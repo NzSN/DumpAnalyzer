@@ -277,6 +277,7 @@ fn test_config(server: &MockServer, state_dir: &Path, byte_cache_max_bytes: u64)
         claude_model: None,
         tls_ca_cert: None,
         scheduler_enabled: true,
+        writeback_enabled: true,
     }
 }
 

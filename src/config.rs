@@ -49,6 +49,10 @@ const RUNNER_VAR: &str = "DUMP_ANALYZER_RUNNER";
 const CLAUDE_BIN_VAR: &str = "DUMP_ANALYZER_CLAUDE_BIN";
 /// `DUMP_ANALYZER_CLAUDE_MODEL`: optional model override for the provider.
 const CLAUDE_MODEL_VAR: &str = "DUMP_ANALYZER_CLAUDE_MODEL";
+/// `DUMP_ANALYZER_WRITE_BACK`: `on` (default) or `off`; `off` treats the
+/// ledger as a read-only dump source — verdicts are recorded locally and
+/// jobs settle without ever POSTing analyses.
+const WRITE_BACK_VAR: &str = "DUMP_ANALYZER_WRITE_BACK";
 /// `DUMP_ANALYZER_SCHEDULER`: `on` (default) or `off`; `off` runs the feed,
 /// status UI, and on-demand analysis but never claims jobs.
 const SCHEDULER_VAR: &str = "DUMP_ANALYZER_SCHEDULER";
@@ -168,6 +172,10 @@ pub struct Config {
     /// Whether the scheduler claims jobs; default on. Off = manual operation:
     /// feed, status UI, and on-demand analysis run, nothing auto-executes.
     pub scheduler_enabled: bool,
+    /// Whether verdicts are written back to the ledger; default on. Off = the
+    /// ledger is a read-only dump source: verdicts record locally and jobs
+    /// settle `done` without any `POST …/analyses`.
+    pub writeback_enabled: bool,
 }
 
 impl Config {
@@ -230,6 +238,16 @@ impl Config {
         };
         let claude_model = Self::optional_value(&vars, CLAUDE_MODEL_VAR);
         let tls_ca_cert = Self::optional_value(&vars, TLS_CA_CERT_VAR).map(PathBuf::from);
+        let writeback_enabled = match Self::optional_value(&vars, WRITE_BACK_VAR).as_deref() {
+            None => true,
+            Some("on") => true,
+            Some("off") => false,
+            Some(other) => {
+                return Err(AnalyzerError::Config(format!(
+                    "{WRITE_BACK_VAR} must be on or off (got {other:?})"
+                )));
+            }
+        };
         let scheduler_enabled = match Self::optional_value(&vars, SCHEDULER_VAR).as_deref() {
             None => true,
             Some("on") => true,
@@ -260,6 +278,7 @@ impl Config {
             claude_model,
             tls_ca_cert,
             scheduler_enabled,
+            writeback_enabled,
         })
     }
 

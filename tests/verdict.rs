@@ -74,6 +74,7 @@ fn test_config(base_url: Url, state_dir: PathBuf, name: &str) -> Config {
         claude_model: None,
         tls_ca_cert: None,
         scheduler_enabled: true,
+        writeback_enabled: true,
     }
 }
 
@@ -1001,5 +1002,50 @@ async fn verdict_replay_sweep_settles_the_reporting_job_done() {
         harness.store.jobs().phase_of(&identity).expect("phase"),
         Some(JobPhase::Done),
         "the reporting job settles to done once its verdict posts"
+    );
+}
+
+#[tokio::test]
+async fn verdict_local_sink_records_and_settles_without_any_http() {
+    let harness = harness().await;
+    let identity = identity();
+    harness
+        .store
+        .jobs()
+        .upsert_discovered(&identity)
+        .expect("upsert");
+    harness
+        .store
+        .jobs()
+        .set_phase(&identity, JobPhase::Reporting)
+        .expect("reporting");
+
+    let sink = dump_analyzer::verdict::LocalVerdictSink::new(
+        harness.store.clone(),
+        harness.config.clone(),
+    );
+    dump_analyzer::agent::VerdictSink::submit(
+        &sink,
+        &identity,
+        RunOutput {
+            outcome: ReportOutcome::Completed,
+            summary: "local only".to_string(),
+            facts: json!({ "k": 1 }),
+        },
+    )
+    .await
+    .expect("submit");
+
+    assert_eq!(
+        harness.store.jobs().phase_of(&identity).expect("phase"),
+        Some(JobPhase::Done)
+    );
+    let pending = harness.store.local_reports().pending().expect("pending");
+    assert_eq!(pending.len(), 1, "recorded locally, never posted");
+    // No HTTP happened at all: the mock server saw no requests.
+    let requests = harness.server.received_requests().await.expect("recorded");
+    assert!(
+        requests.is_empty(),
+        "write-back off means zero ledger calls"
     );
 }

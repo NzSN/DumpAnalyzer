@@ -227,6 +227,11 @@ AN2 deliverable against AI1+AI2 alone.
 
 ## Correctness and idempotency
 
+- **Write-back is optional.** `DUMP_ANALYZER_WRITE_BACK=off` treats the
+  ledger as a read-only dump source: the verdict sink is `LocalVerdictSink`
+  (assemble + record locally + settle `done` — no POST, no acceptance wait),
+  the boot reconcile and the idle replay sweep are skipped, and stale
+  `reporting` rows settle `done` at boot.
 - **Exactly-once effect, at-least-once execution.** The server identity
   `(dumpId, analyzer.name, analyzer.version, kind, inputSha256)` plus
   idempotent replay gives exactly-once visible effect. DumpAnalyzer never

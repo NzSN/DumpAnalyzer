@@ -44,6 +44,7 @@ fn config_for(server: &MockServer) -> Config {
         claude_model: None,
         tls_ca_cert: None,
         scheduler_enabled: true,
+        writeback_enabled: true,
     }
 }
 

@@ -58,6 +58,7 @@ fn test_config_with_token(base_url: Url, token: &str) -> Config {
         claude_model: None,
         tls_ca_cert: None,
         scheduler_enabled: true,
+        writeback_enabled: true,
     }
 }
 

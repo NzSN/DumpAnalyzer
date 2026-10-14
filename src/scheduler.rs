@@ -119,7 +119,15 @@ pub async fn run(
         reset = recovery.reset_to_claimed.len(),
         "crash recovery complete"
     );
-    let reconcile = verdict::reconcile_on_boot(&client, &store, &config).await?;
+    let reconcile = if config.writeback_enabled {
+        verdict::reconcile_on_boot(&client, &store, &config).await?
+    } else {
+        let settled = verdict::settle_reporting_locally(&store)?;
+        if settled > 0 {
+            tracing::info!(settled, "write-back off: stale reporting jobs settled done");
+        }
+        crate::verdict::ReconcileReport::default()
+    };
     tracing::info!(
         confirmed = reconcile.confirmed,
         reposted = reconcile.reposted,
@@ -147,11 +155,20 @@ pub async fn run(
         return Ok(());
     }
 
-    let sink = Arc::new(VerdictWriter::new(
-        Arc::clone(&client),
-        store.clone(),
-        config.clone(),
-    ));
+    // Write-back on: verdicts POST to the ledger. Off: the ledger is a
+    // read-only dump source and verdicts settle locally at once.
+    let sink: Arc<dyn crate::agent::VerdictSink> = if config.writeback_enabled {
+        Arc::new(VerdictWriter::new(
+            Arc::clone(&client),
+            store.clone(),
+            config.clone(),
+        ))
+    } else {
+        Arc::new(crate::verdict::LocalVerdictSink::new(
+            store.clone(),
+            config.clone(),
+        ))
+    };
     // `LedgerClient` is not `Clone` (module ownership), so the agent gets its
     // own instance built from the same validated config; both speak to the
     // same base URL with the same credentials.
@@ -425,7 +442,7 @@ async fn scheduler_loop(
                 }
             }
             Ok(None) => {
-                if last_sweep.elapsed() >= REPLAY_SWEEP_INTERVAL {
+                if config.writeback_enabled && last_sweep.elapsed() >= REPLAY_SWEEP_INTERVAL {
                     match verdict::replay_pending(client, store, config).await {
                         Ok(report) if report.replayed > 0 || report.abandoned > 0 => {
                             tracing::info!(

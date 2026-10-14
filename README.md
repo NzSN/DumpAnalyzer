@@ -44,6 +44,8 @@ dump-analyzer
 
 Optional knobs (see `src/config.rs`): `DUMP_ANALYZER_STATE_DIR` (`./data`),
 `DUMP_ANALYZER_NAME`/`DUMP_ANALYZER_VERSION` (report attribution),
+`DUMP_ANALYZER_WRITE_BACK` (`off` treats the ledger as a read-only dump
+source: verdicts record locally and jobs settle without `POST …/analyses`),
 `DUMP_ANALYZER_POLL_INTERVAL_MS` (5–30 s feed cadence),
 `DUMP_ANALYZER_RUN_WALL_TIMEOUT_MS`, `DUMP_ANALYZER_MAX_OUTPUT_BYTES`,
 `DUMP_ANALYZER_MAX_WORKSPACE_BYTES`, `DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES`.

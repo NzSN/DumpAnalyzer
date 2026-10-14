@@ -440,3 +440,12 @@ fn config_tls_ca_cert_optional_path() {
         Some(std::path::PathBuf::from("/etc/ssl/ledger.pem"))
     );
 }
+
+#[test]
+fn config_writeback_flag() {
+    assert!(parse(&[]).writeback_enabled, "default on");
+    assert!(parse(&[("DUMP_ANALYZER_WRITE_BACK", "on")]).writeback_enabled);
+    assert!(!parse(&[("DUMP_ANALYZER_WRITE_BACK", "off")]).writeback_enabled);
+    let err = parse_err(&[("DUMP_ANALYZER_WRITE_BACK", "maybe")]);
+    assert!(err.contains("DUMP_ANALYZER_WRITE_BACK"), "{err}");
+}

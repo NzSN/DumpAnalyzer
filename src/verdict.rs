@@ -175,8 +175,9 @@ pub fn assemble(
 /// retry budget; the job stays `reporting`) and for local-state failures. A
 /// terminal rejection settles the job (`failed`/`dropped`) and returns
 /// `Ok(())`; `invalid_request` is additionally logged loudly as a bug signal.
-pub async fn submit(
-    client: &LedgerClient,
+/// The pin guard plus the local record: every accepted-to-be-reported
+/// verdict lands in `local_reports` before anything else (crash-safe).
+pub fn record_local(
     store: &Store,
     identity: &JobIdentity,
     submission: &AnalysisReportSubmission,
@@ -194,6 +195,55 @@ pub async fn submit(
         &submission.summary,
         &facts_json,
     )?;
+    Ok(())
+}
+
+/// Write-back off (`DUMP_ANALYZER_WRITE_BACK=off`): the ledger is a read-only
+/// dump source. A verdict is assembled and recorded locally, and the job
+/// settles `done` immediately — nothing is ever POSTed, and no job waits for
+/// ledger acceptance.
+pub struct LocalVerdictSink {
+    store: Store,
+    config: Config,
+}
+
+impl LocalVerdictSink {
+    /// Builds the sink over the shared store and config.
+    pub fn new(store: Store, config: Config) -> Self {
+        Self { store, config }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::agent::VerdictSink for LocalVerdictSink {
+    async fn submit(&self, identity: &JobIdentity, output: RunOutput) -> Result<()> {
+        let submission = assemble(identity, output, &self.config)?;
+        record_local(&self.store, identity, &submission)?;
+        self.store.jobs().set_phase(identity, JobPhase::Done)?;
+        Ok(())
+    }
+}
+
+/// With write-back off, a `reporting` job has nothing to wait for: its
+/// analysis completed and its verdict is the local record. Settles every
+/// stale `reporting` row to `done`; returns how many moved.
+pub fn settle_reporting_locally(store: &Store) -> Result<usize> {
+    let jobs = store.jobs();
+    let mut settled = 0;
+    for (identity, _attempts) in jobs.jobs_in_phase(JobPhase::Reporting)? {
+        jobs.set_phase(&identity, JobPhase::Done)?;
+        settled += 1;
+    }
+    Ok(settled)
+}
+
+pub async fn submit(
+    client: &LedgerClient,
+    store: &Store,
+    identity: &JobIdentity,
+    submission: &AnalysisReportSubmission,
+) -> Result<()> {
+    record_local(store, identity, submission)?;
     match client.post_analysis(&identity.dump_id, submission).await {
         Ok(PostAnalysisResult::Created(_) | PostAnalysisResult::Replayed(_)) => {
             store.local_reports().mark_posted(identity)?;

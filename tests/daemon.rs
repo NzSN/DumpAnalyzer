@@ -74,6 +74,7 @@ fn test_config(server: &MockServer, state_dir: &Path) -> Config {
         claude_model: None,
         tls_ca_cert: None,
         scheduler_enabled: true,
+        writeback_enabled: true,
     }
 }
 
@@ -921,4 +922,63 @@ async fn daemon_persists_the_env_token_and_boots_from_it_later() {
         ),
         "the stored token is presented as bearer"
     );
+}
+
+#[tokio::test]
+async fn daemon_writeback_off_settles_done_without_any_post() {
+    let server = MockServer::start().await;
+    let dir = TempDir::new().expect("tempdir");
+    let state_dir = dir.path().join("state");
+
+    let payload = b"dump-offline-bytes".as_slice();
+    let sha = sha256_of(payload);
+    mount_catalog(
+        &server,
+        vec![catalog_entry("dump_OFF", &sha)],
+        "0000000000000005",
+    )
+    .await;
+    mount_content(&server, "dump_OFF", payload, "\"etag-off\"", None).await;
+    mount_events(
+        &server,
+        json!({ "events": [], "nextCursor": "0000000000000005" }),
+    )
+    .await;
+    // Any POST to the analyses route must never happen.
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let mut config = test_config(&server, &state_dir);
+    config.writeback_enabled = false;
+    let runner = Arc::new(FakeRunner::new(vec![Ok(completed_output("dump_OFF"))]));
+    let shutdown = CancellationToken::new();
+    let daemon = tokio::spawn({
+        let config = config.clone();
+        let shutdown = shutdown.clone();
+        async move { scheduler::run(config, runner, &shutdown).await }
+    });
+
+    let store = open_store(&state_dir);
+    await_condition("the job to settle done", || {
+        !store
+            .jobs()
+            .jobs_in_phase(JobPhase::Done)
+            .expect("list")
+            .is_empty()
+    })
+    .await;
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(10), daemon)
+        .await
+        .expect("daemon stops")
+        .expect("join")
+        .expect("clean shutdown");
+
+    // The verdict is the local record; the ledger saw no write.
+    let local = store.local_reports().pending().expect("pending");
+    assert_eq!(local.len(), 1);
+    assert_eq!(local[0].dump_id, "dump_OFF");
 }
