@@ -790,3 +790,29 @@ fn state_secrets_store_latest_values() {
         Some("second".to_string())
     );
 }
+
+#[test]
+fn state_phase_of_reports_presence() {
+    let (dir, store, _path) = open_temp();
+    let _ = dir;
+    let job = JobIdentity {
+        dump_id: "dump_p1".into(),
+        input_sha256: "ab".repeat(32),
+        kind: "triage".into(),
+        analyzer_version: "0.1.0".into(),
+    };
+    assert_eq!(store.jobs().phase_of(&job).expect("phase"), None);
+    store.jobs().upsert_discovered(&job).expect("upsert");
+    assert_eq!(
+        store.jobs().phase_of(&job).expect("phase"),
+        Some(JobPhase::Discovered)
+    );
+    store
+        .jobs()
+        .set_phase(&job, JobPhase::Reporting)
+        .expect("set");
+    assert_eq!(
+        store.jobs().phase_of(&job).expect("phase"),
+        Some(JobPhase::Reporting)
+    );
+}

@@ -258,6 +258,24 @@ impl Analyzer for PipelineAnalyzer {
                 &facts_json,
             )
             .map_err(AnalyzeError::Terminal)?;
+
+        // Reflect the run in the jobs table so the dashboard shows reality:
+        // create-or-move the row to `reporting` (the replay path settles it
+        // to `done` once the report posts). An already-`done` row stays.
+        let jobs = self.store.jobs();
+        match jobs.phase_of(&identity).map_err(AnalyzeError::Terminal)? {
+            None => {
+                jobs.upsert_discovered(&identity)
+                    .map_err(AnalyzeError::Terminal)?;
+                jobs.set_phase(&identity, crate::types::JobPhase::Reporting)
+                    .map_err(AnalyzeError::Terminal)?;
+            }
+            Some(crate::types::JobPhase::Done) => {}
+            Some(_) => {
+                jobs.set_phase(&identity, crate::types::JobPhase::Reporting)
+                    .map_err(AnalyzeError::Terminal)?;
+            }
+        }
         Ok(Report {
             identity,
             outcome: submission.outcome,

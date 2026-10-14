@@ -950,3 +950,56 @@ async fn verdict_replay_pending_transient_failure_keeps_rows_pending() {
     );
     assert_row_posted(&harness.store, false);
 }
+
+#[tokio::test]
+async fn verdict_replay_sweep_settles_the_reporting_job_done() {
+    let harness = harness().await;
+    // A pending local report + a reporting job (the on-demand shape).
+    let identity = identity();
+    harness
+        .store
+        .jobs()
+        .upsert_discovered(&identity)
+        .expect("upsert");
+    harness
+        .store
+        .jobs()
+        .set_phase(&identity, JobPhase::Reporting)
+        .expect("reporting");
+    harness
+        .store
+        .local_reports()
+        .insert(
+            &identity,
+            ReportOutcome::Completed,
+            "a verdict",
+            "{\"k\":1}",
+        )
+        .expect("insert");
+
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/dumps/{}/analyses", identity.dump_id)))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "analysisId": "analysis_1",
+            "dumpId": identity.dump_id,
+            "analyzer": { "name": "dump-analyzer", "version": "0.1.0" },
+            "kind": "triage",
+            "inputSha256": identity.input_sha256,
+            "outcome": "completed",
+            "summary": "a verdict",
+            "createdAt": "2026-10-14T08:00:00.000Z"
+        })))
+        .mount(&harness.server)
+        .await;
+
+    let client = LedgerClient::new(&harness.config).expect("client");
+    let report = dump_analyzer::verdict::replay_pending(&client, &harness.store, &harness.config)
+        .await
+        .expect("sweep");
+    assert_eq!(report.replayed, 1);
+    assert_eq!(
+        harness.store.jobs().phase_of(&identity).expect("phase"),
+        Some(JobPhase::Done),
+        "the reporting job settles to done once its verdict posts"
+    );
+}

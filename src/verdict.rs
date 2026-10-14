@@ -322,8 +322,24 @@ pub async fn replay_pending(
     for row in store.local_reports().pending()? {
         let identity = row.identity();
         match replay_row(client, store, config, &row).await {
-            Ok(ReplayOutcome::Replayed) => report.replayed += 1,
-            Ok(ReplayOutcome::Abandoned) => report.abandoned += 1,
+            Ok(ReplayOutcome::Replayed) => {
+                report.replayed += 1;
+                // A `reporting` job whose verdict just posted is done.
+                if store.jobs().phase_of(&identity)? == Some(JobPhase::Reporting) {
+                    store.jobs().set_phase(&identity, JobPhase::Done)?;
+                }
+            }
+            Ok(ReplayOutcome::Abandoned(reason)) => {
+                report.abandoned += 1;
+                // The verdict can never be accepted; settle the job honestly.
+                if store.jobs().phase_of(&identity)? == Some(JobPhase::Reporting) {
+                    let phase = match reason {
+                        AbandonReason::DumpGone => JobPhase::Dropped,
+                        AbandonReason::Rejected => JobPhase::Failed,
+                    };
+                    store.jobs().set_phase(&identity, phase)?;
+                }
+            }
             Ok(ReplayOutcome::RouteAbsent) => {
                 debug!(
                     "analyses route still absent; local-verdict mode continues and the replay sweep stops"
@@ -374,10 +390,19 @@ enum ReportingOutcome {
 enum ReplayOutcome {
     /// Accepted (`201`/`200`); marked posted.
     Replayed,
-    /// Dequeued without acceptance (dump gone or permanent rejection).
-    Abandoned,
+    /// Dequeued without acceptance, with the reason (dump gone or permanent
+    /// rejection) so the owning job can settle accordingly.
+    Abandoned(AbandonReason),
     /// The analyses route is still absent.
     RouteAbsent,
+}
+
+/// Why a stored verdict was dequeued without acceptance.
+enum AbandonReason {
+    /// The dump is gone (`dropped` settles the job).
+    DumpGone,
+    /// The server rejected the pinned identity permanently (`failed`).
+    Rejected,
 }
 
 async fn reconcile_reporting(
@@ -479,7 +504,7 @@ async fn replay_row(
                 "stored verdict is unusable; dequeuing it"
             );
             store.local_reports().mark_posted(&identity)?;
-            return Ok(ReplayOutcome::Abandoned);
+            return Ok(ReplayOutcome::Abandoned(AbandonReason::Rejected));
         }
     };
     match client.post_analysis(&row.dump_id, &submission).await {
@@ -496,7 +521,7 @@ async fn replay_row(
                 "dump purged; the stored verdict can never be accepted, dequeuing it"
             );
             store.local_reports().mark_posted(&identity)?;
-            Ok(ReplayOutcome::Abandoned)
+            Ok(ReplayOutcome::Abandoned(AbandonReason::DumpGone))
         }
         Err(err) if is_invalid_request(&err) => {
             error!(
@@ -505,7 +530,7 @@ async fn replay_row(
                 "stored verdict rejected as invalid_request (sha mismatch); dequeuing it"
             );
             store.local_reports().mark_posted(&identity)?;
-            Ok(ReplayOutcome::Abandoned)
+            Ok(ReplayOutcome::Abandoned(AbandonReason::Rejected))
         }
         Err(err) => Err(err),
     }

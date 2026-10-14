@@ -2,7 +2,6 @@
 //! (client → fetch/verify → runner) against a wiremock ledger and a fake
 //! tool runner. No SSH, no CDB.
 
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -558,4 +557,59 @@ async fn analyze_scope_ambiguous_customer_name_is_terminal() {
         .await
         .expect_err("ambiguous");
     assert!(matches!(err, AnalyzeError::Terminal(_)), "{err}");
+}
+
+#[tokio::test]
+async fn analyze_reflects_the_run_in_the_jobs_table() {
+    let server = MockServer::start().await;
+    mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server).await;
+
+    let config = config_for(&server);
+    let (_dir, store) = store();
+    let jobs = store.jobs();
+    let client = dump_analyzer::client::LedgerClient::new(&config).expect("client");
+    let analyzer = PipelineAnalyzer::new(
+        client,
+        store.clone(),
+        config,
+        Arc::new(FakeRunner {
+            queue: Mutex::new(vec![Ok(good_output())]),
+        }),
+    );
+
+    // No row -> created straight at reporting.
+    let report = analyzer.analyze(DUMP_ID).await.expect("report");
+    assert_eq!(report.outcome, ReportOutcome::Completed);
+    let identity = dump_analyzer::types::JobIdentity {
+        dump_id: DUMP_ID.to_string(),
+        input_sha256: content_sha(),
+        kind: "triage".to_string(),
+        analyzer_version: "0.1.0".to_string(),
+    };
+    assert_eq!(
+        jobs.phase_of(&identity).expect("phase"),
+        Some(dump_analyzer::types::JobPhase::Reporting)
+    );
+
+    // A second run against the same identity keeps the row (phase stays
+    // reporting until the replay settles it).
+    let server2 = MockServer::start().await;
+    mount_detail(&server2, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server2).await;
+    let config2 = config_for(&server2);
+    let client2 = dump_analyzer::client::LedgerClient::new(&config2).expect("client");
+    let analyzer2 = PipelineAnalyzer::new(
+        client2,
+        store.clone(),
+        config2,
+        Arc::new(FakeRunner {
+            queue: Mutex::new(vec![Ok(good_output())]),
+        }),
+    );
+    analyzer2.analyze(DUMP_ID).await.expect("re-run");
+    assert_eq!(
+        jobs.phase_of(&identity).expect("phase"),
+        Some(dump_analyzer::types::JobPhase::Reporting)
+    );
 }

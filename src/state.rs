@@ -372,6 +372,27 @@ impl JobStore {
         Ok(())
     }
 
+    /// The job's current phase, or `None` when no row exists.
+    pub fn phase_of(&self, job: &JobIdentity) -> Result<Option<JobPhase>> {
+        let guard = lock(&self.conn)?;
+        let raw: Option<String> = guard
+            .query_row(
+                "SELECT phase FROM jobs
+                  WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
+                    AND analyzer_version = ?4",
+                params![
+                    job.dump_id,
+                    job.input_sha256,
+                    job.kind,
+                    job.analyzer_version
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_err)?;
+        raw.map(|phase| phase_from_str(&phase)).transpose()
+    }
+
     /// Lists the jobs currently in `phase`, oldest first, with their attempt
     /// counts. Crash recovery uses this as specified: volatile phases
     /// (`fetching`/`staged`/`analyzing`) are reset to `claimed`, `reporting`
