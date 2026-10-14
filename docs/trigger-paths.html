@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DumpAnalyzer — how analysis gets triggered</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0 auto; max-width: 1180px; padding: 1.5rem; background: #f7f8fa; color: #1c2430; }
+  h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
+  .muted { color: #667; font-size: .85rem; }
+  svg { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; width: 100%; height: auto; display: block; }
+  .src { fill: #eef4ff; stroke: #4a78c2; }
+  .srctext { font: 12px ui-sans-serif, system-ui; fill: #17325c; text-anchor: middle; font-weight: 600; }
+  .srcsub { font: 10px ui-sans-serif, system-ui; fill: #5a7299; text-anchor: middle; }
+  .tbl { fill: #eefaf1; stroke: #3d9958; }
+  .eng { fill: #f5eefe; stroke: #7c3aed; }
+  .no { fill: #fdeceb; stroke: #b3261e; stroke-dasharray: 5 3; }
+  .flow { stroke: #64748b; stroke-width: 1.6; fill: none; marker-end: url(#arr); }
+  .flowlabel { font: 10px ui-sans-serif, system-ui; fill: #64748b; text-anchor: middle; }
+  ul { font-size: .9rem; line-height: 1.5; }
+  code { background: #eef1f4; border-radius: 4px; padding: 0 .3em; }
+</style>
+</head>
+<body>
+<h1>DumpAnalyzer — ways analysis gets triggered (current build)</h1>
+<p class="muted">Verified against <code>src/scheduler.rs</code>, <code>src/sync.rs</code>, <code>src/agent.rs</code> on 2026-10-14 (phase 2).</p> Four automatic paths plus token-guarded manual triggers (added 2026-10-14).</p>
+
+<svg viewBox="0 0 1140 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- Trigger sources -->
+  <rect x="30" y="40" width="290" height="82" rx="8" class="src"/>
+  <text x="175" y="64" class="srctext">1 · Boot — initial_scan</text>
+  <text x="175" y="82" class="srcsub">GET /api/v1/dumps?phase=available (paged)</text>
+  <text x="175" y="97" class="srcsub">every available+sealed dump → discovered</text>
+  <text x="175" y="112" class="srcsub">boot only — no periodic re-scan</text>
+
+  <rect x="30" y="150" width="290" height="82" rx="8" class="src"/>
+  <text x="175" y="174" class="srctext">2 · Event feed — follow_feed</text>
+  <text x="175" y="192" class="srcsub">GET /api/v1/events every poll interval (10 s)</text>
+  <text x="175" y="207" class="srcsub">intake/seal event → get_dump → upsert</text>
+  <text x="175" y="222" class="srcsub">steady-state discovery of new dumps</text>
+
+  <rect x="30" y="260" width="290" height="82" rx="8" class="src"/>
+  <text x="175" y="284" class="srctext">3 · Boot — crash recovery</text>
+  <text x="175" y="302" class="srcsub">Agent::recover: volatile phases → claimed</text>
+  <text x="175" y="317" class="srcsub">verdict::reconcile_on_boot re-submits</text>
+  <text x="175" y="332" class="srcsub">reporting jobs / replays local verdicts</text>
+
+  <rect x="30" y="370" width="290" height="82" rx="8" class="src"/>
+  <text x="175" y="394" class="srctext">4 · Bounded retry</text>
+  <text x="175" y="412" class="srcsub">run_job: transient failure → claimed (≤2 attempts)</text>
+  <text x="175" y="427" class="srcsub">scheduler: Err → backoff 1 s → 30 s cap</text>
+  <text x="175" y="442" class="srcsub">terminal failure → failed (never retried)</text>
+
+  <!-- Job table -->
+  <rect x="440" y="150" width="240" height="120" rx="10" class="tbl"/>
+  <text x="560" y="180" class="srctext" style="fill:#1e6b38">jobs table (SQLite)</text>
+  <text x="560" y="200" class="srcsub">identity: (dumpId, sha256, kind, version)</text>
+  <text x="560" y="216" class="srcsub">phase · attempts · timestamps</text>
+  <text x="560" y="236" class="srcsub">upsert = insert-or-ignore (dedup)</text>
+  <text x="560" y="252" class="srcsub">dropped/done/failed rows are terminal</text>
+
+  <!-- Scheduler loop -->
+  <rect x="440" y="330" width="240" height="110" rx="10" class="eng"/>
+  <text x="560" y="356" class="srctext" style="fill:#4c1d95">scheduler_loop</text>
+  <text x="560" y="374" class="srcsub">claim_next (oldest discovered)</text>
+  <text x="560" y="390" class="srcsub">→ Agent::run_job · concurrency 1</text>
+  <text x="560" y="406" class="srcsub">idle → sleep poll interval</text>
+  <text x="560" y="426" class="srcsub">fetch → verify → analyze → report</text>
+
+  <!-- External ledger -->
+  <rect x="820" y="40" width="280" height="82" rx="10" fill="#f3f4f6" stroke="#8a93a0" stroke-dasharray="5 3"/>
+  <text x="960" y="66" class="srctext" style="fill:#3c4450">DumpLedger</text>
+  <text x="960" y="84" class="srcsub">catalog · event feed · content · analyses</text>
+
+  <!-- Not present -->
+  <rect x="820" y="150" width="280" height="150" rx="10" class="src"/>
+  <text x="960" y="176" class="srctext">5 · Manual (token-guarded, UI)</text>
+  <text x="960" y="196" class="srcsub">POST /-/analyze {"dumpId"} → report JSON</text>
+  <text x="960" y="212" class="srcsub">POST /-/rescan → full catalog sweep now</text>
+  <text x="960" y="228" class="srcsub">(both also as dashboard forms)</text>
+  <text x="960" y="244" class="srcsub">scheduler: 60 s replay sweep of pending</text>
+  <text x="960" y="260" class="srcsub">local verdicts while idle</text>
+  <text x="960" y="284" class="srcsub">open: no per-kind scheduling (all “triage”)</text>
+
+  <!-- flows -->
+  <path class="flow" d="M 320 81 C 420 81 400 150 470 158"/>
+  <text x="395" y="105" class="flowlabel">upsert</text>
+  <path class="flow" d="M 320 191 L 440 191"/>
+  <text x="380" y="183" class="flowlabel">upsert / drop</text>
+  <path class="flow" d="M 320 301 C 400 301 400 250 445 240"/>
+  <text x="382" y="290" class="flowlabel">reset to claimed</text>
+  <path class="flow" d="M 320 411 L 440 395"/>
+  <text x="380" y="420" class="flowlabel">re-claim</text>
+
+  <path class="flow" d="M 560 270 L 560 330"/>
+  <text x="610" y="302" class="flowlabel">claim_next</text>
+
+  <path class="flow" d="M 320 81 C 600 40 700 60 820 72"/>
+  <text x="570" y="50" class="flowlabel">HTTPS + analyzer token</text>
+  <path class="flow" d="M 320 175 C 600 140 700 90 820 90"/>
+  <text x="580" y="120" class="flowlabel">feed poll</text>
+</svg>
+
+<ul>
+  <li><b>Manual</b> (2026-10-14): <code>POST /-/analyze</code> (one dump → report) and
+  <code>POST /-/rescan</code> (full sweep), both bearer-guarded; plus a 60 s idle replay
+  sweep for pending local verdicts.</li>
+  <li><b>Boot scan</b> is the catch-up: the full catalog is paged at every start.</li>
+  <li><b>Event feed</b> is the steady state: new intake becomes a job within one poll interval.</li>
+  <li><b>Crash recovery</b> re-runs interrupted jobs and settles write-back — per the TLA+ spec (CrashReset / reconcile), MBT-replayed against the real store.</li>
+  <li><b>Retry</b> is bounded: attempt budget per job (default 2), then terminal <code>failed</code>; verdict-failed is a report, infra failure is not.</li>
+</ul>
+<p class="muted">Remaining candidate: a <code>scan-once</code> CLI subcommand for a stopped daemon (the instance lock forbids it while running).</p>
+</body>
+</html>

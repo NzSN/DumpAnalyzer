@@ -1,0 +1,65 @@
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       SRV*c:\symcache*https://192.168.150.219:4080/symbols
+
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Loading Dump File [C:\da\work\2bc4-9f31\dump.dmp]
+User Mini Dump File: Only registers, stack and portions of memory are available
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       SRV*c:\symcache*https://192.168.150.219:4080/symbols
+Symbol search path is: SRV*c:\symcache*https://192.168.150.219:4080/symbols
+Executable search path is: 
+Windows 10 Version 26200 (9457) MP (32 procs) Free x64
+Product: WinNt
+Edition build lab: Windows NT 10.0.26200.9457
+Debug session time: Thu Sep 11 09:02:14.000 2025 (UTC + 8:00)
+System Uptime: not available
+Process Uptime: 0 days 4:11:37.000
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(2bc4.5f18): Access violation - code c0000005 (first/second chance not available)
+For analysis of this file, run !analyze -v
+0:000> .sympath SRV*c:\symcache*https://192.168.150.219:4080/symbols
+Symbol search path is: SRV*c:\symcache*https://192.168.150.219:4080/symbols
+0:000> .reload
+Reloading current modules
+................
+0:000> .ecxr
+rax=0000000000000000 rbx=000000d1f27fe9b0 rcx=0000000000000000
+rdx=0000000000000000 rsi=0000000000000000 rdi=0000000000000000
+rip=00007ff6e2d02a41 rsp=000000d1f27fe6b8 rbp=000000d1f27fe730
+ r8=0000000000000000  r9=0000000000000000 r10=0000000000000000
+r11=0000000000000000 r12=0000000000000000 r13=000000d1f27fe9b0
+r14=0000000000000000 r15=0000000000000000 iopl=0         nv up ei pl zr na po nc
+cs=0033  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00010246
+electron+0x1f2a41:
+00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx] ds:00000000`00000000=????????????????
+*** WARNING: Unable to verify timestamp for electron.exe
+DBGHELP: electron - no symbols loaded
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+electron               The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> kc
+Call Site
+electron+0x1f2a41
+electron+0x18f4cd
+KERNEL32!BaseThreadInitThunk
+ntdll!RtlUserThreadStart
+0:000> lm
+start             end                 module name
+00007ff6`e2b10000 00007ff6`ecc00000   electron   T (no symbols)           
+00007ffb`c1e00000 00007ffb`c1f40000   KERNEL32   (pdb symbols)          C:\symcache\wkernel32.pdb\2C1B94AE9F46331F9A4FBBEA74E30D462\wkernel32.pdb
+00007ffb`c2000000 00007ffb`c21f6000   ntdll      (pdb symbols)          C:\symcache\wntdll.pdb\38AB84FA7C1F4B0A9E6B045B7E5D2C8A1\wntdll.pdb
+0:000> |
+.  0  id: 2bc4    create	Thu Sep 11 08:02:11.000 2025 (UTC + 8:00)
+0:000> q
+quit:

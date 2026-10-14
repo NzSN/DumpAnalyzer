@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DumpAnalyzer — current architecture</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0 auto; max-width: 1180px; padding: 1.5rem; background: #f7f8fa; color: #1c2430; }
+  h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
+  h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+  .muted { color: #667; font-size: .85rem; }
+  svg { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; width: 100%; height: auto; display: block; }
+  .mod { fill: #eef4ff; stroke: #4a78c2; }
+  .modtext { font: 12px ui-sans-serif, system-ui; fill: #17325c; text-anchor: middle; }
+  .modsub { font: 10px ui-sans-serif, system-ui; fill: #5a7299; text-anchor: middle; }
+  .ext { fill: #f3f4f6; stroke: #8a93a0; stroke-dasharray: 5 3; }
+  .exttext { font: 12px ui-sans-serif, system-ui; fill: #3c4450; text-anchor: middle; font-weight: 600; }
+  .proc { fill: none; stroke: #1a56c4; stroke-width: 2; }
+  .store { fill: #eefaf1; stroke: #3d9958; }
+  .ui { fill: #fdf6e3; stroke: #b58900; }
+  .prov { fill: #f5eefe; stroke: #7c3aed; }
+  .flow { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .flowlabel { font: 10px ui-sans-serif, system-ui; fill: #64748b; text-anchor: middle; }
+  .dashed { stroke-dasharray: 4 3; }
+</style>
+</head>
+<body>
+<h1>DumpAnalyzer — current architecture</h1>
+<p class="muted">Rendered from <code>docs/analyzer-design.md</code> + <code>src/</code> as built on 2026-10-13 (200 tests green; TLA+ TLC/Apalache clean; 33-trace MirrorRust MBT corpus replayed).</p>
+
+<h2>Runtime</h2>
+<svg viewBox="0 0 1140 640" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- DumpAnalyzer process -->
+  <rect x="300" y="30" width="560" height="470" rx="12" class="proc"/>
+  <text x="580" y="52" class="modtext" style="font-weight:700">dump-analyzer process (Rust · tokio · no unsafe)</text>
+
+  <!-- status UI -->
+  <rect x="330" y="70" width="200" height="58" rx="8" class="ui"/>
+  <text x="430" y="94" class="modtext">http — status UI</text>
+  <text x="430" y="110" class="modsub">GET-only dashboard + JSON, 127.0.0.1:4180</text>
+
+  <!-- sync / scheduler -->
+  <rect x="330" y="150" width="150" height="64" rx="8" class="mod"/>
+  <text x="405" y="176" class="modtext">sync</text>
+  <text x="405" y="192" class="modsub">catalog scan + feed follower</text>
+  <rect x="510" y="150" width="150" height="64" rx="8" class="mod"/>
+  <text x="585" y="176" class="modtext">scheduler</text>
+  <text x="585" y="192" class="modsub">claim_next · backoff · lock</text>
+
+  <!-- agent -->
+  <rect x="330" y="240" width="240" height="70" rx="8" class="mod"/>
+  <text x="450" y="266" class="modtext">agent — pipeline driver</text>
+  <text x="450" y="282" class="modsub">fetch → verify (sha256) → analyze → report</text>
+  <text x="450" y="297" class="modsub">per-run workspace, wiped</text>
+
+  <!-- verdict -->
+  <rect x="330" y="335" width="240" height="58" rx="8" class="mod"/>
+  <text x="450" y="360" class="modtext">verdict — write-back</text>
+  <text x="450" y="376" class="modsub">idempotent POST · local-verdict mode · reconcile</text>
+
+  <!-- client -->
+  <rect x="600" y="240" width="230" height="64" rx="8" class="mod"/>
+  <text x="715" y="264" class="modtext">client — LedgerClient</text>
+  <text x="715" y="280" class="modsub">bearer token · ETag · 30 s API timeout</text>
+
+  <!-- state -->
+  <rect x="600" y="335" width="230" height="58" rx="8" class="store"/>
+  <text x="715" y="360" class="modtext">state — SQLite (WAL)</text>
+  <text x="715" y="376" class="modsub">jobs · cursors · byte cache · local reports</text>
+
+  <!-- runner seam -->
+  <rect x="330" y="425" width="500" height="60" rx="8" fill="none" stroke="#7c3aed" stroke-dasharray="6 3"/>
+  <text x="580" y="443" class="modsub" style="fill:#7c3aed">ToolRunner seam (types.rs) — RunBounds: wall timeout · output cap · workspace cap</text>
+  <rect x="345" y="452" width="235" height="24" rx="6" class="prov"/>
+  <text x="462" y="468" class="modtext" style="font-size:11px">cdb-ssh — deterministic CDB script</text>
+  <rect x="595" y="452" width="220" height="24" rx="6" class="prov"/>
+  <text x="705" y="468" class="modtext" style="font-size:11px">claude-cdb — claude CLI (--restricted)</text>
+
+  <!-- external: DumpLedger -->
+  <rect x="900" y="120" width="210" height="120" rx="10" class="ext"/>
+  <text x="1005" y="150" class="exttext">DumpLedger</text>
+  <text x="1005" y="170" class="modsub">HTTPS API :4080</text>
+  <text x="1005" y="186" class="modsub">catalog · events · content · analyses</text>
+  <text x="1005" y="206" class="modsub">symsrv symbol store</text>
+
+  <!-- external: analysis box -->
+  <rect x="40" y="380" width="230" height="120" rx="10" class="ext"/>
+  <text x="155" y="410" class="exttext">Windows analysis box</text>
+  <text x="155" y="430" class="modsub">CDB + symcache (SSH target)</text>
+  <text x="155" y="450" class="modsub">never on the DumpLedger host</text>
+  <text x="155" y="466" class="modsub">dumps are hostile input</text>
+
+  <!-- external: operator browser -->
+  <rect x="40" y="60" width="200" height="58" rx="10" class="ext"/>
+  <text x="140" y="84" class="exttext">operator browser</text>
+  <text x="140" y="100" class="modsub">this status page</text>
+
+  <!-- flows -->
+  <!-- UI -> browser -->
+  <path class="flow" d="M 240 99 L 330 99"/>
+  <text x="285" y="92" class="flowlabel">GET /</text>
+  <!-- sync -> client -->
+  <path class="flow" d="M 480 205 C 540 205 545 250 600 255"/>
+  <text x="545" y="222" class="flowlabel">catalog · events</text>
+  <!-- client -> ledger -->
+  <path class="flow" d="M 830 272 L 900 205"/>
+  <text x="878" y="252" class="flowlabel">HTTPS + token</text>
+  <!-- scheduler -> state -->
+  <path class="flow" d="M 620 214 L 680 335"/>
+  <text x="668" y="270" class="flowlabel">claim</text>
+  <!-- sync -> state -->
+  <path class="flow" d="M 405 214 L 405 335 L 600 360"/>
+  <text x="470" y="352" class="flowlabel">upsert · drop · cursor</text>
+  <!-- scheduler -> agent -->
+  <path class="flow" d="M 585 214 L 520 240"/>
+  <!-- agent -> state -->
+  <path class="flow" d="M 570 290 L 640 335"/>
+  <text x="622" y="302" class="flowlabel">phases · attempts</text>
+  <!-- agent -> verdict -->
+  <path class="flow" d="M 450 310 L 450 335"/>
+  <!-- verdict -> client -->
+  <path class="flow" d="M 570 364 L 640 304"/>
+  <text x="620" y="345" class="flowlabel">report</text>
+  <!-- client -> ledger (analyses) dashed second lane -->
+  <path class="flow dashed" d="M 830 292 C 870 292 880 240 900 235"/>
+  <text x="885" y="282" class="flowlabel">POST analyses (AI3)</text>
+  <!-- agent -> runner seam -->
+  <path class="flow" d="M 450 310 L 450 425"/>
+  <!-- runner -> analysis box -->
+  <path class="flow" d="M 330 460 L 270 445"/>
+  <text x="300" y="435" class="flowlabel">SSH / scp</text>
+  <!-- UI -> state (read-only) -->
+  <path class="flow" d="M 530 99 C 660 99 700 200 715 335"/>
+  <text x="700" y="130" class="flowlabel">read-only</text>
+  <!-- CDB -> symsrv -->
+  <path class="flow dashed" d="M 270 380 C 500 330 800 230 900 215"/>
+  <text x="560" y="330" class="flowlabel">sympath: SRV*cache*https://ledger/symbols</text>
+</svg>
+
+<h2>Verification / MBT pipeline</h2>
+<svg viewBox="0 0 1140 180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect x="20" y="40" width="180" height="70" rx="8" class="mod"/>
+  <text x="110" y="68" class="modtext">specs/DumpAnalyzer.tla</text>
+  <text x="110" y="86" class="modsub">+ DumpAnalyzerReplay.tla</text>
+  <rect x="250" y="40" width="180" height="70" rx="8" class="mod"/>
+  <text x="340" y="64" class="modtext">TLC + Apalache</text>
+  <text x="340" y="82" class="modsub">1.6M states clean · 11 invariants</text>
+  <rect x="480" y="40" width="180" height="70" rx="8" class="mod"/>
+  <text x="570" y="64" class="modtext">tools/mbt/gen_traces.py</text>
+  <text x="570" y="82" class="modsub">per-action witnesses + sim</text>
+  <rect x="710" y="40" width="180" height="70" rx="8" class="mod"/>
+  <text x="800" y="64" class="modtext">mirror (MirrorRust)</text>
+  <text x="800" y="82" class="modsub">33 traces · step diffing</text>
+  <rect x="940" y="40" width="180" height="70" rx="8" class="store"/>
+  <text x="1030" y="64" class="modtext">tests/mbt harness</text>
+  <text x="1030" y="82" class="modsub">drives real state layer</text>
+  <path class="flow" d="M 200 75 L 250 75" style="marker-end:url(#arrow2)"/>
+  <path class="flow" d="M 430 75 L 480 75" style="marker-end:url(#arrow2)"/>
+  <path class="flow" d="M 660 75 L 710 75" style="marker-end:url(#arrow2)"/>
+  <path class="flow" d="M 890 75 L 940 75" style="marker-end:url(#arrow2)"/>
+</svg>
+
+<p class="muted">Legend — solid blue: modules in <code>src/</code>; green: local persistence; amber: status UI; purple: tool-runner providers; dashed gray: external systems (not this process).</p>
+</body>
+</html>

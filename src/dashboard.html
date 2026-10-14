@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DumpAnalyzer</title>
+<style>
+:root {
+  --bg: #0f1115; --panel: #171b22; --panel2: #1d222b; --border: #262d38;
+  --text: #e6e9ee; --muted: #8b94a3; --accent: #4f8cff; --green: #34c98e;
+  --red: #f0564f; --amber: #e0a43c; --purple: #a78bfa; --gray: #5b6472;
+  --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,.35), 0 4px 16px rgba(0,0,0,.2);
+}
+[data-theme="light"] {
+  --bg: #f4f6f9; --panel: #ffffff; --panel2: #f0f2f6; --border: #e2e7ee;
+  --text: #1c2430; --muted: #66707e; --accent: #1a56c4; --green: #18743c;
+  --red: #b3261e; --amber: #9a6200; --purple: #6a24b8; --gray: #556;
+  --shadow: 0 1px 3px rgba(16,24,40,.06), 0 4px 16px rgba(16,24,40,.06);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px; line-height: 1.45; }
+a { color: var(--accent); text-decoration: none; }
+button { cursor: pointer; font: inherit; }
+input, button { border-radius: 8px; border: 1px solid var(--border); padding: .45rem .7rem;
+  background: var(--panel2); color: var(--text); }
+button { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
+button.ghost { background: transparent; border-color: var(--border); color: var(--text); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .85em; }
+
+.topbar { display: flex; align-items: center; gap: 1rem; padding: .8rem 1.4rem;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); }
+.topbar h1 { font-size: 1.05rem; margin: 0; letter-spacing: .01em; }
+.topbar .ver { color: var(--muted); font-size: .8rem; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gray); }
+.dot.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.topbar .spacer { flex: 1; }
+.theme-toggle button { background: transparent; border: none; color: var(--muted); padding: .3rem .5rem; }
+.theme-toggle button.active { color: var(--accent); font-weight: 700; }
+
+main { max-width: 1200px; margin: 0 auto; padding: 1.4rem; display: grid; gap: 1.1rem; }
+.grid-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .9rem; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 1rem 1.2rem; }
+.stat .num { font-size: 1.7rem; font-weight: 700; line-height: 1.1;
+  overflow-wrap: anywhere; }
+.stat .num.mono { font-size: 1.05rem; }
+.stat .lbl { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; }
+
+.pipeline { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--panel2); }
+.pipeline > div { transition: width .4s ease; }
+.pipeline-key { display: flex; flex-wrap: wrap; gap: .9rem; margin-top: .6rem; font-size: .78rem; color: var(--muted); }
+.key { display: inline-flex; align-items: center; gap: .35rem; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .2rem 0 .8rem; }
+.chip { border: 1px solid var(--border); background: var(--panel2); color: var(--muted);
+  padding: .22rem .65rem; border-radius: 999px; font-size: .78rem; font-weight: 600; }
+.chip.active { background: var(--accent); border-color: transparent; color: #fff; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+tbody tr:hover { background: var(--panel2); }
+.badge { display: inline-block; padding: .12rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 700; }
+.badge.gray { background: color-mix(in srgb, var(--gray) 22%, transparent); color: var(--muted); }
+.badge.blue { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.badge.amber { background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); }
+.badge.purple { background: color-mix(in srgb, var(--purple) 20%, transparent); color: var(--purple); }
+.badge.green { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
+.badge.dark { background: color-mix(in srgb, var(--gray) 30%, transparent); color: var(--muted); }
+.badge.red { background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red); }
+
+.actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .9rem; }
+.actions-grid h3 { margin: 0 0 .5rem; font-size: .85rem; }
+.actions-grid form { display: grid; gap: .45rem; }
+.actions-grid .hint { color: var(--muted); font-size: .75rem; }
+.toast { margin-top: .7rem; padding: .6rem .8rem; border-radius: 8px; font-size: .82rem; display: none; }
+.toast.ok { display: block; background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.toast.err { display: block; background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+.toolbar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.toolbar input[type="search"] { min-width: 220px; }
+footer { color: var(--muted); font-size: .78rem; text-align: center; padding: 1rem; }
+.muted { color: var(--muted); }
+h2 { font-size: .95rem; margin: 0 0 .7rem; }
+.spin { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .4; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span id="live-dot" class="dot"></span>
+  <h1>DumpAnalyzer <span class="ver" id="ver"></span></h1>
+  <span class="muted mono" id="base"></span>
+  <span class="spacer"></span>
+  <span class="muted" id="updated" title="last update"></span>
+  <span class="theme-toggle">
+    <button data-theme="dark" title="dark">◐</button>
+    <button data-theme="light" title="light">◐</button>
+    <button data-theme="system" title="system" class="active">A</button>
+  </span>
+</header>
+<main>
+  <section class="grid-cards" id="stats"></section>
+
+  <section class="card">
+    <h2>Pipeline</h2>
+    <div class="pipeline" id="pipeline"></div>
+    <div class="pipeline-key" id="pipeline-key"></div>
+  </section>
+
+  <section class="card" id="token-card">
+    <h2>Analyzer token</h2>
+    <div class="toolbar">
+      <input type="password" id="new-token" placeholder="new analyzer token" autocomplete="off">
+      <button id="store-token-btn">Store token</button>
+    </div>
+    <div class="hint">probed against the ledger before storing · used by action forms immediately and by the pipeline from the next boot · action forms may also leave the token empty to use the stored one</div>
+    <div class="toast" id="token-toast"></div>
+  </section>
+
+  <section class="card" id="actions-card" style="display:none">
+    <h2>Actions</h2>
+    <div class="hint" style="margin-bottom:.8rem">actions run with the daemon's stored token (see the Analyzer token card above)</div>
+    <div class="actions-grid">
+      <div id="act-dump"><h3>Analyze dump</h3>
+        <form data-act="dump"><input name="id" placeholder="dump_…" required><button>Run</button></form>
+      </div>
+      <div id="act-case"><h3>Analyze case</h3>
+        <form data-act="case"><input name="id" placeholder="case_…" required><button>Run</button></form>
+        <div class="hint">every available dump of the case · sequential · cap 64</div>
+      </div>
+      <div id="act-customer"><h3>Analyze customer</h3>
+        <form data-act="customer"><input name="id" placeholder="customer_… or display name" required><button>Run</button></form>
+        <div class="hint">every available dump of the customer · sequential · cap 64</div>
+      </div>
+      <div id="act-rescan"><h3>Rescan catalog</h3>
+        <form data-act="rescan"><button class="ghost">Rescan now</button></form>
+        <div class="hint">re-reads the catalog and schedules newly available dumps</div>
+      </div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </section>
+
+  <section class="card">
+    <div class="toolbar">
+      <h2 style="margin:0">Jobs</h2>
+      <input type="search" id="job-filter" placeholder="filter by dump id / kind…">
+      <span class="chips" id="phase-chips"></span>
+    </div>
+    <table>
+      <thead><tr><th>Dump</th><th>Kind</th><th>Phase</th><th>Attempts</th><th>Updated</th></tr></thead>
+      <tbody id="jobs"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Local reports</h2>
+    <table>
+      <thead><tr><th>Dump</th><th>Outcome</th><th>Posted</th><th>Created</th><th>Summary</th></tr></thead>
+      <tbody id="reports"></tbody>
+    </table>
+  </section>
+</main>
+<footer>read-only status · live-updates every 5 s · API: /api/status · /api/jobs · /api/reports</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const PHASES = [
+  ["discovered","gray"],["claimed","blue"],["fetching","amber"],["staged","amber"],
+  ["analyzing","amber"],["reporting","purple"],["done","green"],["dropped","dark"],["failed","red"],
+];
+const phaseColor = (p) => (PHASES.find(([n]) => n === p) || ["","gray"])[1];
+let filterText = "", filterPhase = null, capabilities = { analyzer: false, rescan: false };
+
+// Theme: System/Light/Dark (persisted per browser; system follows the OS).
+const themeKey = "dump-analyzer-theme";
+function applyTheme(mode) {
+  document.querySelectorAll(".theme-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.theme === mode));
+  const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = dark ? "" : "light";
+  try { localStorage.setItem(themeKey, mode); } catch {}
+}
+document.querySelectorAll(".theme-toggle button").forEach((b) => (b.onclick = () => applyTheme(b.dataset.theme)));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(localStorage.getItem(themeKey) || "system"));
+applyTheme((() => { try { return localStorage.getItem(themeKey) || "system"; } catch { return "system"; } })());
+
+async function api(path) {
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error(path + " -> " + res.status);
+  return res.json();
+}
+
+function renderStats(status) {
+  const phases = status.jobs.byPhase || {};
+  const cursor = status.eventCursor ?? null;
+  const cursorShort = cursor ? cursor.replace(/^0+(?=\d)/, "") : "—";
+  const cards = [
+    ["event cursor", cursorShort, cursor],
+    ["jobs", status.jobs.total],
+    ["pending reports", status.reports.pending],
+    ["up", status.upSeconds + "s"],
+    ["poll", status.pollIntervalMs + " ms"],
+    ["ssh", status.sshConfigured ? "configured" : "NOT configured"],
+  ];
+  $("stats").innerHTML = cards.map(([l, v, title]) =>
+    `<div class="card stat"><div class="num mono" ${title ? `title="${esc(title)}"` : ""}>${esc(v)}</div><div class="lbl">${esc(l)}</div></div>`).join("");
+  const total = Math.max(1, status.jobs.total);
+  $("pipeline").innerHTML = PHASES.filter(([p]) => phases[p]).map(([p, c]) =>
+    `<div style="width:${(phases[p] / total) * 100}%;background:var(--${c === "dark" ? "gray" : c === "blue" ? "accent" : c})" title="${p}: ${phases[p]}"></div>`).join("");
+  $("pipeline-key").innerHTML = PHASES.filter(([p]) => phases[p]).map(([p, c]) =>
+    `<span class="key"><span class="swatch" style="background:var(--${c === "dark" ? "gray" : c === "blue" ? "accent" : c})"></span>${p} ${phases[p]}</span>`).join("");
+  const chips = [["(all)", null], ...PHASES.filter(([p]) => phases[p]).map(([p]) => [p, p])];
+  $("phase-chips").innerHTML = chips.map(([label, p]) =>
+    `<button class="chip ${filterPhase === p ? "active" : ""}" data-phase="${p ?? ""}">${esc(label)}</button>`).join("");
+  document.querySelectorAll("#phase-chips .chip").forEach((c) =>
+    (c.onclick = () => { filterPhase = c.dataset.phase || null; refresh(); }));
+}
+
+function renderJobs(jobs) {
+  const rows = jobs.filter((j) =>
+    (!filterPhase || j.phase === filterPhase) &&
+    (!filterText || (j.dumpId + " " + j.kind).toLowerCase().includes(filterText)));
+  $("jobs").innerHTML = rows.length
+    ? rows.map((j) => `<tr>
+        <td class="mono">${esc(j.dumpId)}</td>
+        <td>${esc(j.kind)}</td>
+        <td><span class="badge ${phaseColor(j.phase)}">${esc(j.phase)}</span></td>
+        <td>${j.attempts}</td>
+        <td class="muted">${esc(j.updatedAt)}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted">no jobs match</td></tr>`;
+}
+
+function renderReports(reports) {
+  $("reports").innerHTML = reports.length
+    ? reports.map((r) => `<tr>
+        <td class="mono">${esc(r.dumpId)}</td>
+        <td><span class="badge ${r.outcome === "completed" ? "green" : "red"}">${esc(r.outcome)}</span></td>
+        <td>${r.posted ? "yes" : "no"}</td>
+        <td class="muted">${esc(r.createdAt)}</td>
+        <td>${esc(r.summary)}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted">no local reports</td></tr>`;
+}
+
+async function refresh() {
+  try {
+    const [status, jobs, reports] = await Promise.all([api("/api/status"), api("/api/jobs"), api("/api/reports")]);
+    $("ver").textContent = "v" + status.version;
+    $("base").textContent = status.baseUrl;
+    renderStats(status);
+    renderJobs(jobs.jobs || []);
+    renderReports(reports.reports || []);
+    $("live-dot").className = "dot ok";
+    $("updated").textContent = new Date().toLocaleTimeString();
+  } catch (e) {
+    $("live-dot").className = "dot err";
+  }
+}
+
+async function loadCapabilities() {
+  try {
+    capabilities = await api("/api/capabilities");
+  } catch { capabilities = { analyzer: false, rescan: false }; }
+  $("actions-card").style.display = capabilities.analyzer || capabilities.rescan ? "" : "none";
+  $("act-dump").style.display = capabilities.analyzer ? "" : "none";
+  $("act-case").style.display = capabilities.analyzer ? "" : "none";
+  $("act-customer").style.display = capabilities.analyzer ? "" : "none";
+  $("act-rescan").style.display = capabilities.rescan ? "" : "none";
+}
+
+function toast(ok, msg) {
+  const t = $("toast");
+  t.className = "toast " + (ok ? "ok" : "err");
+  t.textContent = msg;
+}
+
+document.querySelectorAll(".actions-grid form").forEach((form) => {
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const act = form.dataset.act;
+    const id = form.id ? form.querySelector("input[name=id]")?.value.trim() : "";
+    // Empty token field = the daemon's stored token (server-side rule).
+    const routes = {
+      dump: ["/-/analyze", { dumpId: id }],
+      case: ["/-/analyze-case", { caseId: id }],
+      customer: ["/-/analyze-customer", { customerId: id }],
+      rescan: ["/-/rescan", {}],
+    };
+    const [route, payload] = routes[act];
+    const btn = form.querySelector("button");
+    btn.disabled = true; btn.classList.add("spin"); btn.textContent = "running…";
+    toast(true, `${act}: running (a real dump takes minutes)…`);
+    try {
+      const headers = { "content-type": "application/json" };
+      const res = await fetch(route, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return toast(false, `${act}: ${res.status} ${body.message ?? body.error ?? ""}`);
+      if (act === "rescan") toast(true, `rescan: ${body.inserted} new dump(s) scheduled`);
+      else if (body.reports) toast(true, `${act}: ${body.considered} considered, ${body.reports.length} reported, ${body.skipped.length} skipped`);
+      else toast(true, `${act}: ${body.report?.outcome ?? "done"} — ${body.report?.summary ?? ""}`);
+      refresh();
+    } catch (e2) {
+      toast(false, `${act}: ${e2.message}`);
+    } finally {
+      btn.disabled = false; btn.classList.remove("spin"); btn.textContent = act === "rescan" ? "Rescan now" : "Run";
+    }
+  });
+});
+
+$("store-token-btn").addEventListener("click", async (e) => {
+  e.preventDefault();
+  const input = $("new-token");
+  const token = input.value.trim();
+  const t = $("token-toast");
+  const show = (ok, msg) => { t.className = "toast " + (ok ? "ok" : "err"); t.textContent = msg; };
+  if (!token) return show(false, "paste a token first");
+  try {
+    const res = await fetch("/-/store-token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return show(false, body.message ?? ("not stored (" + res.status + ")"));
+    input.value = "";
+    show(true, "stored — action forms can use it immediately; the pipeline uses it from the next boot");
+  } catch (err) {
+    show(false, err.message);
+  }
+});
+
+$("job-filter").addEventListener("input", (e) => { filterText = e.target.value.toLowerCase(); refresh(); });
+refresh(); loadCapabilities();
+setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+</script>
+</body>
+</html>

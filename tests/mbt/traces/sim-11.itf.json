@@ -1,0 +1,2055 @@
+{
+ "#meta": {
+  "format": "ITF",
+  "varTypes": {
+   "jobState": "Seq(Str)",
+   "jobContent": "Seq(Int)",
+   "bytesVerified": "Seq(Bool)",
+   "attempts": "Seq(Int)",
+   "serverDump": "Seq(Str)",
+   "serverReports": "Set(<<Int, Int>>)",
+   "eventsSeen": "Int",
+   "eventCursor": "Int",
+   "lastEventCursor": "Int",
+   "agentUp": "Bool",
+   "action_taken": "Str",
+   "parameters": "{ dump: Int, content: Int, kind: Str }"
+  }
+ },
+ "vars": [
+  "action_taken",
+  "agentUp",
+  "attempts",
+  "bytesVerified",
+  "eventCursor",
+  "eventsSeen",
+  "jobContent",
+  "jobState",
+  "lastEventCursor",
+  "parameters",
+  "serverDump",
+  "serverReports"
+ ],
+ "params": [],
+ "param_vars": [
+  "parameters"
+ ],
+ "states": [
+  {
+   "#meta": {
+    "index": 0
+   },
+   "jobState": [
+    "none",
+    "none"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "0"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "init",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": ""
+   }
+  },
+  {
+   "#meta": {
+    "index": 1
+   },
+   "jobState": [
+    "none",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "0"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "discover",
+   "parameters": {
+    "dump": {
+     "#bigint": "2"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 2
+   },
+   "jobState": [
+    "none",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "1"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "purge",
+   "parameters": {
+    "dump": {
+     "#bigint": "2"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 3
+   },
+   "jobState": [
+    "none",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "2"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "intake",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 4
+   },
+   "jobState": [
+    "none",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "2"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "purge-observed",
+   "parameters": {
+    "dump": {
+     "#bigint": "2"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 5
+   },
+   "jobState": [
+    "none",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "3"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "intake",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 6
+   },
+   "jobState": [
+    "none",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "intake",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 7
+   },
+   "jobState": [
+    "none",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "follow",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 8
+   },
+   "jobState": [
+    "discovered",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "discover",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 9
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "claim",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 10
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "begin-fetch",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 11
+   },
+   "jobState": [
+    "staged",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "stage",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 12
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "verify-corrupt",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 13
+   },
+   "jobState": [
+    "staged",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "stage",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 14
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "verify-corrupt",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 15
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 16
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash-reset",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 17
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 18
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "begin-fetch",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 19
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 20
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash-reset",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 21
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 22
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 23
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 24
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "begin-fetch",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 25
+   },
+   "jobState": [
+    "staged",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "stage",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 26
+   },
+   "jobState": [
+    "staged",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 27
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash-reset",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 28
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 29
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 30
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 31
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 32
+   },
+   "jobState": [
+    "claimed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 33
+   },
+   "jobState": [
+    "fetching",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "begin-fetch",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 34
+   },
+   "jobState": [
+    "staged",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "stage",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 35
+   },
+   "jobState": [
+    "failed",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "1"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "2"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "4"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "job-failed",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "1"
+    },
+    "kind": "triage"
+   }
+  }
+ ]
+}

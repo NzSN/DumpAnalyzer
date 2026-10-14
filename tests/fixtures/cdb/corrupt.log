@@ -1,0 +1,11 @@
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       SRV*c:\symcache*https://192.168.150.219:4080/symbols
+
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Loading Dump File [C:\da\work\8b70-9ec86f3c\dump.dmp]
+Could not open dump file [C:\da\work\8b70-9ec86f3c\dump.dmp], Win32 error 0n38
+"Reached the end of the file."

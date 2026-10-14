@@ -1,0 +1,711 @@
+{
+ "#meta": {
+  "format": "ITF",
+  "varTypes": {
+   "jobState": "Seq(Str)",
+   "jobContent": "Seq(Int)",
+   "bytesVerified": "Seq(Bool)",
+   "attempts": "Seq(Int)",
+   "serverDump": "Seq(Str)",
+   "serverReports": "Set(<<Int, Int>>)",
+   "eventsSeen": "Int",
+   "eventCursor": "Int",
+   "lastEventCursor": "Int",
+   "agentUp": "Bool",
+   "action_taken": "Str",
+   "parameters": "{ dump: Int, content: Int, kind: Str }"
+  }
+ },
+ "vars": [
+  "action_taken",
+  "agentUp",
+  "attempts",
+  "bytesVerified",
+  "eventCursor",
+  "eventsSeen",
+  "jobContent",
+  "jobState",
+  "lastEventCursor",
+  "parameters",
+  "serverDump",
+  "serverReports"
+ ],
+ "params": [],
+ "param_vars": [
+  "parameters"
+ ],
+ "states": [
+  {
+   "#meta": {
+    "index": 0
+   },
+   "jobState": [
+    "none",
+    "none"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "0"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "init",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": ""
+   }
+  },
+  {
+   "#meta": {
+    "index": 1
+   },
+   "jobState": [
+    "none",
+    "none"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "1"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "intake",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 2
+   },
+   "jobState": [
+    "none",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "1"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "discover",
+   "parameters": {
+    "dump": {
+     "#bigint": "2"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 3
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "1"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "discover",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 4
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "1"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "crash",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 5
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "2"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": false,
+   "action_taken": "intake",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 6
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "available"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "2"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "recover",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 7
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "3"
+   },
+   "eventCursor": {
+    "#bigint": "0"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "purge",
+   "parameters": {
+    "dump": {
+     "#bigint": "2"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 8
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "available",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "3"
+   },
+   "eventCursor": {
+    "#bigint": "3"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "follow",
+   "parameters": {
+    "dump": {
+     "#bigint": "0"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 9
+   },
+   "jobState": [
+    "discovered",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "purged",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "3"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "purge",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 10
+   },
+   "jobState": [
+    "dropped",
+    "discovered"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "purged",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "3"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "purge-observed",
+   "parameters": {
+    "dump": {
+     "#bigint": "1"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  },
+  {
+   "#meta": {
+    "index": 11
+   },
+   "jobState": [
+    "dropped",
+    "dropped"
+   ],
+   "jobContent": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "bytesVerified": [
+    false,
+    false
+   ],
+   "attempts": [
+    {
+     "#bigint": "0"
+    },
+    {
+     "#bigint": "0"
+    }
+   ],
+   "serverDump": [
+    "purged",
+    "purged"
+   ],
+   "serverReports": {
+    "#set": []
+   },
+   "eventsSeen": {
+    "#bigint": "4"
+   },
+   "eventCursor": {
+    "#bigint": "3"
+   },
+   "lastEventCursor": {
+    "#bigint": "0"
+   },
+   "agentUp": true,
+   "action_taken": "purge-observed",
+   "parameters": {
+    "dump": {
+     "#bigint": "2"
+    },
+    "content": {
+     "#bigint": "0"
+    },
+    "kind": "triage"
+   }
+  }
+ ]
+}
