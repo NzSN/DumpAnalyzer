@@ -66,6 +66,8 @@ pub struct UiContext {
     ssh_configured: bool,
     started: Instant,
     analyzer: Option<Arc<dyn crate::analyzer::Analyzer>>,
+    /// Catalog browsing is independent of automatic analysis and queue state.
+    explorer: Option<Arc<crate::explorer::DumpsExplorer>>,
     /// Manual catalog re-scan (`POST /-/rescan`); `None` when unwired.
     rescan: Option<RescanDeps>,
     /// sha256 of the analyzer token the mutation routes accept; compared in
@@ -89,6 +91,7 @@ impl UiContext {
             ssh_configured: config.ssh_target.is_some(),
             started: Instant::now(),
             analyzer: None,
+            explorer: None,
             rescan: None,
             token_sha256: std::sync::RwLock::new(
                 config
@@ -103,6 +106,12 @@ impl UiContext {
     /// that backs `POST /-/analyze`. Without it the route answers 501.
     pub fn with_analyzer(mut self, analyzer: Arc<dyn crate::analyzer::Analyzer>) -> Self {
         self.analyzer = Some(analyzer);
+        self
+    }
+
+    /// Attaches the customer/case catalog backing `GET /api/dumps`.
+    pub fn with_explorer(mut self, explorer: Arc<crate::explorer::DumpsExplorer>) -> Self {
+        self.explorer = Some(explorer);
         self
     }
 
@@ -320,13 +329,47 @@ async fn route(request: &Request, context: &UiContext) -> Response {
             json!({
                 "analyzer": context.analyzer.is_some(),
                 "rescan": context.rescan.is_some(),
+                "explorer": context.explorer.is_some(),
             }),
         ),
         ("GET", "/api/status") => json_response(200, status_json(context)),
-        ("GET", "/api/jobs") => match context.store.jobs().list() {
+        ("GET", "/api/jobs") => match queue_jobs(context) {
             Ok(jobs) => json_response(200, json!({ "jobs": jobs_json(&jobs) })),
             Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
         },
+        ("GET", "/api/dumps") => {
+            let Some(explorer) = &context.explorer else {
+                return json_response(503, json!({"error":"explorer_unavailable"}));
+            };
+            match explorer.snapshot().await {
+                Ok(mut snapshot) => {
+                    let active = match active_manual_jobs(context) {
+                        Ok(active) => active,
+                        Err(err) => {
+                            return json_response(500, json!({"error":format!("state: {err}")}));
+                        }
+                    };
+                    for customer in &mut snapshot.customers {
+                        for case in &mut customer.cases {
+                            for dump in &mut case.dumps {
+                                if let Some(run) = active.iter().find(|run| {
+                                    run.identity.dump_id == dump.dump_id
+                                        && dump.sha256.as_ref() == Some(&run.identity.input_sha256)
+                                        && run.identity.analyzer_version == context.version
+                                }) {
+                                    dump.analysis_phase = Some(run.phase);
+                                }
+                            }
+                        }
+                    }
+                    json_response(200, json!(snapshot))
+                }
+                Err(err) => json_response(
+                    if err.is_transient() { 503 } else { 500 },
+                    json!({"error":"catalog_unavailable", "message":err.to_string()}),
+                ),
+            }
+        }
         ("GET", "/api/reports") => match context.store.local_reports().list_recent(REPORTS_LIMIT) {
             Ok(reports) => json_response(200, json!({ "reports": reports_json(&reports) })),
             Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
@@ -869,8 +912,47 @@ async fn write_response(
     stream.flush().await
 }
 
+/// Discovery candidates remain durable for automatic scheduling; the
+/// operator's work queue starts once an execution has been claimed.
+fn queue_jobs(context: &UiContext) -> Result<Vec<JobRow>> {
+    let mut jobs: Vec<JobRow> = context
+        .store
+        .jobs()
+        .list()?
+        .into_iter()
+        .filter(|row| {
+            matches!(
+                row.phase,
+                crate::types::JobPhase::Claimed
+                    | crate::types::JobPhase::Fetching
+                    | crate::types::JobPhase::Staged
+                    | crate::types::JobPhase::Analyzing
+                    | crate::types::JobPhase::Reporting
+            )
+        })
+        .collect();
+    for run in active_manual_jobs(context)? {
+        if !jobs.iter().any(|row| row.identity == run.identity) {
+            jobs.push(run);
+        }
+    }
+    jobs.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.identity.dump_id.cmp(&right.identity.dump_id))
+    });
+    Ok(jobs)
+}
+
+fn active_manual_jobs(context: &UiContext) -> Result<Vec<JobRow>> {
+    match &context.analyzer {
+        Some(analyzer) => analyzer.active_jobs(),
+        None => Ok(Vec::new()),
+    }
+}
+
 fn status_json(context: &UiContext) -> Json {
-    let jobs = context.store.jobs().list().unwrap_or_default();
+    let jobs = queue_jobs(context).unwrap_or_default();
     let reports = context
         .store
         .local_reports()

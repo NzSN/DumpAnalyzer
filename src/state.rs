@@ -5,19 +5,20 @@
 //! [`Store`] owns one connection to `data/analyzer.sqlite` and hands out four
 //! narrow sub-stores that share it: [`JobStore`], [`CursorStore`],
 //! [`CacheIndex`], and [`LocalReportStore`]. The schema is applied through a
-//! `schema_migrations` ledger; migration 1 is the only migration, is applied
-//! at most once per database, and reopening an initialized database re-runs
-//! nothing.
+//! `schema_migrations` ledger; each migration is applied at most once per
+//! database, and reopening an initialized database re-runs nothing.
 //!
 //! The tables back the job lifecycle modeled in `specs/DumpAnalyzer.tla`:
 //!
-//! * `jobs` — one row per [`JobIdentity`] with its persisted `phase`, bounded
-//!   `attempts` counter, and per-run workspace path. Terminal rows
-//!   (`done`/`dropped`/`failed`) persist, so a settled identity is never
-//!   rediscovered (local dedup saves CDB runs; the server's idempotent
-//!   replay is the correctness boundary). Phase history is deliberately not
-//!   kept — the server audit feed is the history — so a job row is exactly
-//!   its current phase.
+//! * `jobs` — durable discovery candidates and claimed work, one row per
+//!   [`JobIdentity`] with its persisted `phase`, bounded `attempts` counter,
+//!   and per-run workspace path. The dashboard Jobs view excludes candidates
+//!   still in `discovered`; those are browsed in the Dumps explorer.
+//! * `settled_jobs` — terminal identities (`done`/`dropped`/`failed`), moved
+//!   atomically out of `jobs`. These markers prevent rediscovery without
+//!   leaving completed work in the queue. Phase history is deliberately not
+//!   kept — the server audit feed is the history — so each identity has only
+//!   its current phase. Local reports remain independently available.
 //! * `cursors` — named cursors. The event-feed cursor is a zero-padded rowid
 //!   and therefore compares lexically; [`CursorStore::set_monotonic`]
 //!   enforces the spec's `CursorMonotonic` (never moves backward).
@@ -51,8 +52,8 @@ pub struct Store {
 impl Store {
     /// Opens (creating if absent) the local state database at `path`.
     ///
-    /// Missing parent directories are created. Migration 1 is applied inside
-    /// the same transaction that records it in `schema_migrations`, so it
+    /// Missing parent directories are created. Migrations are applied inside
+    /// the same transaction that records them in `schema_migrations`, so each
     /// runs exactly once per database and reopening an existing database
     /// re-runs nothing.
     pub fn open(path: impl AsRef<Path>) -> Result<Store> {
@@ -180,9 +181,31 @@ CREATE TABLE secrets (
 );
 ";
 
+/// Migration 3: terminal identities leave the active work queue while keeping
+/// their dedup markers and lifecycle metadata. Existing databases are cleaned
+/// up in the same transaction that installs the new table.
+const MIGRATION_3_SQL: &str = "
+CREATE TABLE settled_jobs (
+    dump_id          TEXT NOT NULL,
+    input_sha256     TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    analyzer_version TEXT NOT NULL,
+    phase            TEXT NOT NULL,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    workspace_path   TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (dump_id, input_sha256, kind, analyzer_version)
+);
+
+INSERT INTO settled_jobs
+    SELECT * FROM jobs WHERE phase IN ('done', 'dropped', 'failed');
+DELETE FROM jobs WHERE phase IN ('done', 'dropped', 'failed');
+";
+
 /// Applies any pending migrations. Reads and writes the ledger inside one
 /// immediate transaction, so concurrent openers serialize and the second one
-/// observes version 1 as already applied.
+/// observes each migration as already applied.
 fn migrate(conn: &mut Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_MIGRATIONS_SQL).map_err(sql_err)?;
     let tx = conn
@@ -218,11 +241,26 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         )
         .map_err(sql_err)?;
     }
+    let applied_v3: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 3",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_err)?;
+    if applied_v3 == 0 {
+        tx.execute_batch(MIGRATION_3_SQL).map_err(sql_err)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?1)",
+            params![now_utc()],
+        )
+        .map_err(sql_err)?;
+    }
     tx.commit().map_err(sql_err)?;
     Ok(())
 }
 
-/// Persistence for analysis jobs, one row per [`JobIdentity`].
+/// Persistence for the active work queue and settled identity markers.
 #[derive(Clone)]
 pub struct JobStore {
     conn: SharedConn,
@@ -231,10 +269,9 @@ pub struct JobStore {
 impl JobStore {
     /// Records a discovered job, inserting only when its identity is new.
     ///
-    /// Returns `true` iff a row was inserted. An identity that already has a
-    /// row stays untouched in whatever phase it reached (including terminal
-    /// `done`/`dropped`/`failed`), so the local dedup never re-queues work
-    /// the server would replay anyway.
+    /// Returns `true` iff a row was inserted. An identity that already has an
+    /// active or settled row stays untouched, so the local dedup never
+    /// re-queues work the server would replay anyway.
     pub fn upsert_discovered(&self, job: &JobIdentity) -> Result<bool> {
         let guard = lock(&self.conn)?;
         let now = now_utc();
@@ -243,7 +280,12 @@ impl JobStore {
                 "INSERT OR IGNORE INTO jobs
                      (dump_id, input_sha256, kind, analyzer_version,
                       phase, attempts, workspace_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?6)",
+                 SELECT ?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?6
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM settled_jobs
+                     WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
+                       AND analyzer_version = ?4
+                 )",
                 params![
                     job.dump_id,
                     job.input_sha256,
@@ -313,20 +355,92 @@ impl JobStore {
         Ok(claimed)
     }
 
-    /// Persists a phase transition (and refreshes `updated_at`). Phase
-    /// history is deliberately not kept. An unknown identity is a state
-    /// error: silently losing a transition would corrupt recovery.
+    /// Persists a phase transition and refreshes `updated_at`. Terminal
+    /// transitions atomically move the identity out of the active queue to
+    /// `settled_jobs`, preserving its metadata. A settled identity can receive
+    /// another terminal transition but cannot implicitly re-enter the queue.
+    /// An unknown identity is a state error.
     pub fn set_phase(&self, job: &JobIdentity, phase: JobPhase) -> Result<()> {
-        let guard = lock(&self.conn)?;
-        let changed = guard
-            .execute(
-                "UPDATE jobs
-                    SET phase = ?1, updated_at = ?2
+        if !self.transition(job, None, phase)? {
+            return Err(AnalyzerError::State(format!(
+                "unknown job {}",
+                job_key(job)
+            )));
+        }
+        Ok(())
+    }
+
+    /// Transitions only if the persisted phase still equals `expected`.
+    /// The comparison and transition share one immediate transaction, so
+    /// settling discovered work cannot overwrite a concurrent claim.
+    /// Returns `false` for a missing identity or phase mismatch. As with
+    /// [`JobStore::set_phase`], settled identities cannot re-enter the queue.
+    pub fn set_phase_if(
+        &self,
+        job: &JobIdentity,
+        expected: JobPhase,
+        phase: JobPhase,
+    ) -> Result<bool> {
+        self.transition(job, Some(expected), phase)
+    }
+
+    fn transition(
+        &self,
+        job: &JobIdentity,
+        expected: Option<JobPhase>,
+        phase: JobPhase,
+    ) -> Result<bool> {
+        let mut guard = lock(&self.conn)?;
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_err)?;
+        let current: Option<(String, bool)> = tx
+            .query_row(
+                "SELECT phase, 1 FROM jobs
+                  WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
+                    AND analyzer_version = ?4
+                 UNION ALL
+                 SELECT phase, 0 FROM settled_jobs
+                  WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
+                    AND analyzer_version = ?4
+                 LIMIT 1",
+                params![
+                    job.dump_id,
+                    job.input_sha256,
+                    job.kind,
+                    job.analyzer_version
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(sql_err)?;
+        let Some((current, active)) = current else {
+            return Ok(false);
+        };
+        if expected.is_some_and(|expected| phase_str(expected) != current) {
+            return Ok(false);
+        }
+        let terminal = is_terminal(phase);
+        if !active && !terminal {
+            return Err(AnalyzerError::State(format!(
+                "settled job {} cannot re-enter the queue",
+                job_key(job)
+            )));
+        }
+        let now = now_utc();
+        if active && terminal {
+            tx.execute(
+                "INSERT INTO settled_jobs
+                     (dump_id, input_sha256, kind, analyzer_version,
+                      phase, attempts, workspace_path, created_at, updated_at)
+                 SELECT dump_id, input_sha256, kind, analyzer_version,
+                        ?1, attempts, workspace_path, created_at, ?2
+                   FROM jobs
                   WHERE dump_id = ?3 AND input_sha256 = ?4 AND kind = ?5
                     AND analyzer_version = ?6",
                 params![
                     phase_str(phase),
-                    now_utc(),
+                    now,
                     job.dump_id,
                     job.input_sha256,
                     job.kind,
@@ -334,13 +448,43 @@ impl JobStore {
                 ],
             )
             .map_err(sql_err)?;
-        if changed != 1 {
-            return Err(AnalyzerError::State(format!(
-                "unknown job {}",
-                job_key(job)
-            )));
+            tx.execute(
+                "DELETE FROM jobs
+                  WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
+                    AND analyzer_version = ?4",
+                params![
+                    job.dump_id,
+                    job.input_sha256,
+                    job.kind,
+                    job.analyzer_version
+                ],
+            )
+            .map_err(sql_err)?;
+        } else {
+            let sql = if active {
+                "UPDATE jobs SET phase = ?1, updated_at = ?2
+                  WHERE dump_id = ?3 AND input_sha256 = ?4 AND kind = ?5
+                    AND analyzer_version = ?6"
+            } else {
+                "UPDATE settled_jobs SET phase = ?1, updated_at = ?2
+                  WHERE dump_id = ?3 AND input_sha256 = ?4 AND kind = ?5
+                    AND analyzer_version = ?6"
+            };
+            tx.execute(
+                sql,
+                params![
+                    phase_str(phase),
+                    now,
+                    job.dump_id,
+                    job.input_sha256,
+                    job.kind,
+                    job.analyzer_version
+                ],
+            )
+            .map_err(sql_err)?;
         }
-        Ok(())
+        tx.commit().map_err(sql_err)?;
+        Ok(true)
     }
 
     /// Charges one transient failure against the job's bounded retry budget
@@ -372,14 +516,20 @@ impl JobStore {
         Ok(())
     }
 
-    /// The job's current phase, or `None` when no row exists.
+    /// The active or settled job's current phase, or `None` for an unknown
+    /// identity. Settled identities remain queryable for lifecycle and dedup.
     pub fn phase_of(&self, job: &JobIdentity) -> Result<Option<JobPhase>> {
         let guard = lock(&self.conn)?;
         let raw: Option<String> = guard
             .query_row(
                 "SELECT phase FROM jobs
                   WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
-                    AND analyzer_version = ?4",
+                    AND analyzer_version = ?4
+                 UNION ALL
+                 SELECT phase FROM settled_jobs
+                  WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3
+                    AND analyzer_version = ?4
+                 LIMIT 1",
                 params![
                     job.dump_id,
                     job.input_sha256,
@@ -393,20 +543,27 @@ impl JobStore {
         raw.map(|phase| phase_from_str(&phase)).transpose()
     }
 
-    /// Lists the jobs currently in `phase`, oldest first, with their attempt
-    /// counts. Crash recovery uses this as specified: volatile phases
+    /// Lists identities currently in `phase`, oldest first, with their attempt
+    /// counts. Active phases read the work queue; terminal phases read settled
+    /// markers for lifecycle introspection, unlike [`JobStore::list`].
+    /// Crash recovery uses this as specified: volatile phases
     /// (`fetching`/`staged`/`analyzing`) are reset to `claimed`, `reporting`
     /// is left for the verdict writer's reconciliation, and
     /// `done`/`dropped`/`failed` are terminal.
     pub fn jobs_in_phase(&self, phase: JobPhase) -> Result<Vec<(JobIdentity, u32)>> {
         let guard = lock(&self.conn)?;
+        let table = if is_terminal(phase) {
+            "settled_jobs"
+        } else {
+            "jobs"
+        };
         let mut stmt = guard
-            .prepare(
+            .prepare(&format!(
                 "SELECT dump_id, input_sha256, kind, analyzer_version, attempts
-                   FROM jobs
+                   FROM {table}
                   WHERE phase = ?1
-                  ORDER BY created_at ASC, rowid ASC",
-            )
+                  ORDER BY created_at ASC, rowid ASC"
+            ))
             .map_err(sql_err)?;
         let rows = stmt
             .query_map(params![phase_str(phase)], |row| {
@@ -421,13 +578,14 @@ impl JobStore {
     }
 
     /// Marks the job `dropped`: the terminal state for a purge race or a 404
-    /// at any server touch. The row is retained as the terminal marker, so
-    /// [`JobStore::upsert_discovered`] will not re-queue the identity.
+    /// at any server touch. Its settled marker prevents
+    /// [`JobStore::upsert_discovered`] from re-queuing the identity.
     pub fn drop_job(&self, job: &JobIdentity) -> Result<()> {
         self.set_phase(job, JobPhase::Dropped)
     }
 
-    /// Lists every job with its lifecycle timestamps, oldest first.
+    /// Lists discovery candidates and active work with lifecycle timestamps,
+    /// oldest first. The operator queue filters out `Discovered` candidates.
     /// Read-only observability for the status UI; scheduling order is
     /// [`JobStore::claim_next`]'s, not this listing's.
     pub fn list(&self) -> Result<Vec<JobRow>> {
@@ -946,6 +1104,10 @@ pub fn phase_from_str(value: &str) -> Result<JobPhase> {
     }
 }
 
+fn is_terminal(phase: JobPhase) -> bool {
+    matches!(phase, JobPhase::Done | JobPhase::Dropped | JobPhase::Failed)
+}
+
 fn phase_str(phase: JobPhase) -> &'static str {
     match phase {
         JobPhase::Discovered => "discovered",
@@ -1012,7 +1174,7 @@ fn sql_err(error: rusqlite::Error) -> AnalyzerError {
 }
 
 /// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ` (second precision).
-fn now_utc() -> String {
+pub(crate) fn now_utc() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))

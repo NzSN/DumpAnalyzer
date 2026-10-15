@@ -2,7 +2,8 @@
 //!
 //! Discovers dumps through the DumpLedger catalog, analyzes them with the
 //! internal agent (CDB toolchain via the tool runner), and writes verdicts
-//! back as analysis reports. Single process, no listening port in v1.
+//! back as analysis reports. A local dashboard separates catalog browsing
+//! from the active work queue.
 #![forbid(unsafe_code)]
 
 pub mod agent;
@@ -10,6 +11,7 @@ pub mod analyzer;
 pub mod claude_runner;
 pub mod client;
 pub mod config;
+pub mod explorer;
 pub mod http;
 pub mod runner;
 pub mod scheduler;

@@ -51,8 +51,9 @@ impl AnalyzerError {
 }
 
 /// Job lifecycle phases, mirroring `JobStates` in specs/DumpAnalyzer.tla
-/// (the spec's "none" is the absence of a job row). Stored in SQLite as the
-/// kebab-case serde spelling.
+/// (the spec's "none" is the absence of an active or settled identity).
+/// Terminal identities leave the work queue and remain in `settled_jobs`.
+/// Stored in SQLite as the kebab-case serde spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobPhase {

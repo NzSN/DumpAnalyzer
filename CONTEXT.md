@@ -13,9 +13,25 @@ store**, **Analyzer**, **analyzer token**, **analysis report**, **event
 feed**. Those terms are not redefined here.
 
 **Analysis job**:
-The unit of work: one dump at one pinned content hash, one kind, one
-analyzer version. Identity `(dumpId, inputSha256, kind, analyzerVersion)`.
+The unit of analysis work identified by `(dumpId, inputSha256, kind,
+analyzerVersion)`. Completed, failed, and dropped jobs leave the queue;
+their reports and settled identities remain.
 _Avoid_: task, scan
+
+**Work queue**:
+Jobs that have been claimed, are running, or are waiting for report delivery.
+Discovered dumps and settled work are outside this queue.
+_Avoid_: job history
+
+**Discovered dump**:
+An available dump known to the analyzer and eligible for a future run.
+It is browseable in the dumps explorer before a job is claimed.
+_Avoid_: queued job
+
+**Dumps explorer**:
+The catalog of available dumps grouped by customer and case, including dumps
+awaiting analysis and dumps with completed reports.
+_Avoid_: work queue
 
 **Agent**:
 The internal component executing a job end to end (staging, symbols,
@@ -53,8 +69,9 @@ applied-then-persisted with idempotent replay.
 _Avoid_: offset, bookmark
 
 **Analyzer component**:
-The on-demand capability `f : DumpId -> IO Report` (`analyzer::Analyzer`,
-production `PipelineAnalyzer`): one call, one report, no job row.
+The on-demand capability `f : DumpId -> IO Report`: one call, one report.
+Completed analysis leaves the work queue once its report is settled under
+the configured delivery policy.
 _Avoid_: ad-hoc analysis
 
 **Local-verdict mode**:

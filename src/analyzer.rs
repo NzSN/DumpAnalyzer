@@ -3,24 +3,29 @@
 //! Given a dump identifier from DumpLedger, `analyze` performs the whole
 //! effectful pipeline — detail lookup, byte fetch with cache/ETag, sha256
 //! verification, bounded toolchain run — and returns the verdict as a
-//! [`Report`]. It creates no job rows and persists nothing except the
-//! content-addressed byte cache; scheduling, retry bookkeeping, and
-//! write-back remain the scheduled pipeline's business (docs: the four
-//! automatic triggers). Write-back of an on-demand report is the caller's
-//! choice: pass the report to [`crate::verdict::submit`] (or the sink) if it
-//! should land on the ledger.
+//! [`Report`]. Successful reports are retained locally for the dashboard.
+//! With write-back enabled, an unposted report creates or advances an idle
+//! job to `reporting` for reconciliation to deliver it to the ledger. With
+//! write-back disabled, the analysis settles immediately and leaves the
+//! work queue. An already-posted report also settles immediately. Manual
+//! reruns preserve settled identities and any scheduled execution in progress;
+//! they do not persist their own attempt counters or intermediate phases.
+//! Active manual executions appear in [`Analyzer::active_jobs`] until their
+//! request completes, fails, or is cancelled.
 //!
 //! `Analyzer` here is the effectful component trait; `wire::Analyzer` (the
 //! name/version attribution struct inside a report) is a different, purely
 //! descriptive type.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::{Arc, Mutex};
 
 use crate::agent::{Agent, Attempt, MAX_ATTEMPTS};
 use crate::client::LedgerClient;
 use crate::config::Config;
-use crate::state::Store;
-use crate::types::{AnalyzerError, JobIdentity, ReportOutcome, Result, ToolRunner};
+use crate::state::{JobRow, Store, now_utc};
+use crate::types::{AnalyzerError, JobIdentity, JobPhase, ReportOutcome, Result, ToolRunner};
 use crate::verdict;
 use crate::wire::{DumpCatalogQuery, DumpPhase};
 
@@ -40,7 +45,7 @@ pub enum AnalyzeError {
     /// The ledger has no such dump (or it was purged mid-analysis).
     #[error("dump not found: {0}")]
     NotFound(String),
-    /// The dump exists but is not analyzable (not `available`, or unsealed).
+    /// The dump is unavailable, unsealed, or already being analyzed manually.
     #[error("dump {dump_id} is not analyzable: {reason}")]
     NotAvailable { dump_id: String, reason: String },
     /// Transient failure after the bounded retry budget (transport, 5xx,
@@ -95,6 +100,11 @@ pub struct ScopeReport {
 pub trait Analyzer: Send + Sync {
     async fn analyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError>;
 
+    /// Current on-demand executions, independent of the durable scheduled queue.
+    fn active_jobs(&self) -> Result<Vec<JobRow>> {
+        Ok(Vec::new())
+    }
+
     /// `f : (CaseId | CustomerId) -> IO ScopeReport` — every `available`
     /// dump of the case/customer, analyzed sequentially through the same
     /// pipeline. Per-dump failures land in `skipped`, never abort the batch.
@@ -127,6 +137,24 @@ pub struct PipelineAnalyzer {
     agent: Agent,
     config: Config,
     store: Store,
+    active: Arc<Mutex<HashMap<JobIdentity, JobRow>>>,
+}
+
+/// Owns one live manual execution; cancellation drops the guard with its future.
+struct ActiveManualJob {
+    identity: JobIdentity,
+    active: Arc<Mutex<HashMap<JobIdentity, JobRow>>>,
+}
+
+impl Drop for ActiveManualJob {
+    fn drop(&mut self) {
+        // Cleanup must also run while unwinding; recover the map if a prior
+        // panic poisoned its mutex rather than leaving an orphan active row.
+        self.active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.identity);
+    }
 }
 
 impl PipelineAnalyzer {
@@ -150,7 +178,41 @@ impl PipelineAnalyzer {
             agent,
             config,
             store,
+            active: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn register_active_job(
+        &self,
+        identity: &JobIdentity,
+    ) -> std::result::Result<ActiveManualJob, AnalyzeError> {
+        let mut active = self.active.lock().map_err(|_| {
+            AnalyzeError::Terminal(AnalyzerError::State(
+                "active analysis registry mutex poisoned".to_owned(),
+            ))
+        })?;
+        match active.entry(identity.clone()) {
+            Entry::Occupied(_) => {
+                return Err(AnalyzeError::NotAvailable {
+                    dump_id: identity.dump_id.clone(),
+                    reason: "analysis already running".to_owned(),
+                });
+            }
+            Entry::Vacant(entry) => {
+                let now = now_utc();
+                entry.insert(JobRow {
+                    identity: identity.clone(),
+                    phase: JobPhase::Claimed,
+                    attempts: 0,
+                    created_at: now.clone(),
+                    updated_at: now,
+                });
+            }
+        }
+        Ok(ActiveManualJob {
+            identity: identity.clone(),
+            active: self.active.clone(),
+        })
     }
 
     async fn resolve_customer(&self, input: &str) -> std::result::Result<String, AnalyzeError> {
@@ -186,6 +248,30 @@ impl PipelineAnalyzer {
 
 #[async_trait::async_trait]
 impl Analyzer for PipelineAnalyzer {
+    fn active_jobs(&self) -> Result<Vec<JobRow>> {
+        let active = self.active.lock().map_err(|_| {
+            AnalyzerError::State("active analysis registry mutex poisoned".to_owned())
+        })?;
+        let mut rows: Vec<JobRow> = active.values().cloned().collect();
+        rows.sort_by(|left, right| {
+            (
+                &left.created_at,
+                &left.identity.dump_id,
+                &left.identity.input_sha256,
+                &left.identity.kind,
+                &left.identity.analyzer_version,
+            )
+                .cmp(&(
+                    &right.created_at,
+                    &right.identity.dump_id,
+                    &right.identity.input_sha256,
+                    &right.identity.kind,
+                    &right.identity.analyzer_version,
+                ))
+        });
+        Ok(rows)
+    }
+
     async fn analyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError> {
         // Gate: the dump must exist, be `available`, and carry a sealed hash.
         let detail = match self.agent.client().get_dump(dump_id).await {
@@ -215,6 +301,7 @@ impl Analyzer for PipelineAnalyzer {
             kind: "triage".to_owned(),
             analyzer_version: self.config.version.clone(),
         };
+        let _active_job = self.register_active_job(&identity)?;
 
         // Bounded retries, identical budget to the scheduled path; no
         // attempt counter is persisted for on-demand analysis.
@@ -241,10 +328,8 @@ impl Analyzer for PipelineAnalyzer {
         // Assemble (and bound-check) the report exactly as write-back does.
         let submission =
             verdict::assemble(&identity, output, &self.config).map_err(AnalyzeError::Terminal)?;
-        // Record it as a pending local report: on-demand analysis creates no
-        // job row, but the run must be visible on the dashboard; the replay
-        // path posts it to the ledger lazily (boot reconciliation / idle
-        // sweep), exactly like a local-verdict-mode report.
+        // Preserve the report independently of the work queue. When write-back
+        // is enabled, reconciliation posts an unposted report lazily.
         let facts_json = match &submission.facts {
             Some(facts) => facts.to_string(),
             None => "null".to_owned(),
@@ -259,22 +344,29 @@ impl Analyzer for PipelineAnalyzer {
             )
             .map_err(AnalyzeError::Terminal)?;
 
-        // Reflect the run in the jobs table so the dashboard shows reality:
-        // create-or-move the row to `reporting` (the replay path settles it
-        // to `done` once the report posts). An already-`done` row stays.
+        let posted = self
+            .store
+            .local_reports()
+            .get(&identity)
+            .map_err(AnalyzeError::Terminal)?
+            .is_some_and(|report| report.posted);
+        let next_phase = if self.config.writeback_enabled && !posted {
+            JobPhase::Reporting
+        } else {
+            JobPhase::Done
+        };
+
+        // Only idle work belongs to this manual completion. Preserve any
+        // scheduled run already executing and never reopen a settled identity.
+        // Compare-and-set also protects a scheduler claim after our phase read.
         let jobs = self.store.jobs();
-        match jobs.phase_of(&identity).map_err(AnalyzeError::Terminal)? {
-            None => {
-                jobs.upsert_discovered(&identity)
-                    .map_err(AnalyzeError::Terminal)?;
-                jobs.set_phase(&identity, crate::types::JobPhase::Reporting)
-                    .map_err(AnalyzeError::Terminal)?;
-            }
-            Some(crate::types::JobPhase::Done) => {}
-            Some(_) => {
-                jobs.set_phase(&identity, crate::types::JobPhase::Reporting)
-                    .map_err(AnalyzeError::Terminal)?;
-            }
+        jobs.upsert_discovered(&identity)
+            .map_err(AnalyzeError::Terminal)?;
+        if let Some(phase @ (JobPhase::Discovered | JobPhase::Reporting)) =
+            jobs.phase_of(&identity).map_err(AnalyzeError::Terminal)?
+        {
+            jobs.set_phase_if(&identity, phase, next_phase)
+                .map_err(AnalyzeError::Terminal)?;
         }
         Ok(Report {
             identity,

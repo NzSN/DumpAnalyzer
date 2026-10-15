@@ -2,13 +2,16 @@
 //! (client → fetch/verify → runner) against a wiremock ledger and a fake
 //! tool runner. No SSH, no CDB.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dump_analyzer::analyzer::{AnalyzeError, Analyzer, PipelineAnalyzer};
 use dump_analyzer::config::{Config, SecretToken};
 use dump_analyzer::state::Store;
-use dump_analyzer::types::{ReportOutcome, RunOutput, RunRequest, RunnerKind, ToolRunner};
+use dump_analyzer::types::{
+    JobIdentity, JobPhase, ReportOutcome, RunOutput, RunRequest, RunnerKind, ToolRunner,
+};
 use sha2::Digest;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -73,6 +76,30 @@ fn content_sha() -> String {
     hex::encode(sha2::Sha256::digest(CONTENT))
 }
 
+fn identity() -> JobIdentity {
+    JobIdentity {
+        dump_id: DUMP_ID.to_owned(),
+        input_sha256: content_sha(),
+        kind: "triage".to_owned(),
+        analyzer_version: "0.1.0".to_owned(),
+    }
+}
+
+async fn analyze_once(config: Config, store: Store) {
+    let client = dump_analyzer::client::LedgerClient::new(&config).expect("client");
+    let analyzer = PipelineAnalyzer::new(
+        client,
+        store,
+        config,
+        Arc::new(FakeRunner {
+            queue: Mutex::new(vec![Ok(good_output())]),
+        }),
+    );
+    let report = analyzer.analyze(DUMP_ID).await.expect("report");
+    assert_eq!(report.identity, identity());
+    assert_eq!(report.outcome, ReportOutcome::Completed);
+}
+
 /// Scripted runner: pops queued outcomes in order.
 struct FakeRunner {
     queue: Mutex<Vec<Result<RunOutput, String>>>,
@@ -86,6 +113,75 @@ impl ToolRunner for FakeRunner {
             Ok(output) => Ok(output),
             Err(message) => Err(dump_analyzer::types::AnalyzerError::Runner(message)),
         }
+    }
+}
+
+struct BlockingRunner {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Semaphore,
+    calls: AtomicUsize,
+    fail: bool,
+}
+
+#[async_trait::async_trait]
+impl ToolRunner for BlockingRunner {
+    async fn run(&self, _request: RunRequest) -> dump_analyzer::types::Result<RunOutput> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.entered.notify_one();
+        self.release.acquire().await.expect("release").forget();
+        if self.fail {
+            Err(dump_analyzer::types::AnalyzerError::Integrity(
+                "intentional terminal failure".to_owned(),
+            ))
+        } else {
+            Ok(good_output())
+        }
+    }
+}
+
+struct BlockingAnalysis {
+    _server: MockServer,
+    _dir: tempfile::TempDir,
+    store: Store,
+    analyzer: Arc<PipelineAnalyzer>,
+    runner: Arc<BlockingRunner>,
+}
+
+impl BlockingAnalysis {
+    async fn new(fail: bool) -> Self {
+        let server = MockServer::start().await;
+        mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+        mount_content(&server).await;
+        let mut config = config_for(&server);
+        config.scheduler_enabled = false;
+        config.writeback_enabled = false;
+        let (dir, store) = store();
+        let client = dump_analyzer::client::LedgerClient::new(&config).expect("client");
+        let runner = Arc::new(BlockingRunner {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Semaphore::new(0),
+            calls: AtomicUsize::new(0),
+            fail,
+        });
+        let analyzer = Arc::new(PipelineAnalyzer::new(
+            client,
+            store.clone(),
+            config,
+            runner.clone(),
+        ));
+        Self {
+            _server: server,
+            _dir: dir,
+            store,
+            analyzer,
+            runner,
+        }
+    }
+
+    async fn wait_for_runner(&self) {
+        tokio::time::timeout(Duration::from_secs(5), self.runner.entered.notified())
+            .await
+            .expect("analysis reaches the runner");
     }
 }
 
@@ -150,6 +246,270 @@ async fn analyze_happy_path_returns_the_report() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].dump_id, DUMP_ID);
     assert!(!pending[0].posted);
+    let queued = store_check.jobs().list().expect("queue");
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].phase, JobPhase::Reporting);
+}
+
+#[tokio::test]
+async fn manual_execution_is_visible_until_report_completion() {
+    let fixture = BlockingAnalysis::new(false).await;
+    let analyzer = fixture.analyzer.clone();
+    let analysis = tokio::spawn(async move { analyzer.analyze(DUMP_ID).await });
+    fixture.wait_for_runner().await;
+
+    let active = fixture.analyzer.active_jobs().expect("active jobs");
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].identity, identity());
+    assert_eq!(active[0].phase, JobPhase::Claimed);
+    assert_eq!(active[0].attempts, 0);
+    assert_eq!(active[0].created_at.len(), 20);
+    assert_eq!(active[0].updated_at, active[0].created_at);
+    assert!(
+        fixture
+            .store
+            .jobs()
+            .list()
+            .expect("durable jobs")
+            .is_empty()
+    );
+
+    fixture.runner.release.add_permits(1);
+    let report = analysis.await.expect("analysis task").expect("report");
+    assert_eq!(report.identity, identity());
+    assert!(
+        fixture
+            .analyzer
+            .active_jobs()
+            .expect("active jobs")
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .store
+            .local_reports()
+            .get(&identity())
+            .expect("report")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn manual_execution_is_removed_after_a_terminal_error() {
+    let fixture = BlockingAnalysis::new(true).await;
+    let analyzer = fixture.analyzer.clone();
+    let analysis = tokio::spawn(async move { analyzer.analyze(DUMP_ID).await });
+    fixture.wait_for_runner().await;
+    assert_eq!(
+        fixture.analyzer.active_jobs().expect("active jobs").len(),
+        1
+    );
+
+    fixture.runner.release.add_permits(1);
+    let error = analysis
+        .await
+        .expect("analysis task")
+        .expect_err("runner failure");
+    assert!(matches!(error, AnalyzeError::Terminal(_)));
+    assert!(
+        fixture
+            .analyzer
+            .active_jobs()
+            .expect("active jobs")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn dropping_manual_analysis_removes_its_active_job() {
+    let fixture = BlockingAnalysis::new(false).await;
+    let mut analysis = Box::pin(fixture.analyzer.analyze(DUMP_ID));
+    tokio::select! {
+        result = &mut analysis => panic!("analysis completed before release: {result:?}"),
+        () = fixture.wait_for_runner() => {}
+    }
+    assert_eq!(
+        fixture.analyzer.active_jobs().expect("active jobs").len(),
+        1
+    );
+
+    drop(analysis);
+
+    assert!(
+        fixture
+            .analyzer
+            .active_jobs()
+            .expect("active jobs")
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .store
+            .jobs()
+            .list()
+            .expect("durable jobs")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn concurrent_manual_analysis_of_the_same_identity_is_rejected() {
+    let fixture = BlockingAnalysis::new(false).await;
+    let analyzer = fixture.analyzer.clone();
+    let analysis = tokio::spawn(async move { analyzer.analyze(DUMP_ID).await });
+    fixture.wait_for_runner().await;
+
+    let error = tokio::time::timeout(Duration::from_secs(2), fixture.analyzer.analyze(DUMP_ID))
+        .await
+        .expect("duplicate returns without running the toolchain")
+        .expect_err("duplicate analysis");
+    assert!(matches!(
+        error,
+        AnalyzeError::NotAvailable { dump_id, reason }
+            if dump_id == DUMP_ID && reason == "analysis already running"
+    ));
+    assert_eq!(fixture.runner.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        fixture.analyzer.active_jobs().expect("active jobs").len(),
+        1
+    );
+
+    fixture.runner.release.add_permits(1);
+    analysis.await.expect("analysis task").expect("report");
+    assert!(
+        fixture
+            .analyzer
+            .active_jobs()
+            .expect("active jobs")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn analyze_local_only_settles_the_work_queue_immediately() {
+    let server = MockServer::start().await;
+    mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server).await;
+
+    for initial in [None, Some(JobPhase::Discovered), Some(JobPhase::Reporting)] {
+        let mut config = config_for(&server);
+        config.scheduler_enabled = false;
+        config.writeback_enabled = false;
+        let (_dir, store) = store();
+        if let Some(phase) = initial {
+            store.jobs().upsert_discovered(&identity()).expect("job");
+            store.jobs().set_phase(&identity(), phase).expect("phase");
+        }
+
+        analyze_once(config, store.clone()).await;
+
+        assert_eq!(
+            store.jobs().phase_of(&identity()).expect("phase"),
+            Some(JobPhase::Done),
+            "initial phase: {initial:?}"
+        );
+        assert!(store.jobs().list().expect("queue").is_empty());
+        assert!(
+            store
+                .local_reports()
+                .get(&identity())
+                .expect("report")
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
+async fn analyze_reruns_settled_identities_without_reopening_the_queue() {
+    let server = MockServer::start().await;
+    mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server).await;
+
+    for terminal in [JobPhase::Done, JobPhase::Failed, JobPhase::Dropped] {
+        let config = config_for(&server);
+        let (_dir, store) = store();
+        store.jobs().upsert_discovered(&identity()).expect("job");
+        store
+            .jobs()
+            .set_phase(&identity(), terminal)
+            .expect("settled");
+
+        analyze_once(config, store.clone()).await;
+
+        assert_eq!(
+            store.jobs().phase_of(&identity()).expect("phase"),
+            Some(terminal)
+        );
+        assert!(store.jobs().list().expect("queue").is_empty());
+        assert!(
+            store
+                .local_reports()
+                .get(&identity())
+                .expect("report")
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
+async fn analyze_manual_completion_preserves_a_scheduled_jobs_execution_phase() {
+    let server = MockServer::start().await;
+    mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server).await;
+
+    for writeback_enabled in [false, true] {
+        for phase in [
+            JobPhase::Claimed,
+            JobPhase::Fetching,
+            JobPhase::Staged,
+            JobPhase::Analyzing,
+        ] {
+            let mut config = config_for(&server);
+            config.writeback_enabled = writeback_enabled;
+            let (_dir, store) = store();
+            store.jobs().upsert_discovered(&identity()).expect("job");
+            store.jobs().set_phase(&identity(), phase).expect("phase");
+
+            analyze_once(config, store.clone()).await;
+
+            assert_eq!(
+                store.jobs().phase_of(&identity()).expect("phase"),
+                Some(phase)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn analyze_previously_posted_report_settles_without_pending_delivery() {
+    let server = MockServer::start().await;
+    mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server).await;
+    let config = config_for(&server);
+    let (_dir, store) = store();
+    store.jobs().upsert_discovered(&identity()).expect("job");
+    store
+        .local_reports()
+        .insert(
+            &identity(),
+            ReportOutcome::Completed,
+            "previous report",
+            "null",
+        )
+        .expect("previous report");
+    store
+        .local_reports()
+        .mark_posted(&identity())
+        .expect("posted");
+
+    analyze_once(config, store.clone()).await;
+
+    assert_eq!(
+        store.jobs().phase_of(&identity()).expect("phase"),
+        Some(JobPhase::Done)
+    );
+    assert!(store.jobs().list().expect("queue").is_empty());
+    assert!(store.local_reports().pending().expect("pending").is_empty());
 }
 
 #[tokio::test]

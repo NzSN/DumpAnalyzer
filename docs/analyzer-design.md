@@ -199,10 +199,11 @@ never a verdict.
 takes a DumpLedger dump ID and returns a `Report` — detail lookup gated on
 `available` + sealed sha256, then the shared pipeline stages (cache + ETag
 fetch, sha256 verification, bounded toolchain run via `Agent::attempt`).
-It creates no job rows and persists no attempts (the by-phase pipeline shows
-scheduled work only); the report is recorded as a pending local report for
-dashboard visibility and written back lazily by the replay path (boot
-reconciliation / idle sweep). Errors map to `NotFound`,
+It persists no attempt counters; the report is recorded locally and pending
+delivery appears in the work queue. Write-back-off completion settles locally
+at once. Otherwise the replay path delivers it at boot or on its independent
+periodic cadence. A manual completion cannot overwrite a scheduled run already
+executing or reopen a settled identity. Errors map to `NotFound`,
 `NotAvailable`, `Transient` (budget exhausted), `Terminal`. The status UI
 exposes it as token-guarded `POST /-/analyze` (plus a browser form); the
 token is digest-compared in constant time and never stored or rendered.
@@ -230,8 +231,18 @@ AN2 deliverable against AI1+AI2 alone.
 - **Write-back is optional.** `DUMP_ANALYZER_WRITE_BACK=off` treats the
   ledger as a read-only dump source: the verdict sink is `LocalVerdictSink`
   (assemble + record locally + settle `done` — no POST, no acceptance wait),
-  the boot reconcile and the idle replay sweep are skipped, and stale
-  `reporting` rows settle `done` at boot.
+  server reconciliation and periodic delivery are skipped. At boot, stale
+  `reporting` rows with a durable report settle locally; rows without a report
+  return to discovery for another run.
+- **Jobs are a work queue.** Terminal transitions atomically move the job
+  from `jobs` to `settled_jobs`. Reports stay available independently; settled
+  identity markers prevent rediscovery. Migration 3 moves pre-existing terminal
+  rows out of the queue. The Jobs widget and its counts start at `claimed`;
+  `discovered` is a scheduling candidate shown in the separate Dumps explorer.
+  The explorer reads the available catalog independently of local job retention,
+  grouped by customer/case with names, search, and scoped analysis actions.
+  Manual executions have a request-scoped active record so they appear in Jobs
+  during execution without leaving a stale row when cancelled.
 - **Exactly-once effect, at-least-once execution.** The server identity
   `(dumpId, analyzer.name, analyzer.version, kind, inputSha256)` plus
   idempotent replay gives exactly-once visible effect. DumpAnalyzer never
@@ -249,8 +260,10 @@ AN2 deliverable against AI1+AI2 alone.
   reconciliation is needed beyond dropping the job.
 - **Restart reconciliation.** On boot: jobs in `reporting` check
   `GET …/analyses` for their identity tuple (present → `done`, absent →
-  re-POST); jobs in `claimed`/`fetching`/`analyzing` re-enter at fetch with
-  byte re-verification; the cursor resumes the feed.
+  re-POST). If both server report and local copy are absent, the job is requeued.
+  Jobs in `claimed`/`fetching`/`staged`/`analyzing` resume at fetch with byte
+  re-verification and preserved attempt counts; the cursor resumes the feed.
+  Durable report delivery continues independently of automatic job scheduling.
 - **Single-writer discipline.** One DumpAnalyzer process per configured
   `(analyzer.name, analyzer.version)`: the token has no per-client identity,
   so two concurrent writers would share one attribution. v1 enforces this

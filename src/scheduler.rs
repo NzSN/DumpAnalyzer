@@ -200,6 +200,11 @@ pub async fn run(
         ));
         let context = crate::http::UiContext::new(&config, store.clone())
             .with_analyzer(on_demand)
+            .with_explorer(Arc::new(crate::explorer::DumpsExplorer::new(
+                Arc::clone(&client),
+                store.clone(),
+                config.version.clone(),
+            )))
             .with_rescan(crate::http::RescanDeps::new(
                 std::sync::Arc::clone(&client),
                 store.clone(),
@@ -220,12 +225,17 @@ pub async fn run(
     let feed = supervise_feed(&client, &store, &config, shutdown);
     // DUMP_ANALYZER_SCHEDULER=off: manual operation — feed, status UI, and
     // on-demand analysis run; no job is ever claimed.
-    let scheduler = scheduler_loop(&agent, &client, &store, &config, shutdown);
+    let scheduler = scheduler_loop(&agent, &store, &config, shutdown);
+    // Report delivery is work even when automatic analysis is disabled or
+    // busy. Keep its cadence independent of job claiming.
+    let delivery = replay_loop(&client, &store, &config, shutdown, REPLAY_SWEEP_INTERVAL);
     tokio::pin!(feed);
     tokio::pin!(scheduler);
+    tokio::pin!(delivery);
     let mut feed_done = false;
     let mut scheduler_done = false;
-    while !(feed_done && scheduler_done) {
+    let mut delivery_done = false;
+    while !(feed_done && scheduler_done && delivery_done) {
         tokio::select! {
             biased;
             result = &mut feed, if !feed_done => {
@@ -236,6 +246,10 @@ pub async fn run(
             result = &mut scheduler, if !scheduler_done => {
                 scheduler_done = true;
                 tracing::debug!("scheduler stopped");
+                result?;
+            }
+            result = &mut delivery, if !delivery_done => {
+                delivery_done = true;
                 result?;
             }
         }
@@ -360,12 +374,6 @@ async fn supervise_feed(
 
 /// The scheduler loop: claim → run → settle, one job at a time.
 ///
-/// `Agent::run_job` runs the persisted stage machine to a terminal phase
-/// (`done`/`dropped`/`failed`). The only `Err` it returns is a transient
-/// write-back failure with the job left durable in `reporting`; the loop
-/// backs off and moves on (boot reconciliation owns re-submission). An empty
-/// job table sleeps for `config.poll_interval`, so the loop never busy-spins.
-/// Shutdown is observed between jobs: an in-flight job always finishes first.
 /// Resolves the analyzer token at boot: the environment wins (and is
 /// persisted as the latest-used token); otherwise the state store's stored
 /// token; otherwise boot fails fast naming both sources. The source is
@@ -394,14 +402,16 @@ fn resolve_token(config: &mut Config, store: &Store) -> Result<()> {
     }
 }
 
-/// Cadence of the pending-local-verdict replay sweep while the daemon idles
+/// Cadence of the pending-local-verdict replay sweep while the daemon runs
 /// (boot reconciliation covers restarts; this covers the route appearing
 /// mid-run). Cheap: one local query and zero requests when nothing pends.
 const REPLAY_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Resumes persisted claims, then claims new work one job at a time.
+/// Terminal jobs leave the queue; durable report delivery runs separately.
+/// An in-flight job finishes before observing shutdown between jobs.
 async fn scheduler_loop(
     agent: &Agent,
-    client: &LedgerClient,
     store: &Store,
     config: &Config,
     shutdown: &CancellationToken,
@@ -412,12 +422,27 @@ async fn scheduler_loop(
         return Ok(());
     }
     let mut backoff = Backoff::new();
-    let mut last_sweep = std::time::Instant::now();
+    // Only this scheduler resumes the claims persisted across a restart.
+    // claim_next continues selecting new work atomically, preserving its
+    // guarantee that concurrent claimers never return the same job.
+    let mut recovered = std::collections::VecDeque::from(
+        store
+            .jobs()
+            .jobs_in_phase(crate::types::JobPhase::Claimed)?,
+    );
     loop {
         if shutdown.is_cancelled() {
             return Ok(());
         }
-        match store.jobs().claim_next() {
+        let next = if let Some((identity, attempts)) = recovered.pop_front() {
+            if store.jobs().phase_of(&identity)? != Some(crate::types::JobPhase::Claimed) {
+                continue;
+            }
+            Ok(Some((identity, attempts)))
+        } else {
+            store.jobs().claim_next()
+        };
+        match next {
             Ok(Some((identity, attempts))) => {
                 tracing::info!(
                     dump_id = %identity.dump_id,
@@ -427,7 +452,34 @@ async fn scheduler_loop(
                 );
                 match agent.run_job(&identity).await {
                     Ok(()) => backoff.reset(),
+                    Err(_)
+                        if store.jobs().phase_of(&identity)?
+                            == Some(crate::types::JobPhase::Dropped) =>
+                    {
+                        // The feed can purge an identity while the agent is
+                        // awaiting bytes or its tool runner. Its next phase
+                        // write must not resurrect it or stop the daemon.
+                        backoff.reset();
+                    }
+                    Err(err @ AnalyzerError::State(_)) => return Err(err),
                     Err(err) => {
+                        if !err.is_transient() {
+                            // A report assembly/contract error cannot be
+                            // replayed. Settle it rather than leaving an
+                            // unusable entry in the work queue.
+                            if let Some(phase) = store.jobs().phase_of(&identity)? {
+                                if !matches!(
+                                    phase,
+                                    crate::types::JobPhase::Done
+                                        | crate::types::JobPhase::Failed
+                                        | crate::types::JobPhase::Dropped
+                                ) {
+                                    store
+                                        .jobs()
+                                        .set_phase(&identity, crate::types::JobPhase::Failed)?;
+                                }
+                            }
+                        }
                         let delay = backoff.next_delay();
                         tracing::warn!(
                             dump_id = %identity.dump_id,
@@ -442,22 +494,6 @@ async fn scheduler_loop(
                 }
             }
             Ok(None) => {
-                if config.writeback_enabled && last_sweep.elapsed() >= REPLAY_SWEEP_INTERVAL {
-                    match verdict::replay_pending(client, store, config).await {
-                        Ok(report) if report.replayed > 0 || report.abandoned > 0 => {
-                            tracing::info!(
-                                replayed = report.replayed,
-                                abandoned = report.abandoned,
-                                "periodic verdict replay sweep settled pending reports"
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(err) => {
-                            tracing::warn!(error = %err, "verdict replay sweep failed")
-                        }
-                    }
-                    last_sweep = std::time::Instant::now();
-                }
                 if sleep_or_shutdown(config.poll_interval, shutdown).await {
                     return Ok(());
                 }
@@ -473,6 +509,38 @@ async fn scheduler_loop(
                     return Ok(());
                 }
             }
+        }
+    }
+}
+
+/// Delivers durable reports independently of automatic analysis. Never
+/// requeues reportless rows here: a live run may still be saving its report.
+async fn replay_loop(
+    client: &LedgerClient,
+    store: &Store,
+    config: &Config,
+    shutdown: &CancellationToken,
+    interval: Duration,
+) -> Result<()> {
+    if !config.writeback_enabled {
+        shutdown.cancelled().await;
+        return Ok(());
+    }
+    loop {
+        if sleep_or_shutdown(interval, shutdown).await {
+            return Ok(());
+        }
+        match verdict::replay_pending(client, store, config).await {
+            Ok(report) if report.replayed > 0 || report.abandoned > 0 => {
+                tracing::info!(
+                    replayed = report.replayed,
+                    abandoned = report.abandoned,
+                    "periodic verdict delivery settled pending reports"
+                );
+            }
+            Ok(_) => {}
+            Err(err @ AnalyzerError::State(_)) => return Err(err),
+            Err(err) => tracing::warn!(error = %err, "verdict delivery failed"),
         }
     }
 }
@@ -635,6 +703,87 @@ fn sweep_orphaned_workspaces(state_dir: &Path) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn report_delivery_drains_manual_queue_with_scheduling_disabled() {
+        use crate::types::{JobPhase, ReportOutcome};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::from_env(
+            [
+                (
+                    "DUMP_ANALYZER_BASE_URL".into(),
+                    "https://ledger.example.test".into(),
+                ),
+                ("DUMP_ANALYZER_TOKEN".into(), "test-token".into()),
+                ("DUMP_ANALYZER_SCHEDULER".into(), "off".into()),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        config.base_url = server.uri().parse().unwrap();
+        let store = Store::open(dir.path().join("state.sqlite")).unwrap();
+        let identity = JobIdentity {
+            dump_id: "dump_MANUAL".into(),
+            input_sha256: "a".repeat(64),
+            kind: "triage".into(),
+            analyzer_version: config.version.clone(),
+        };
+        store.jobs().upsert_discovered(&identity).unwrap();
+        store
+            .jobs()
+            .set_phase(&identity, JobPhase::Reporting)
+            .unwrap();
+        store
+            .local_reports()
+            .insert(&identity, ReportOutcome::Completed, "manual verdict", "{}")
+            .unwrap();
+        Mock::given(method("POST"))
+            .and(path("/api/v1/dumps/dump_MANUAL/analyses"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "analysisId": "analysis_MANUAL", "dumpId": identity.dump_id,
+                "analyzer": {"name":config.name, "version":config.version},
+                "kind":"triage", "inputSha256":identity.input_sha256,
+                "outcome":"completed", "summary":"manual verdict",
+                "createdAt":"2026-10-15T02:00:00.000Z"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = LedgerClient::new(&config).unwrap();
+        let shutdown = CancellationToken::new();
+        let delivery = replay_loop(
+            &client,
+            &store,
+            &config,
+            &shutdown,
+            Duration::from_millis(5),
+        );
+        let observe = async {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while store.jobs().phase_of(&identity).unwrap() != Some(JobPhase::Done) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("manual report delivered without automatic scheduling");
+            shutdown.cancel();
+        };
+        let (result, ()) = tokio::join!(delivery, observe);
+        result.unwrap();
+        assert!(store.jobs().list().unwrap().is_empty());
+        assert!(
+            store
+                .local_reports()
+                .get(&identity)
+                .unwrap()
+                .unwrap()
+                .posted
+        );
+    }
 
     #[test]
     fn backoff_doubles_to_the_cap_and_resets() {

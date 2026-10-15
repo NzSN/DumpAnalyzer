@@ -114,7 +114,8 @@ fn state_open_applies_migrations_once_and_reopen_preserves_data() {
             "jobs",
             "local_reports",
             "schema_migrations",
-            "secrets"
+            "secrets",
+            "settled_jobs"
         ]
     );
     let versions: Vec<i64> = {
@@ -126,7 +127,7 @@ fn state_open_applies_migrations_once_and_reopen_preserves_data() {
             .collect::<rusqlite::Result<Vec<_>>>()
             .expect("collect")
     };
-    assert_eq!(versions, vec![1, 2]);
+    assert_eq!(versions, vec![1, 2, 3]);
 
     // Reopening neither re-ran the migrations nor reset the data.
     assert_eq!(
@@ -159,6 +160,7 @@ fn state_schema_matches_the_specified_migration() {
             col("updated_at", "TEXT", true, None, 0),
         ]
     );
+    assert_eq!(columns(&conn, "settled_jobs"), columns(&conn, "jobs"));
     assert_eq!(
         columns(&conn, "cursors"),
         vec![
@@ -424,9 +426,13 @@ fn state_set_phase_round_trips_every_phase_spelling() {
         let expected = serde_json::to_value(phase).expect("serde");
         let expected = expected.as_str().expect("string");
         let stored: String = conn
-            .query_row("SELECT phase FROM jobs WHERE dump_id = 'd1'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT phase FROM jobs WHERE dump_id = 'd1'
+                 UNION ALL
+                 SELECT phase FROM settled_jobs WHERE dump_id = 'd1'",
+                [],
+                |row| row.get(0),
+            )
             .expect("row");
         assert_eq!(stored, expected);
         assert!(
@@ -438,6 +444,255 @@ fn state_set_phase_round_trips_every_phase_spelling() {
                 .any(|(job, _)| *job == id)
         );
     }
+}
+
+#[test]
+fn state_terminal_jobs_leave_the_queue_and_preserve_reports_and_dedup_on_restart() {
+    let (_dir, store, path) = open_temp();
+    let active = job("active");
+    store
+        .jobs()
+        .upsert_discovered(&active)
+        .expect("insert active");
+    let mut settled = Vec::new();
+    for (dump, terminal) in [
+        ("done", JobPhase::Done),
+        ("failed", JobPhase::Failed),
+        ("dropped", JobPhase::Dropped),
+    ] {
+        let id = job(dump);
+        store.jobs().upsert_discovered(&id).expect("insert");
+        store.jobs().record_attempt(&id).expect("record attempt");
+        store
+            .local_reports()
+            .insert(&id, ReportOutcome::Completed, "retained report", "{}")
+            .expect("report");
+        raw(&path)
+            .execute(
+                "UPDATE jobs SET workspace_path = '/work/run', created_at = '2026-01-01T00:00:00Z'
+                 WHERE dump_id = ?1",
+                [dump],
+            )
+            .expect("pin workspace and timestamp");
+
+        store.jobs().set_phase(&id, terminal).expect("settle");
+        assert_eq!(store.jobs().phase_of(&id).expect("phase"), Some(terminal));
+        assert_eq!(
+            store.jobs().jobs_in_phase(terminal).expect("archive"),
+            vec![(id.clone(), 1)]
+        );
+        let (phase, attempts, workspace, created): (String, i64, String, String) = raw(&path)
+            .query_row(
+                "SELECT phase, attempts, workspace_path, created_at FROM settled_jobs WHERE dump_id = ?1",
+                [dump],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("settled metadata");
+        assert_eq!(phase, dump);
+        assert_eq!(attempts, 1);
+        assert_eq!(workspace, "/work/run");
+        assert_eq!(created, "2026-01-01T00:00:00Z");
+        settled.push((id, terminal));
+    }
+
+    let queued = store.jobs().list().expect("list queue");
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].identity, active);
+    assert_eq!(
+        raw(&path)
+            .query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get::<_, i64>(0))
+            .expect("physical queue count"),
+        1
+    );
+    drop(store);
+
+    let reopened = Store::open(&path).expect("reopen");
+    for (id, terminal) in settled {
+        assert!(!reopened.jobs().upsert_discovered(&id).expect("rescan"));
+        assert_eq!(
+            reopened.jobs().phase_of(&id).expect("phase"),
+            Some(terminal)
+        );
+        assert_eq!(
+            reopened
+                .local_reports()
+                .get(&id)
+                .expect("report")
+                .expect("retained")
+                .summary,
+            "retained report"
+        );
+    }
+    assert_eq!(reopened.jobs().list().expect("queue").len(), 1);
+}
+
+#[test]
+fn state_settled_transitions_are_idempotent_and_cannot_implicitly_requeue() {
+    let (_dir, store, path) = open_temp();
+    let id = job("d1");
+    store.jobs().upsert_discovered(&id).expect("insert");
+    store.jobs().set_phase(&id, JobPhase::Done).expect("done");
+    store
+        .jobs()
+        .set_phase(&id, JobPhase::Done)
+        .expect("repeat done");
+    store.jobs().drop_job(&id).expect("purged after completion");
+    assert_eq!(
+        store.jobs().phase_of(&id).expect("phase"),
+        Some(JobPhase::Dropped)
+    );
+    assert!(matches!(
+        store.jobs().set_phase(&id, JobPhase::Discovered),
+        Err(AnalyzerError::State(_))
+    ));
+    assert!(store.jobs().list().expect("queue").is_empty());
+    assert_eq!(
+        raw(&path)
+            .query_row("SELECT COUNT(*) FROM settled_jobs", [], |row| row
+                .get::<_, i64>(0))
+            .expect("settled count"),
+        1
+    );
+}
+
+#[test]
+fn state_terminal_transition_rolls_back_archive_if_queue_removal_fails() {
+    let (_dir, store, path) = open_temp();
+    let id = job("d1");
+    store.jobs().upsert_discovered(&id).expect("insert");
+    raw(&path)
+        .execute_batch(
+            "CREATE TRIGGER reject_removal BEFORE DELETE ON jobs
+             BEGIN SELECT RAISE(ABORT, 'injected removal failure'); END;",
+        )
+        .expect("inject failure");
+
+    assert!(store.jobs().set_phase(&id, JobPhase::Done).is_err());
+    assert_eq!(
+        store.jobs().phase_of(&id).expect("phase"),
+        Some(JobPhase::Discovered)
+    );
+    assert_eq!(store.jobs().list().expect("queue").len(), 1);
+    assert!(
+        store
+            .jobs()
+            .jobs_in_phase(JobPhase::Done)
+            .expect("archive")
+            .is_empty()
+    );
+}
+
+#[test]
+fn state_conditional_transition_does_not_settle_a_job_claimed_by_another_worker() {
+    let (_dir, store, _path) = open_temp();
+    let id = job("d1");
+    store.jobs().upsert_discovered(&id).expect("insert");
+    store.jobs().claim_next().expect("claim").expect("job");
+    assert!(
+        !store
+            .jobs()
+            .set_phase_if(&id, JobPhase::Discovered, JobPhase::Done)
+            .expect("conditional settle")
+    );
+    assert_eq!(
+        store.jobs().phase_of(&id).expect("phase"),
+        Some(JobPhase::Claimed)
+    );
+    assert_eq!(store.jobs().list().expect("queue").len(), 1);
+    assert!(
+        store
+            .jobs()
+            .jobs_in_phase(JobPhase::Done)
+            .expect("archive")
+            .is_empty()
+    );
+    assert!(
+        store
+            .jobs()
+            .set_phase_if(&id, JobPhase::Claimed, JobPhase::Done)
+            .expect("conditional settle")
+    );
+    assert!(store.jobs().list().expect("queue").is_empty());
+    assert!(
+        !store
+            .jobs()
+            .set_phase_if(&id, JobPhase::Claimed, JobPhase::Done)
+            .expect("already settled")
+    );
+    assert!(
+        !store
+            .jobs()
+            .set_phase_if(&job("missing"), JobPhase::Discovered, JobPhase::Done)
+            .expect("absent")
+    );
+}
+
+#[test]
+fn state_migration_archives_legacy_terminal_rows_and_preserves_active_work() {
+    let (_dir, store, path) = open_temp();
+    drop(store);
+    let conn = raw(&path);
+    // Recreate the migration-2 layout, whose jobs table held terminal work.
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS settled_jobs;
+         DELETE FROM schema_migrations WHERE version = 3;
+         INSERT INTO jobs (dump_id, input_sha256, kind, analyzer_version, phase, attempts,
+                           workspace_path, created_at, updated_at)
+         VALUES ('done', 'done', 'triage', '0.1.0', 'done', 2, '/legacy/work',
+                 '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
+                ('failed', 'failed', 'triage', '0.1.0', 'failed', 3, NULL,
+                 '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
+                ('dropped', 'dropped', 'triage', '0.1.0', 'dropped', 0, NULL,
+                 '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
+                ('active', 'active', 'triage', '0.1.0', 'reporting', 1, NULL,
+                 '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+         INSERT INTO local_reports
+             (dump_id, input_sha256, kind, analyzer_version, outcome, summary, facts_json, created_at)
+         VALUES ('done', 'done', 'triage', '0.1.0', 'completed', 'legacy report', '{}',
+                 '2026-01-02T00:00:00Z');",
+    ).expect("legacy database");
+    drop(conn);
+
+    let migrated = Store::open(&path).expect("migrate legacy database");
+    let queued = migrated.jobs().list().expect("queue");
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].identity.dump_id, "active");
+    let conn = raw(&path);
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM settled_jobs", [], |row| row
+            .get::<_, i64>(0))
+            .expect("archive count"),
+        3
+    );
+    let preserved: (i64, String, String, String) = conn.query_row(
+        "SELECT attempts, workspace_path, created_at, updated_at FROM settled_jobs WHERE dump_id = 'done'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).expect("legacy metadata");
+    assert_eq!(
+        preserved,
+        (
+            2,
+            "/legacy/work".into(),
+            "2026-01-01T00:00:00Z".into(),
+            "2026-01-02T00:00:00Z".into()
+        )
+    );
+    assert_eq!(
+        conn.query_row("SELECT summary FROM local_reports", [], |row| row
+            .get::<_, String>(0))
+            .expect("legacy report"),
+        "legacy report"
+    );
+    let settled = JobIdentity {
+        input_sha256: "done".into(),
+        ..job("done")
+    };
+    assert!(!migrated.jobs().upsert_discovered(&settled).expect("rescan"));
+    drop(conn);
+    drop(migrated);
+    let reopened = Store::open(&path).expect("idempotent migration");
+    assert_eq!(reopened.jobs().list().expect("queue").len(), 1);
 }
 
 #[test]

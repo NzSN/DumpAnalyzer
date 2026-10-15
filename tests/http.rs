@@ -124,6 +124,8 @@ async fn http_dashboard_and_json_api() {
         .expect("body");
     assert!(html.contains("<title>DumpAnalyzer</title>"), "shell title");
     assert!(html.contains(r#"id="jobs""#), "jobs container");
+    assert!(html.contains("Jobs · work queue"), "queue heading");
+    assert!(html.contains("No active jobs."), "queue empty state");
     assert!(html.contains("/api/capabilities"), "capabilities probe");
 
     assert!(
@@ -145,8 +147,8 @@ async fn http_dashboard_and_json_api() {
         .await
         .expect("body");
     let status: serde_json::Value = serde_json::from_slice(&status).expect("json");
-    assert_eq!(status["jobs"]["total"], 2);
-    assert_eq!(status["jobs"]["byPhase"]["done"], 1);
+    assert_eq!(status["jobs"]["total"], 1);
+    assert!(status["jobs"]["byPhase"].get("done").is_none());
     assert_eq!(status["jobs"]["byPhase"]["analyzing"], 1);
     assert_eq!(status["reports"]["pending"], 1);
     assert_eq!(status["eventCursor"], "00000000000000000042");
@@ -163,11 +165,10 @@ async fn http_dashboard_and_json_api() {
         .expect("body");
     let jobs: serde_json::Value = serde_json::from_slice(&jobs).expect("json");
     let list = jobs["jobs"].as_array().expect("jobs array");
-    assert_eq!(list.len(), 2);
-    assert_eq!(list[0]["dumpId"], "dump_01AAA");
-    assert_eq!(list[0]["phase"], "done");
-    assert_eq!(list[1]["phase"], "analyzing");
-    assert_eq!(list[1]["attempts"], 1);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["dumpId"], "dump_01BBB");
+    assert_eq!(list[0]["phase"], "analyzing");
+    assert_eq!(list[0]["attempts"], 1);
 
     // JSON reports.
     let reports = client
@@ -199,6 +200,86 @@ async fn http_dashboard_and_json_api() {
     assert_eq!(missing.status(), 404);
 
     // Clean shutdown: cancel the token and the accept loop returns.
+    ui.shutdown.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(5), ui.task)
+        .await
+        .expect("server stops on shutdown")
+        .expect("join");
+    assert!(result.is_ok(), "clean stop: {result:?}");
+}
+
+#[tokio::test]
+async fn terminal_jobs_leave_the_work_queue_and_keep_reports() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let completed = identity("dump_01DONE", SHA256_A);
+    let failed = identity("dump_01FAILED", SHA256_B);
+    let dropped = identity("dump_01DROPPED", SHA256_A);
+    for job in [&completed, &failed, &dropped] {
+        store.jobs().upsert_discovered(job).expect("discover job");
+        store
+            .jobs()
+            .set_phase(job, JobPhase::Analyzing)
+            .expect("start job");
+    }
+    let ui = start(store.clone()).await;
+    let base = format!("http://{}", ui.addr);
+    let client = test_client();
+
+    let fetch = |path: &str| client.get(format!("{base}{path}"));
+    let response = fetch("/api/jobs").send().await.expect("GET jobs");
+    let jobs: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.expect("body")).expect("json");
+    assert_eq!(jobs["jobs"].as_array().expect("jobs array").len(), 3);
+    let response = fetch("/api/status").send().await.expect("GET status");
+    let status: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.expect("body")).expect("json");
+    assert_eq!(status["jobs"]["total"], 3);
+
+    store
+        .local_reports()
+        .insert(
+            &completed,
+            ReportOutcome::Completed,
+            "finished analysis",
+            "{}",
+        )
+        .expect("save report");
+    for (job, phase) in [
+        (&completed, JobPhase::Done),
+        (&failed, JobPhase::Failed),
+        (&dropped, JobPhase::Dropped),
+    ] {
+        store.jobs().set_phase(job, phase).expect("settle job");
+    }
+
+    let response = fetch("/api/jobs").send().await.expect("GET settled jobs");
+    let jobs: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.expect("body")).expect("json");
+    assert!(jobs["jobs"].as_array().expect("jobs array").is_empty());
+    let response = fetch("/api/status")
+        .send()
+        .await
+        .expect("GET settled status");
+    let status: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.expect("body")).expect("json");
+    assert_eq!(status["jobs"]["total"], 0);
+    assert!(
+        status["jobs"]["byPhase"]
+            .as_object()
+            .expect("phase counts")
+            .is_empty()
+    );
+    assert_eq!(status["reports"]["pending"], 1);
+    let response = fetch("/api/reports").send().await.expect("GET reports");
+    let reports: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.expect("body")).expect("json");
+    let reports = reports["reports"].as_array().expect("reports array");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["dumpId"], "dump_01DONE");
+    assert_eq!(reports[0]["outcome"], "completed");
+    assert_eq!(reports[0]["summary"], "finished analysis");
+
     ui.shutdown.cancel();
     let result = tokio::time::timeout(Duration::from_secs(5), ui.task)
         .await
@@ -1329,4 +1410,361 @@ async fn store_token_form_renders_a_result_page() {
 
     ui.shutdown.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), ui.task).await;
+}
+
+#[tokio::test]
+async fn discovered_dumps_do_not_appear_in_jobs_or_queue_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("analyzer.sqlite")).unwrap();
+    let idle = identity("dump_DISCOVERED", SHA256_A);
+    let claimed = identity("dump_CLAIMED", SHA256_A);
+    let reporting = identity("dump_REPORTING", SHA256_B);
+    for job in [&idle, &claimed, &reporting] {
+        store.jobs().upsert_discovered(job).unwrap();
+    }
+    store.jobs().set_phase(&claimed, JobPhase::Claimed).unwrap();
+    store
+        .jobs()
+        .set_phase(&reporting, JobPhase::Reporting)
+        .unwrap();
+    let ui = start(store.clone()).await;
+    let client = test_client();
+    let body = client
+        .get(format!("http://{}/api/jobs", ui.addr))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let jobs = body["jobs"].as_array().unwrap();
+    assert_eq!(jobs.len(), 2);
+    assert!(jobs.iter().all(|row| row["phase"] != "discovered"));
+    let status = client
+        .get(format!("http://{}/api/status", ui.addr))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let status: serde_json::Value = serde_json::from_str(&status).unwrap();
+    assert_eq!(status["jobs"]["total"], 2);
+    assert!(status["jobs"]["byPhase"].get("discovered").is_none());
+    assert_eq!(
+        store.jobs().phase_of(&idle).unwrap(),
+        Some(JobPhase::Discovered),
+        "Discovery remains available to the scheduler"
+    );
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
+}
+
+async fn start_with_explorer(store: Store, server_url: &str) -> RunningUi {
+    let mut config = test_config();
+    config.base_url = Url::parse(server_url).unwrap();
+    let client = Arc::new(dump_analyzer::client::LedgerClient::new(&config).unwrap());
+    let explorer = Arc::new(dump_analyzer::explorer::DumpsExplorer::new(
+        client,
+        store.clone(),
+        config.version.clone(),
+    ));
+    let context = http::UiContext::new(&config, store).with_explorer(explorer);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(http::serve_listener(
+        listener,
+        Arc::new(context),
+        shutdown.clone(),
+    ));
+    RunningUi {
+        addr,
+        shutdown,
+        task,
+    }
+}
+
+#[tokio::test]
+async fn http_explorer_groups_catalog_dumps_independently_of_jobs() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dumps"))
+        .and(query_param("phase", "available"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "dumps":[catalog_entry("dump_READY"),catalog_entry("dump_DONE")]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/customers"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "customers":[{"customerId":"customer_01JAA0XYZ", "displayName":"Customer <one>"}]
+        })))
+        .mount(&server)
+        .await;
+    // Detail metadata is absent on this server; grouping falls back to case ID.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("analyzer.sqlite")).unwrap();
+    let ready = identity("dump_READY", SHA256_A);
+    let done = identity("dump_DONE", SHA256_A);
+    store.jobs().upsert_discovered(&ready).unwrap();
+    store.jobs().upsert_discovered(&done).unwrap();
+    store.jobs().set_phase(&done, JobPhase::Done).unwrap();
+    let ui = start_with_explorer(store.clone(), &server.uri()).await;
+    let client = test_client();
+    let base = format!("http://{}", ui.addr);
+    let response = client
+        .get(format!("{base}/api/dumps"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let text = response.text().await.unwrap();
+    assert!(!text.contains("never-me-in-output"));
+    let data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(data["total"], 2);
+    let customer = &data["customers"][0];
+    assert_eq!(customer["displayName"], "Customer <one>");
+    assert_eq!(customer["dumpCount"], 2);
+    let case = &customer["cases"][0];
+    assert_eq!(case["caseId"], "case_01JAB0XYZ");
+    assert_eq!(case["title"], "case_01JAB0XYZ");
+    let dumps = case["dumps"].as_array().unwrap();
+    assert!(
+        dumps
+            .iter()
+            .any(|d| d["dumpId"] == "dump_READY" && d["analysisPhase"] == "discovered")
+    );
+    assert!(
+        dumps
+            .iter()
+            .any(|d| d["dumpId"] == "dump_DONE" && d["analysisPhase"] == "done")
+    );
+    let jobs: serde_json::Value = serde_json::from_str(
+        &client
+            .get(format!("{base}/api/jobs"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(jobs["jobs"].as_array().unwrap().is_empty());
+    let caps: serde_json::Value = serde_json::from_str(
+        &client
+            .get(format!("{base}/api/capabilities"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(caps["explorer"], true);
+    assert_eq!(
+        store.jobs().phase_of(&ready).unwrap(),
+        Some(JobPhase::Discovered)
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.method == "GET")
+    );
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn http_catalog_failure_does_not_break_the_jobs_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dumps"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("analyzer.sqlite")).unwrap();
+    let job = identity("dump_RUNNING", SHA256_A);
+    store.jobs().upsert_discovered(&job).unwrap();
+    store.jobs().set_phase(&job, JobPhase::Analyzing).unwrap();
+    let ui = start_with_explorer(store, &server.uri()).await;
+    let client = test_client();
+    let response = client
+        .get(format!("http://{}/api/dumps", ui.addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 503);
+    let response = client
+        .get(format!("http://{}/api/jobs", ui.addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let data: serde_json::Value = serde_json::from_str(&response.text().await.unwrap()).unwrap();
+    assert_eq!(data["jobs"][0]["dumpId"], "dump_RUNNING");
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
+}
+
+struct BlockingUiAnalyzer {
+    running: std::sync::atomic::AtomicBool,
+    release: tokio::sync::Notify,
+}
+#[async_trait::async_trait]
+impl dump_analyzer::analyzer::Analyzer for BlockingUiAnalyzer {
+    async fn analyze(
+        &self,
+        _dump_id: &str,
+    ) -> std::result::Result<dump_analyzer::analyzer::Report, dump_analyzer::analyzer::AnalyzeError>
+    {
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.release.notified().await;
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(canned_report())
+    }
+    async fn analyze_scope(
+        &self,
+        _scope: &dump_analyzer::analyzer::AnalysisScope,
+    ) -> std::result::Result<
+        dump_analyzer::analyzer::ScopeReport,
+        dump_analyzer::analyzer::AnalyzeError,
+    > {
+        unreachable!("scope analysis is not used in this test")
+    }
+    fn active_jobs(&self) -> dump_analyzer::types::Result<Vec<dump_analyzer::state::JobRow>> {
+        Ok(if self.running.load(std::sync::atomic::Ordering::SeqCst) {
+            vec![dump_analyzer::state::JobRow {
+                identity: identity("dump_01AAA", SHA256_A),
+                phase: JobPhase::Claimed,
+                attempts: 0,
+                created_at: "2026-10-15T00:00:00Z".into(),
+                updated_at: "2026-10-15T00:00:00Z".into(),
+            }]
+        } else {
+            vec![]
+        })
+    }
+}
+
+#[tokio::test]
+async fn manual_execution_is_visible_in_jobs_and_explorer_until_completion() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dumps"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"dumps":[catalog_entry("dump_01AAA")]})),
+        )
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("state.sqlite")).unwrap();
+    store
+        .jobs()
+        .upsert_discovered(&identity("dump_01AAA", SHA256_A))
+        .unwrap();
+    let mut config = test_config();
+    config.base_url = server.uri().parse().unwrap();
+    let ledger = Arc::new(dump_analyzer::client::LedgerClient::new(&config).unwrap());
+    let analyzer = Arc::new(BlockingUiAnalyzer {
+        running: std::sync::atomic::AtomicBool::new(false),
+        release: tokio::sync::Notify::new(),
+    });
+    let context = http::UiContext::new(&config, store.clone())
+        .with_analyzer(analyzer.clone())
+        .with_explorer(Arc::new(dump_analyzer::explorer::DumpsExplorer::new(
+            ledger,
+            store,
+            config.version.clone(),
+        )));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(http::serve_listener(
+        listener,
+        Arc::new(context),
+        shutdown.clone(),
+    ));
+    let client = test_client();
+    let request = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .post(format!("http://{addr}/-/analyze"))
+                .body(r#"{"dumpId":"dump_01AAA"}"#)
+                .send()
+                .await
+                .unwrap()
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !analyzer.running.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let read = |path: &str| client.get(format!("http://{addr}{path}"));
+    let jobs: serde_json::Value = serde_json::from_str(
+        &read("/api/jobs")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(jobs["jobs"][0]["phase"], "claimed");
+    let status: serde_json::Value = serde_json::from_str(
+        &read("/api/status")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status["jobs"]["total"], 1);
+    let dumps: serde_json::Value = serde_json::from_str(
+        &read("/api/dumps")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        dumps["customers"][0]["cases"][0]["dumps"][0]["analysisPhase"],
+        "claimed"
+    );
+    analyzer.release.notify_one();
+    assert_eq!(request.await.unwrap().status(), 200);
+    let jobs: serde_json::Value = serde_json::from_str(
+        &read("/api/jobs")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(jobs["jobs"].as_array().unwrap().is_empty());
+    shutdown.cancel();
+    task.await.unwrap().unwrap();
 }

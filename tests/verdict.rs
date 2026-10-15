@@ -676,7 +676,7 @@ async fn verdict_reconcile_reposts_when_identity_is_absent() {
 }
 
 #[tokio::test]
-async fn verdict_reconcile_leaves_reporting_job_without_local_copy_unresolved() {
+async fn verdict_reconcile_requeues_reporting_job_without_local_copy() {
     let harness = harness().await;
     let client = LedgerClient::new(&harness.config).expect("client");
     let identity = identity();
@@ -685,7 +685,7 @@ async fn verdict_reconcile_leaves_reporting_job_without_local_copy_unresolved() 
     Mock::given(method("GET"))
         .and(path(analyses_path()))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "analyses": [] })))
-        .expect(1)
+        .expect(0)
         .mount(&harness.server)
         .await;
 
@@ -694,7 +694,7 @@ async fn verdict_reconcile_leaves_reporting_job_without_local_copy_unresolved() 
         .expect("reconcile");
 
     assert_eq!(report.unresolved, vec![identity]);
-    assert_job_phase(&harness.store, JobPhase::Reporting);
+    assert_job_phase(&harness.store, JobPhase::Discovered);
 }
 
 #[tokio::test]
@@ -1048,4 +1048,97 @@ async fn verdict_local_sink_records_and_settles_without_any_http() {
         requests.is_empty(),
         "write-back off means zero ledger calls"
     );
+}
+
+#[tokio::test]
+async fn verdict_local_recovery_requeues_reportless_jobs() {
+    let harness = harness().await;
+    let identity = identity();
+    set_up_reporting_job(&harness.store, &identity);
+    assert_eq!(
+        verdict::settle_reporting_locally(&harness.store).unwrap(),
+        0
+    );
+    assert_job_phase(&harness.store, JobPhase::Discovered);
+    assert!(harness.store.local_reports().pending().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn verdict_route_absent_dequeues_only_reporting_jobs_with_local_reports() {
+    let harness = harness().await;
+    let first = identity();
+    let mut second = first.clone();
+    second.dump_id = "dump_SECOND".into();
+    let mut in_flight = first.clone();
+    in_flight.dump_id = "dump_INFLIGHT".into();
+    for job in [&first, &second, &in_flight] {
+        set_up_reporting_job(&harness.store, job);
+    }
+    for job in [&first, &second] {
+        set_up_stored_verdict(&harness.store, job, "local verdict", "{}");
+    }
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    let client = LedgerClient::new(&harness.config).unwrap();
+    let replay = verdict::replay_pending(&client, &harness.store, &harness.config)
+        .await
+        .unwrap();
+    assert!(replay.route_absent);
+    for job in [&first, &second] {
+        assert_eq!(
+            harness.store.jobs().phase_of(job).unwrap(),
+            Some(JobPhase::Done)
+        );
+    }
+    assert_eq!(
+        harness.store.jobs().phase_of(&in_flight).unwrap(),
+        Some(JobPhase::Reporting)
+    );
+    assert_eq!(harness.store.jobs().list().unwrap().len(), 1);
+    assert_eq!(harness.store.local_reports().pending().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn verdict_replay_dequeues_a_report_already_posted_before_queue_update() {
+    let harness = harness().await;
+    let identity = identity();
+    set_up_stored_verdict(&harness.store, &identity, "delivered first", "{}");
+    harness
+        .store
+        .local_reports()
+        .mark_posted(&identity)
+        .unwrap();
+    // Delivery ran before manual completion created its reporting entry.
+    set_up_reporting_job(&harness.store, &identity);
+    let client = LedgerClient::new(&harness.config).unwrap();
+    verdict::replay_pending(&client, &harness.store, &harness.config)
+        .await
+        .unwrap();
+    assert_eq!(
+        harness.store.jobs().phase_of(&identity).unwrap(),
+        Some(JobPhase::Done)
+    );
+    assert!(harness.store.jobs().list().unwrap().is_empty());
+    assert!(harness.server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn verdict_boot_requeues_reportless_job_without_waiting_for_the_ledger() {
+    let harness = harness().await;
+    let identity = identity();
+    set_up_reporting_job(&harness.store, &identity);
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(0)
+        .mount(&harness.server)
+        .await;
+    let client = LedgerClient::new(&harness.config).unwrap();
+    let report = verdict::reconcile_on_boot(&client, &harness.store, &harness.config)
+        .await
+        .unwrap();
+    assert_eq!(report.unresolved, vec![identity]);
+    assert_job_phase(&harness.store, JobPhase::Discovered);
 }

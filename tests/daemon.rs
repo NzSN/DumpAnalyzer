@@ -982,3 +982,136 @@ async fn daemon_writeback_off_settles_done_without_any_post() {
     assert_eq!(local.len(), 1);
     assert_eq!(local[0].dump_id, "dump_OFF");
 }
+
+#[tokio::test]
+async fn daemon_resumes_interrupted_queue_entries_and_drains_them() {
+    let server = MockServer::start().await;
+    let dir = TempDir::new().unwrap();
+    let state_dir = dir.path().join("state");
+    let store = open_store(&state_dir);
+    let payload = b"recovered-dump";
+    let sha = sha256_of(payload);
+    let mut identities = Vec::new();
+    for (index, phase) in [
+        JobPhase::Claimed,
+        JobPhase::Fetching,
+        JobPhase::Staged,
+        JobPhase::Analyzing,
+        JobPhase::Reporting,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = triage_job(&format!("dump_RECOVER{index}"), &sha);
+        store.jobs().upsert_discovered(&id).unwrap();
+        store.jobs().set_phase(&id, phase).unwrap();
+        store.jobs().record_attempt(&id).unwrap();
+        mount_content(&server, &id.dump_id, payload, "\"recover\"", None).await;
+        identities.push(id);
+    }
+    // Empty discovery proves that persisted work itself is resumed.
+    mount_catalog(&server, vec![], "0000000000000005").await;
+    mount_events(
+        &server,
+        json!({"events":[], "nextCursor":"0000000000000005"}),
+    )
+    .await;
+    let mut config = test_config(&server, &state_dir);
+    config.writeback_enabled = false;
+    let runner = Arc::new(FakeRunner::new(
+        (0..5).map(|_| Ok(completed_output("recovered"))).collect(),
+    ));
+    let shutdown = CancellationToken::new();
+    let daemon = tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move { scheduler::run(config, runner, &shutdown).await }
+    });
+    await_condition("recovered work to leave the queue", || {
+        phases(&store, JobPhase::Done).len() == identities.len()
+    })
+    .await;
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(10), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(store.jobs().list().unwrap().is_empty());
+    assert_eq!(
+        store.local_reports().list_recent(10).unwrap().len(),
+        identities.len()
+    );
+    assert!(
+        store
+            .jobs()
+            .jobs_in_phase(JobPhase::Done)
+            .unwrap()
+            .iter()
+            .all(|(_, attempts)| *attempts == 1)
+    );
+}
+
+#[tokio::test]
+async fn daemon_survives_a_purge_of_the_executing_job() {
+    let server = MockServer::start().await;
+    let dir = TempDir::new().unwrap();
+    let state_dir = dir.path().join("state");
+    let payload = b"purge-while-executing";
+    let sha = sha256_of(payload);
+    mount_catalog(
+        &server,
+        vec![catalog_entry("dump_A", &sha), catalog_entry("dump_B", &sha)],
+        "0000000000000010",
+    )
+    .await;
+    mount_content(&server, "dump_A", payload, "\"purge\"", Some(1)).await;
+    mount_content(&server, "dump_B", payload, "\"purge\"", None).await;
+    mount_events(
+        &server,
+        json!({"events":[], "nextCursor":"0000000000000000"}),
+    )
+    .await;
+    let mut config = test_config(&server, &state_dir);
+    config.writeback_enabled = false;
+    let (runner, gate) = FakeRunner::gated_first(Ok(completed_output("purged")));
+    let runner = Arc::new(runner);
+    let shutdown = CancellationToken::new();
+    let daemon = tokio::spawn({
+        let runner = runner.clone();
+        let shutdown = shutdown.clone();
+        async move { scheduler::run(config, runner, &shutdown).await }
+    });
+    let store = open_store(&state_dir);
+    await_condition("first job inside runner", || !runner.calls().is_empty()).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/events"))
+        .and(query_param("since", "0000000000000000"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "events":[event("0000000000000001", "FinishPurge", Some("dump_A"))],
+            "nextCursor":"0000000000000002"
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    await_condition("executing job archived as dropped", || {
+        store.jobs().phase_of(&triage_job("dump_A", &sha)).unwrap() == Some(JobPhase::Dropped)
+    })
+    .await;
+    gate.release.notify_one();
+    await_condition("next job completes after purge", || {
+        store.jobs().phase_of(&triage_job("dump_B", &sha)).unwrap() == Some(JobPhase::Done)
+    })
+    .await;
+    assert!(!daemon.is_finished(), "a purge must not stop the daemon");
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(10), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(store.jobs().list().unwrap().is_empty());
+    assert_eq!(
+        store.jobs().phase_of(&triage_job("dump_A", &sha)).unwrap(),
+        Some(JobPhase::Dropped)
+    );
+}

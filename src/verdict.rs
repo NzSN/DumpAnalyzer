@@ -87,8 +87,8 @@ pub struct ReconcileReport {
     /// Reporting jobs settled `done` because the analyses route is still
     /// absent (local-verdict mode continues); the copy stays pending.
     pub local_mode: usize,
-    /// Reporting jobs the server lacks and whose local copy is missing; left
-    /// `reporting` for the next reconciliation.
+    /// Reporting jobs whose local copy is missing; requeued for analysis
+    /// without resetting their attempt counts or waiting for the server.
     pub unresolved: Vec<JobIdentity>,
     /// Pending local verdicts accepted by the server this pass (the replay
     /// sweep: [`ReplayReport::replayed`]).
@@ -226,13 +226,20 @@ impl crate::agent::VerdictSink for LocalVerdictSink {
 
 /// With write-back off, a `reporting` job has nothing to wait for: its
 /// analysis completed and its verdict is the local record. Settles every
-/// stale `reporting` row to `done`; returns how many moved.
+/// stale `reporting` row with a durable report to `done`; reportless rows
+/// return to discovery for another run. Boot-only: a live run may still be
+/// between entering `reporting` and saving its report. Returns how many
+/// completed jobs left the queue.
 pub fn settle_reporting_locally(store: &Store) -> Result<usize> {
     let jobs = store.jobs();
     let mut settled = 0;
     for (identity, _attempts) in jobs.jobs_in_phase(JobPhase::Reporting)? {
-        jobs.set_phase(&identity, JobPhase::Done)?;
-        settled += 1;
+        if store.local_reports().get(&identity)?.is_some() {
+            jobs.set_phase(&identity, JobPhase::Done)?;
+            settled += 1;
+        } else {
+            jobs.set_phase(&identity, JobPhase::Discovered)?;
+        }
     }
     Ok(settled)
 }
@@ -320,7 +327,7 @@ pub async fn reconcile_on_boot(
             Ok(ReportingOutcome::Unresolved) => {
                 warn!(
                     job = %job_key(&identity),
-                    "reporting job has no local verdict copy; left reporting for the next reconciliation"
+                    "reporting job has no local verdict copy; requeued for analysis"
                 );
                 report.unresolved.push(identity);
             }
@@ -369,6 +376,20 @@ pub async fn replay_pending(
     config: &Config,
 ) -> Result<ReplayReport> {
     let mut report = ReplayReport::default();
+    // Delivery can finish before a concurrent manual completion creates its
+    // queue row. Such reports no longer appear in pending(), so settle their
+    // late reporting rows explicitly without sending another request.
+    for (identity, _) in store.jobs().jobs_in_phase(JobPhase::Reporting)? {
+        if store
+            .local_reports()
+            .get(&identity)?
+            .is_some_and(|row| row.posted)
+        {
+            store
+                .jobs()
+                .set_phase_if(&identity, JobPhase::Reporting, JobPhase::Done)?;
+        }
+    }
     for row in store.local_reports().pending()? {
         let identity = row.identity();
         match replay_row(client, store, config, &row).await {
@@ -391,6 +412,17 @@ pub async fn replay_pending(
                 }
             }
             Ok(ReplayOutcome::RouteAbsent) => {
+                // The ledger cannot accept reports yet. Durable local
+                // verdicts have finished their analysis work, just as in
+                // submit's local-verdict mode. Keep the reports pending
+                // for later delivery and remove their jobs from the queue.
+                for (job, _) in store.jobs().jobs_in_phase(JobPhase::Reporting)? {
+                    if store.local_reports().get(&job)?.is_some() {
+                        store
+                            .jobs()
+                            .set_phase_if(&job, JobPhase::Reporting, JobPhase::Done)?;
+                    }
+                }
                 debug!(
                     "analyses route still absent; local-verdict mode continues and the replay sweep stops"
                 );
@@ -432,7 +464,7 @@ enum ReportingOutcome {
     Dropped,
     /// The route is absent and the copy stays pending; settled `done`.
     LocalMode,
-    /// Nothing to re-POST; left `reporting`.
+    /// Nothing to re-POST; requeued for analysis at boot.
     Unresolved,
 }
 
@@ -461,7 +493,13 @@ async fn reconcile_reporting(
     config: &Config,
     identity: &JobIdentity,
 ) -> Result<ReportingOutcome> {
-    let local = store.local_reports().get(identity)?;
+    let Some(local) = store.local_reports().get(identity)? else {
+        // Boot runs before live agents start. Requeue this interrupted report
+        // handoff even if the ledger is unavailable; otherwise no durable
+        // report exists for periodic delivery to visit.
+        store.jobs().set_phase(identity, JobPhase::Discovered)?;
+        return Ok(ReportingOutcome::Unresolved);
+    };
 
     match client.get_analyses(&identity.dump_id).await {
         Ok(reports) => {
@@ -469,9 +507,7 @@ async fn reconcile_reporting(
                 .iter()
                 .any(|report| report_matches(report, identity, config))
             {
-                if local.is_some() {
-                    store.local_reports().mark_posted(identity)?;
-                }
+                store.local_reports().mark_posted(identity)?;
                 store.jobs().set_phase(identity, JobPhase::Done)?;
                 return Ok(ReportingOutcome::Confirmed);
             }
@@ -482,18 +518,13 @@ async fn reconcile_reporting(
         }
         Err(AnalyzerError::Server { status, code }) if dump_gone(status, code.as_deref()) => {
             // Purged while reporting: the job is invalidated at this touch.
-            if local.is_some() {
-                store.local_reports().mark_posted(identity)?;
-            }
+            store.local_reports().mark_posted(identity)?;
             store.jobs().drop_job(identity)?;
             return Ok(ReportingOutcome::Dropped);
         }
         Err(err) => return Err(err),
     }
 
-    let Some(local) = local else {
-        return Ok(ReportingOutcome::Unresolved);
-    };
     let submission = match submission_from_row(&local, config) {
         Ok(submission) => submission,
         Err(err) => {

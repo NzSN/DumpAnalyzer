@@ -87,6 +87,26 @@ tbody tr:hover { background: var(--panel2); }
 footer { color: var(--muted); font-size: .78rem; text-align: center; padding: 1rem; }
 .muted { color: var(--muted); }
 h2 { font-size: .95rem; margin: 0 0 .7rem; }
+.explorer-tree { margin-top: .8rem; }
+.explorer-tree details { border-top: 1px solid var(--border); padding: .65rem 0; }
+.explorer-tree details details { margin-left: .9rem; }
+.explorer-tree summary { cursor: pointer; overflow-wrap: anywhere; }
+.explorer-tree summary .muted { margin-left: .45rem; font-size: .8rem; }
+.explorer-scope { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .6rem 0; }
+.explorer-scope .muted { font-size: .8rem; }
+.dump-row { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; padding: .65rem 0; border-top: 1px solid var(--border); }
+.dump-info { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.dump-info .muted { font-size: .8rem; }
+.explorer-tree button { font-size: .8rem; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.table-scroll { overflow-x: auto; }
+@media (max-width: 600px) {
+  main { padding: .8rem; }
+  .card { padding: .85rem; min-width: 0; }
+  .topbar { flex-wrap: wrap; gap: .5rem; padding: .7rem; }
+  .toolbar input[type="search"] { min-width: 0; width: 100%; }
+  .explorer-tree details details { margin-left: .5rem; }
+}
 .spin { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
 </style>
@@ -108,7 +128,7 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
   <section class="grid-cards" id="stats"></section>
 
   <section class="card">
-    <h2>Pipeline</h2>
+    <h2>Queue pipeline</h2>
     <div class="pipeline" id="pipeline"></div>
     <div class="pipeline-key" id="pipeline-key"></div>
   </section>
@@ -148,35 +168,127 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
 
   <section class="card">
     <div class="toolbar">
-      <h2 style="margin:0">Jobs</h2>
+      <h2 style="margin:0">Jobs · work queue</h2>
       <input type="search" id="job-filter" placeholder="filter by dump id / kind…">
       <span class="chips" id="phase-chips"></span>
     </div>
-    <table>
+    <p class="muted">Claimed, running, and reporting work. Browse available dumps in Dumps explorer.</p>
+    <div class="table-scroll"><table>
       <thead><tr><th>Dump</th><th>Kind</th><th>Phase</th><th>Attempts</th><th>Updated</th></tr></thead>
       <tbody id="jobs"></tbody>
-    </table>
+    </table></div>
+  </section>
+
+  <section class="card" id="explorer-card" aria-labelledby="explorer-heading">
+    <div class="toolbar">
+      <h2 id="explorer-heading" style="margin:0">Dumps explorer</h2>
+      <label class="muted" for="dump-filter">Search dumps</label>
+      <input type="search" id="dump-filter" placeholder="customer, case, dump ID, or filename…">
+    </div>
+    <p class="muted">Available dumps grouped by customer and case. Ready dumps wait here until analysis starts.</p>
+    <p id="explorer-status" class="muted" role="status">Loading dumps…</p>
+    <div class="toast" id="explorer-toast" role="status"></div>
+    <div class="explorer-tree" id="explorer-tree"></div>
   </section>
 
   <section class="card">
     <h2>Local reports</h2>
-    <table>
+    <div class="table-scroll"><table>
       <thead><tr><th>Dump</th><th>Outcome</th><th>Posted</th><th>Created</th><th>Summary</th></tr></thead>
       <tbody id="reports"></tbody>
-    </table>
+    </table></div>
   </section>
 </main>
-<footer>read-only status · live-updates every 5 s · API: /api/status · /api/jobs · /api/reports</footer>
+<footer>read-only status · live-updates every 5 s · API: /api/status · /api/jobs · /api/dumps · /api/reports</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const PHASES = [
-  ["discovered","gray"],["claimed","blue"],["fetching","amber"],["staged","amber"],
-  ["analyzing","amber"],["reporting","purple"],["done","green"],["dropped","dark"],["failed","red"],
+  ["claimed","blue"],["fetching","amber"],["staged","amber"],
+  ["analyzing","amber"],["reporting","purple"],
 ];
 const phaseColor = (p) => (PHASES.find(([n]) => n === p) || ["","gray"])[1];
-let filterText = "", filterPhase = null, capabilities = { analyzer: false, rescan: false };
+let filterText = "", filterPhase = null, capabilities = { analyzer: false, rescan: false, explorer: false };
+let explorerData = null, explorerFilter = "", explorerRequest = null, explorerError = "";
+let explorerSignature = "", actionPending = false, explorerSearchMode = false, explorerShown = 0;
+const expandedScopes = new Map();
+const activePhase = (phase) => PHASES.some(([name]) => name === phase);
+const scopeKey = (kind, ...ids) => JSON.stringify([kind, ...ids]);
+function humanSize(value) {
+  if (value == null || value === "") return "Size unavailable";
+  const size = Number(value);
+  if (!Number.isFinite(size) || size < 0) return "Size unavailable";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+  const unit = size > 0 ? Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1) : 0;
+  return `${(size / 1024 ** unit).toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+function analysisLabel(phase) {
+  return !phase || phase === "discovered" ? "Ready" : phase === "done" ? "Completed" : phase;
+}
+function explorerAction(kind, id, label, count, busy, key, unsealed = false) {
+  if (!capabilities.analyzer) return "";
+  const reason = unsealed ? "Waiting for a SHA-256 fingerprint before analysis." : count > 64 ? "More than 64 dumps; choose a smaller scope." : busy ? "Analysis is already in progress in this scope." : "";
+  return `<div class="explorer-scope"><button class="ghost" data-analyze="${kind}" data-id="${esc(id)}" data-focus-key="${esc(key)}" ${reason || actionPending ? "disabled" : ""}>${label}</button>${reason ? `<span class="muted">${esc(reason)}</span>` : ""}</div>`;
+}
+function renderExplorerStatus() {
+  $("explorer-status").textContent = explorerData
+    ? `${explorerShown} of ${explorerData.total} dump(s)${explorerError ? " · " + explorerError + " Showing the last loaded catalog." : ""}`
+    : explorerError || "Loading dumps…";
+}
+function renderExplorer() {
+  const tree = $("explorer-tree");
+  if (!explorerData) return;
+  const signature = JSON.stringify([explorerData, explorerFilter, capabilities.analyzer, actionPending]);
+  if (signature === explorerSignature) { renderExplorerStatus(); return; }
+  tree.querySelectorAll("details[data-scope]").forEach((node) => expandedScopes.set((explorerSearchMode ? "search:" : "") + node.dataset.scope, node.open));
+  const stateKey = (key) => (explorerFilter ? "search:" : "") + key;
+  const focusedKey = tree.contains(document.activeElement) ? document.activeElement.dataset.focusKey : null;
+  const matches = (...values) => values.some((value) => String(value ?? "").toLowerCase().includes(explorerFilter));
+  let shown = 0;
+  const customers = (explorerData.customers || []).map((customer) => {
+    const customerMatch = matches(customer.customerId, customer.displayName);
+    const allDumps = customer.cases.flatMap((item) => item.dumps);
+    const cases = customer.cases.map((item) => {
+      const caseMatch = customerMatch || matches(item.caseId, item.title);
+      const dumps = item.dumps.filter((dump) => !explorerFilter || caseMatch || matches(dump.dumpId, dump.originalName));
+      if (!dumps.length) return "";
+      shown += dumps.length;
+      const key = scopeKey("case", customer.customerId, item.caseId);
+      const open = expandedScopes.get(stateKey(key)) ?? Boolean(explorerFilter);
+      return `<details data-scope="${esc(key)}" ${open ? "open" : ""}><summary data-focus-key="${esc(key)}">${esc(item.title || item.caseId)} <span class="muted">${esc(item.caseId)} · ${esc(item.dumpCount)} dump(s)</span></summary>
+        ${explorerAction("case", item.caseId, "Analyze case", item.dumpCount, item.dumps.some((d) => activePhase(d.analysisPhase)), key + "-action")}
+        ${dumps.map((dump) => `<div class="dump-row"><div class="dump-info"><div>${esc(dump.originalName || dump.dumpId)}</div><div class="muted mono">${esc(dump.dumpId)}</div><div class="muted">${esc(humanSize(dump.byteSize))}</div></div><span class="badge ${dump.analysisPhase === "done" ? "green" : phaseColor(dump.analysisPhase)}">${esc(analysisLabel(dump.analysisPhase))}</span>${explorerAction("dump", dump.dumpId, "Analyze dump", 1, activePhase(dump.analysisPhase), scopeKey("dump", dump.dumpId), !dump.sha256)}</div>`).join("")}
+      </details>`;
+    }).join("");
+    if (!cases) return "";
+    const key = scopeKey("customer", customer.customerId);
+    const open = expandedScopes.get(stateKey(key)) ?? Boolean(explorerFilter);
+    return `<details data-scope="${esc(key)}" ${open ? "open" : ""}><summary data-focus-key="${esc(key)}">${esc(customer.displayName || customer.customerId)} <span class="muted">${esc(customer.customerId)} · ${esc(customer.dumpCount)} dump(s)</span></summary>
+      ${explorerAction("customer", customer.customerId, "Analyze customer", customer.dumpCount, allDumps.some((dump) => activePhase(dump.analysisPhase)), key + "-action")}${cases}</details>`;
+  }).join("");
+  tree.innerHTML = customers || `<p class="muted">${explorerFilter ? "No dumps match this search." : "No available dumps."}</p>`;
+  explorerSignature = signature;
+  explorerSearchMode = Boolean(explorerFilter);
+  explorerShown = shown;
+  renderExplorerStatus();
+  if (focusedKey) Array.from(tree.querySelectorAll("[data-focus-key]")).find((node) => node.dataset.focusKey === focusedKey)?.focus();
+}
+function refreshExplorer(force = false) {
+  if (!capabilities.explorer) return Promise.resolve();
+  if (explorerRequest) return force ? explorerRequest.then(() => refreshExplorer()) : explorerRequest;
+  explorerRequest = (async () => {
+    try {
+      explorerData = await api("/api/dumps");
+      explorerError = "";
+      renderExplorer();
+    } catch (err) {
+      explorerError = "Could not refresh dumps. Retrying in 5 seconds.";
+      renderExplorerStatus();
+    } finally { explorerRequest = null; }
+  })();
+  return explorerRequest;
+}
 
 // Theme: System/Light/Dark (persisted per browser; system follows the OS).
 const themeKey = "dump-analyzer-theme";
@@ -202,7 +314,7 @@ function renderStats(status) {
   const cursorShort = cursor ? cursor.replace(/^0+(?=\d)/, "") : "—";
   const cards = [
     ["event cursor", cursorShort, cursor],
-    ["jobs", status.jobs.total],
+    ["jobs in queue", status.jobs.total],
     ["pending reports", status.reports.pending],
     ["up", status.upSeconds + "s"],
     ["poll", status.pollIntervalMs + " ms"],
@@ -215,6 +327,7 @@ function renderStats(status) {
     `<div style="width:${(phases[p] / total) * 100}%;background:var(--${c === "dark" ? "gray" : c === "blue" ? "accent" : c})" title="${p}: ${phases[p]}"></div>`).join("");
   $("pipeline-key").innerHTML = PHASES.filter(([p]) => phases[p]).map(([p, c]) =>
     `<span class="key"><span class="swatch" style="background:var(--${c === "dark" ? "gray" : c === "blue" ? "accent" : c})"></span>${p} ${phases[p]}</span>`).join("");
+  if (filterPhase && !phases[filterPhase]) filterPhase = null;
   const chips = [["(all)", null], ...PHASES.filter(([p]) => phases[p]).map(([p]) => [p, p])];
   $("phase-chips").innerHTML = chips.map(([label, p]) =>
     `<button class="chip ${filterPhase === p ? "active" : ""}" data-phase="${p ?? ""}">${esc(label)}</button>`).join("");
@@ -223,7 +336,8 @@ function renderStats(status) {
 }
 
 function renderJobs(jobs) {
-  const rows = jobs.filter((j) =>
+  const queue = jobs.filter((j) => activePhase(j.phase));
+  const rows = queue.filter((j) =>
     (!filterPhase || j.phase === filterPhase) &&
     (!filterText || (j.dumpId + " " + j.kind).toLowerCase().includes(filterText)));
   $("jobs").innerHTML = rows.length
@@ -233,7 +347,7 @@ function renderJobs(jobs) {
         <td><span class="badge ${phaseColor(j.phase)}">${esc(j.phase)}</span></td>
         <td>${j.attempts}</td>
         <td class="muted">${esc(j.updatedAt)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="muted">no jobs match</td></tr>`;
+    : `<tr><td colspan="5" class="muted">${queue.length ? "No active jobs match these filters." : "No active jobs."}</td></tr>`;
 }
 
 function renderReports(reports) {
@@ -265,12 +379,14 @@ async function refresh() {
 async function loadCapabilities() {
   try {
     capabilities = await api("/api/capabilities");
-  } catch { capabilities = { analyzer: false, rescan: false }; }
+  } catch { capabilities = { analyzer: false, rescan: false, explorer: false }; }
   $("actions-card").style.display = capabilities.analyzer || capabilities.rescan ? "" : "none";
   $("act-dump").style.display = capabilities.analyzer ? "" : "none";
   $("act-case").style.display = capabilities.analyzer ? "" : "none";
   $("act-customer").style.display = capabilities.analyzer ? "" : "none";
   $("act-rescan").style.display = capabilities.rescan ? "" : "none";
+  if (capabilities.explorer) await refreshExplorer();
+  else $("explorer-status").textContent = "Dumps explorer is unavailable on this daemon.";
 }
 
 function toast(ok, msg) {
@@ -279,41 +395,62 @@ function toast(ok, msg) {
   t.textContent = msg;
 }
 
-document.querySelectorAll(".actions-grid form").forEach((form) => {
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const act = form.dataset.act;
-    const id = form.id ? form.querySelector("input[name=id]")?.value.trim() : "";
-    // Empty token field = the daemon's stored token (server-side rule).
-    const routes = {
-      dump: ["/-/analyze", { dumpId: id }],
-      case: ["/-/analyze-case", { caseId: id }],
-      customer: ["/-/analyze-customer", { customerId: id }],
-      rescan: ["/-/rescan", {}],
-    };
-    const [route, payload] = routes[act];
-    const btn = form.querySelector("button");
-    btn.disabled = true; btn.classList.add("spin"); btn.textContent = "running…";
-    toast(true, `${act}: running (a real dump takes minutes)…`);
-    try {
-      const headers = { "content-type": "application/json" };
-      const res = await fetch(route, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) return toast(false, `${act}: ${res.status} ${body.message ?? body.error ?? ""}`);
-      if (act === "rescan") toast(true, `rescan: ${body.inserted} new dump(s) scheduled`);
-      else if (body.reports) toast(true, `${act}: ${body.considered} considered, ${body.reports.length} reported, ${body.skipped.length} skipped`);
-      else toast(true, `${act}: ${body.report?.outcome ?? "done"} — ${body.report?.summary ?? ""}`);
-      refresh();
-    } catch (e2) {
-      toast(false, `${act}: ${e2.message}`);
-    } finally {
-      btn.disabled = false; btn.classList.remove("spin"); btn.textContent = act === "rescan" ? "Rescan now" : "Run";
+async function runAction(act, id, button, feedbackId = "toast") {
+  if (actionPending || (act === "rescan" ? !capabilities.rescan : !capabilities.analyzer)) return;
+  const routes = {
+    dump: ["/-/analyze", { dumpId: id }],
+    case: ["/-/analyze-case", { caseId: id }],
+    customer: ["/-/analyze-customer", { customerId: id }],
+    rescan: ["/-/rescan", {}],
+  };
+  const [route, payload] = routes[act];
+  const show = (ok, message) => {
+    const target = $(feedbackId);
+    target.className = "toast " + (ok ? "ok" : "err");
+    target.textContent = message;
+  };
+  const label = button.textContent;
+  const actionFocusKey = button.dataset.focusKey;
+  actionPending = true;
+  document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = true; });
+  renderExplorer();
+  button.classList.add("spin"); button.textContent = "Running…";
+  show(true, `${act}: running (a real dump takes minutes)…`);
+  try {
+    const res = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) show(false, `${act}: ${res.status} ${body.message ?? body.error ?? ""}`);
+    else if (act === "rescan") show(true, `rescan: ${body.inserted} new dump(s) discovered`);
+    else if (body.reports) show(true, `${act}: ${body.considered} considered, ${body.reports.length} reported, ${(body.skipped || []).length} skipped`);
+    else show(true, `${act}: ${body.report?.outcome ?? "done"} — ${body.report?.summary ?? ""}`);
+  } catch (err) {
+    show(false, `${act}: ${err.message}`);
+  } finally {
+    // Refresh while controls remain disabled, including when the POST response was lost.
+    await Promise.all([refresh(), refreshExplorer(true)]);
+    actionPending = false;
+    document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = false; });
+    button.classList.remove("spin"); button.textContent = label;
+    renderExplorer();
+    if (actionFocusKey && document.activeElement === document.body) {
+      Array.from($("explorer-tree").querySelectorAll("button[data-focus-key]")).find((node) => node.dataset.focusKey === actionFocusKey)?.focus();
     }
+  }
+}
+document.querySelectorAll(".actions-grid form").forEach((form) => {
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const id = form.querySelector("input[name=id]")?.value.trim() || "";
+    runAction(form.dataset.act, id, form.querySelector("button"));
   });
+});
+$("explorer-tree").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-analyze]");
+  if (button && !button.disabled) runAction(button.dataset.analyze, button.dataset.id, button, "explorer-toast");
+});
+$("dump-filter").addEventListener("input", (event) => {
+  explorerFilter = event.target.value.trim().toLowerCase();
+  renderExplorer();
 });
 
 $("store-token-btn").addEventListener("click", async (e) => {
@@ -340,7 +477,7 @@ $("store-token-btn").addEventListener("click", async (e) => {
 
 $("job-filter").addEventListener("input", (e) => { filterText = e.target.value.toLowerCase(); refresh(); });
 refresh(); loadCapabilities();
-setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+setInterval(() => { if (!document.hidden) { refresh(); refreshExplorer(); } }, 5000);
 </script>
 </body>
 </html>
