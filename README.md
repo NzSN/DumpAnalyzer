@@ -131,35 +131,47 @@ transient budget exhausted · `500` terminal.
 
 ## Status UI
 
-A dashboard reports the current work queue with phases and attempts,
-event-feed cursor, local reports (pending/posted), and configuration summary
-(token never rendered). It offers analysis actions and binds to loopback by
-default:
+The dashboard has separate **Queue**, **Dumps**, **Reports**, and **Settings**
+panels. Queue shows current analysis work. Dumps navigates from customers to
+cases to a page of dumps. Reports has search, outcome/delivery filters, and
+expandable summary details. Settings holds credentials, manual actions, and
+diagnostics. The listener binds to loopback by default:
 
 ```sh
 export DUMP_ANALYZER_HTTP_ADDR='127.0.0.1:4180'   # default; empty disables
 ```
 
 `http://127.0.0.1:4180/` is the dashboard: a static shell
-(`src/dashboard.html`) that live-updates over `/api/status`, `/api/jobs`,
-`/api/dumps`, `/api/reports`, and `/api/capabilities` every 5 s — dark-first theme
-(System/Light/Dark), phase pipeline bar, filterable jobs table, dumps explorer, and the
-Actions card (the token is held in page memory only and sent as a bearer
-header per call). No server data is embedded in the shell; HTML/JSON
-injection is client-escaped. A
+(`src/dashboard.html`) with direct links `#queue`, `#dumps`, `#reports`, and
+`#settings`. Navigation preserves scope, filters, and page selection, including
+browser Back/Forward. Only the visible list is loaded: the queue polls every
+5 seconds, and the selected Dumps or Reports panel every 15 seconds. Both
+browser lists show 25 rows per page; hidden panels make no list requests.
+Daemon status uses lightweight counts. The System/Light/Dark theme is retained.
+No server data is embedded in the shell; HTML/JSON injection is client-escaped. A
 non-loopback bind is a deployment decision: there is no authentication on
 this surface. Dumps are hostile input:
 CDB runs only on the designated analysis box, under hard time/output caps,
 with per-run workspaces wiped afterwards.
 
-`GET /api/dumps` reads the complete available-dump catalog, including dumps
-whose jobs have already settled. Customer and case groups retain their IDs;
-names come from customer metadata and one representative dump per case.
-Remote catalog metadata is cached for 30 seconds, while local analysis state
-is refreshed on every request. Catalog errors are shown independently of
-Jobs; browsing never starts analysis. A manual run appears in Jobs while
-executing. Its live execution record clears on completion or cancellation;
-pending report delivery remains visible as `reporting`.
+`GET /api/dumps/browse` returns one hierarchy level, with optional `customerId`,
+`caseId`, `q`, `page`, and `pageSize` parameters. Root rows are customers;
+selecting a customer lists its cases, and selecting a case lists its dumps.
+Customer and case rows contain counts rather than nested dump lists. The
+legacy `GET /api/dumps` snapshot remains available for API consumers.
+Remote catalog metadata is cached on the daemon for 30 seconds; the browser
+receives one page and analysis state is read only for returned dumps.
+
+`GET /api/reports` accepts `q`, `outcome` (`all`, `completed`, `failed`),
+`delivery` (`all`, `pending`, `posted`), `page`, and `pageSize`. It returns the
+page, matching count, complete report count, and pending count. Both page APIs
+default to 25 rows and accept sizes from 1 through 100. Search/filter changes
+reset the page, and summaries remain compact until Details is opened.
+
+Catalog and report errors stay inside their panels, retaining the last loaded
+results. Browsing never starts analysis. A manual run appears in Jobs while
+executing; its temporary execution record clears on completion or cancellation,
+while pending report delivery remains visible as `reporting`.
 
 ## Model-based tests
 

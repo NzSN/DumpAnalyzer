@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use dump_analyzer::state::Store;
+use dump_analyzer::state::{ReportQuery, Store};
 use dump_analyzer::types::{AnalyzerError, JobIdentity, JobPhase, ReportOutcome};
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -444,6 +444,68 @@ fn state_set_phase_round_trips_every_phase_spelling() {
                 .any(|(job, _)| *job == id)
         );
     }
+}
+
+#[test]
+fn state_work_queue_selects_only_claimed_work_without_decoding_discovery_candidates() {
+    let (_dir, store, path) = open_temp();
+    let jobs = store.jobs();
+    for index in 0..300 {
+        jobs.upsert_discovered(&job(&format!("candidate-{index:03}")))
+            .expect("discover candidate");
+    }
+    assert!(jobs.work_queue().expect("no work yet").is_empty());
+    for (dump, phase, day) in [
+        ("claimed", JobPhase::Claimed, 2),
+        ("fetching", JobPhase::Fetching, 1),
+        ("staged", JobPhase::Staged, 1),
+        ("analyzing", JobPhase::Analyzing, 3),
+        ("reporting", JobPhase::Reporting, 2),
+    ] {
+        let id = job(dump);
+        jobs.upsert_discovered(&id).expect("insert work");
+        jobs.set_phase(&id, phase).expect("active phase");
+        raw(&path)
+            .execute(
+                "UPDATE jobs SET created_at = ?1 WHERE dump_id = ?2",
+                rusqlite::params![format!("2026-01-{day:02}T00:00:00Z"), dump],
+            )
+            .expect("pin work timestamp");
+    }
+    assert_eq!(jobs.list().expect("legacy full list").len(), 305);
+    // A discovery candidate's invalid attempts would fail the list decoder.
+    // The operator queue must exclude these rows before loading or decoding
+    // them, so its cost does not include the full discovery inventory.
+    raw(&path)
+        .execute(
+            "UPDATE jobs SET attempts = -1 WHERE phase = 'discovered'",
+            [],
+        )
+        .expect("corrupt candidate attempts");
+    assert!(matches!(jobs.list(), Err(AnalyzerError::State(_))));
+
+    let work = jobs.work_queue().expect("active work only");
+    assert_eq!(work.len(), 5);
+    assert_eq!(
+        work.iter()
+            .map(|row| row.identity.dump_id.as_str())
+            .collect::<Vec<_>>(),
+        ["fetching", "staged", "claimed", "reporting", "analyzing"]
+    );
+    assert!(
+        work.iter()
+            .all(|row| row.attempts == 0 && row.phase != JobPhase::Discovered)
+    );
+    assert_eq!(
+        raw(&path)
+            .query_row(
+                "SELECT COUNT(*) FROM jobs WHERE phase = 'discovered'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .expect("candidates preserved"),
+        300
+    );
 }
 
 #[test]
@@ -893,6 +955,263 @@ fn state_local_reports_insert_or_ignore_pending_and_mark_posted() {
         store.local_reports().mark_posted(&job("missing")),
         Err(AnalyzerError::State(_))
     ));
+}
+
+#[test]
+fn state_report_pages_traverse_every_report_in_stable_newest_order() {
+    let (_dir, store, path) = open_temp();
+    let reports = store.local_reports();
+    let conn = raw(&path);
+    let mut expected: Vec<_> = (0..257).collect();
+    for index in &expected {
+        let id = job(&format!("dump-{index:03}"));
+        reports
+            .insert(
+                &id,
+                ReportOutcome::Completed,
+                "retained summary",
+                "{\"retained\":true}",
+            )
+            .expect("insert report");
+        conn.execute(
+            "UPDATE local_reports SET created_at = ?1 WHERE dump_id = ?2",
+            rusqlite::params![
+                format!("2026-10-{:02}T00:00:00Z", index % 7 + 1),
+                id.dump_id
+            ],
+        )
+        .expect("set deterministic timestamp");
+        if index % 3 == 0 {
+            reports.mark_posted(&id).expect("mark posted");
+        }
+    }
+    expected.sort_by_key(|index| std::cmp::Reverse((index % 7, *index)));
+    let expected: Vec<_> = expected
+        .into_iter()
+        .map(|index| format!("dump-{index:03}"))
+        .collect();
+
+    assert_eq!(reports.counts().expect("full counts"), (257, 171));
+    let first = reports.page(&ReportQuery::default()).expect("first page");
+    assert_eq!(first.page, 1);
+    assert_eq!(first.page_size, 25);
+    assert_eq!(first.total, 257);
+    assert_eq!(first.matching, 257);
+    assert_eq!(first.pending, 171);
+    assert_eq!(first.total_pages, 11);
+    assert_eq!(first.reports.len(), 25);
+
+    let mut seen = Vec::new();
+    for page in 1..=11 {
+        let result = reports
+            .page(&ReportQuery {
+                page,
+                ..ReportQuery::default()
+            })
+            .expect("page");
+        assert_eq!(result.page, page);
+        assert_eq!(result.reports.len(), if page == 11 { 7 } else { 25 });
+        for report in result.reports {
+            assert_eq!(report.summary, "retained summary");
+            assert_eq!(report.facts_json, "{\"retained\":true}");
+            seen.push(report.dump_id);
+        }
+    }
+    assert_eq!(seen, expected);
+    assert_eq!(reports.list_recent(200).expect("legacy list").len(), 200);
+
+    drop(store);
+    let reopened = Store::open(path).expect("reopen");
+    assert_eq!(
+        reopened.local_reports().counts().expect("durable counts"),
+        (257, 171)
+    );
+    assert_eq!(
+        reopened
+            .local_reports()
+            .pending()
+            .expect("legacy pending")
+            .len(),
+        171
+    );
+}
+
+#[test]
+fn state_report_pages_search_literals_and_combine_outcome_and_delivery_filters() {
+    let (_dir, store, _path) = open_temp();
+    let reports = store.local_reports();
+    let rows = [
+        (
+            "Dump%One",
+            "triage",
+            "0.1",
+            "plain",
+            ReportOutcome::Completed,
+            true,
+        ),
+        (
+            "dump-two",
+            "kind_value",
+            "0.1",
+            "plain",
+            ReportOutcome::Failed,
+            false,
+        ),
+        (
+            "dump-three",
+            "triage",
+            "version\\value",
+            "plain",
+            ReportOutcome::Completed,
+            false,
+        ),
+        (
+            "dump-four",
+            "triage",
+            "0.1",
+            "MixedCase summary",
+            ReportOutcome::Failed,
+            true,
+        ),
+        (
+            "dump-five",
+            "triage",
+            "0.1",
+            "100%_\\' OR 1=1 --",
+            ReportOutcome::Failed,
+            false,
+        ),
+    ];
+    for (dump, kind, version, summary, outcome, posted) in rows {
+        let id = JobIdentity {
+            kind: kind.into(),
+            ..job_versioned(dump, version)
+        };
+        reports.insert(&id, outcome, summary, "{}").expect("insert");
+        if posted {
+            reports.mark_posted(&id).expect("posted");
+        }
+    }
+
+    for (q, expected) in [
+        ("DUMP%ONE", vec!["Dump%One"]),
+        ("kind_", vec!["dump-two"]),
+        ("VERSION\\", vec!["dump-three"]),
+        ("mixedcase", vec!["dump-four"]),
+        ("%_\\' OR 1=1 --", vec!["dump-five"]),
+        ("%", vec!["dump-five", "Dump%One"]),
+        ("_", vec!["dump-five", "dump-two"]),
+        ("\\", vec!["dump-five", "dump-three"]),
+    ] {
+        let page = reports
+            .page(&ReportQuery {
+                q: q.into(),
+                ..ReportQuery::default()
+            })
+            .expect("search");
+        assert_eq!(page.matching, expected.len() as u64, "query {q:?}");
+        assert_eq!(page.total, 5);
+        assert_eq!(page.pending, 3);
+        let found: Vec<_> = page
+            .reports
+            .iter()
+            .map(|report| report.dump_id.as_str())
+            .collect();
+        assert_eq!(found, expected, "query {q:?}");
+    }
+
+    let failed_pending = reports
+        .page(&ReportQuery {
+            q: "dump".into(),
+            outcome: Some(ReportOutcome::Failed),
+            posted: Some(false),
+            ..ReportQuery::default()
+        })
+        .expect("combined filters");
+    assert_eq!(failed_pending.matching, 2);
+    assert!(
+        failed_pending
+            .reports
+            .iter()
+            .all(|report| report.outcome == ReportOutcome::Failed && !report.posted)
+    );
+    let completed_posted = reports
+        .page(&ReportQuery {
+            outcome: Some(ReportOutcome::Completed),
+            posted: Some(true),
+            ..ReportQuery::default()
+        })
+        .expect("posted completed");
+    assert_eq!(completed_posted.matching, 1);
+    assert_eq!(completed_posted.reports[0].dump_id, "Dump%One");
+    assert_eq!(reports.counts().expect("counts preserved"), (5, 3));
+}
+
+#[test]
+fn state_report_pages_normalize_bounds_and_clamp_out_of_range_pages() {
+    let (_dir, store, _path) = open_temp();
+    let reports = store.local_reports();
+    let empty = reports
+        .page(&ReportQuery {
+            page: u32::MAX,
+            page_size: u32::MAX,
+            ..ReportQuery::default()
+        })
+        .expect("empty page");
+    assert_eq!(
+        (empty.page, empty.page_size, empty.total_pages),
+        (1, 100, 0)
+    );
+    assert_eq!((empty.total, empty.matching, empty.pending), (0, 0, 0));
+    assert!(empty.reports.is_empty());
+    for index in 0..101 {
+        reports
+            .insert(
+                &job(&format!("bound-{index:03}")),
+                ReportOutcome::Completed,
+                "summary",
+                "{}",
+            )
+            .expect("insert");
+    }
+    let normalized = reports
+        .page(&ReportQuery {
+            page: 0,
+            page_size: 0,
+            ..ReportQuery::default()
+        })
+        .expect("normalized");
+    assert_eq!(
+        (
+            normalized.page,
+            normalized.page_size,
+            normalized.total_pages
+        ),
+        (1, 1, 101)
+    );
+    assert_eq!(normalized.reports.len(), 1);
+    let last = reports
+        .page(&ReportQuery {
+            page: u32::MAX,
+            page_size: u32::MAX,
+            ..ReportQuery::default()
+        })
+        .expect("clamped final page");
+    assert_eq!((last.page, last.page_size, last.total_pages), (2, 100, 2));
+    assert_eq!(last.reports.len(), 1);
+    let no_matches = reports
+        .page(&ReportQuery {
+            q: "absent".into(),
+            page: 100,
+            ..ReportQuery::default()
+        })
+        .expect("no matches");
+    assert_eq!(
+        (no_matches.page, no_matches.total_pages, no_matches.matching),
+        (1, 0, 0)
+    );
+    assert_eq!((no_matches.total, no_matches.pending), (101, 101));
+    assert!(no_matches.reports.is_empty());
 }
 
 #[test]

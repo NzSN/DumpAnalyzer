@@ -23,7 +23,7 @@ body { margin: 0; background: var(--bg); color: var(--text);
   font-size: 14px; line-height: 1.45; }
 a { color: var(--accent); text-decoration: none; }
 button { cursor: pointer; font: inherit; }
-input, button { border-radius: 8px; border: 1px solid var(--border); padding: .45rem .7rem;
+input, select, button { border-radius: 8px; border: 1px solid var(--border); padding: .45rem .7rem;
   background: var(--panel2); color: var(--text); }
 button { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
 button.ghost { background: transparent; border-color: var(--border); color: var(--text); }
@@ -87,17 +87,42 @@ tbody tr:hover { background: var(--panel2); }
 footer { color: var(--muted); font-size: .78rem; text-align: center; padding: 1rem; }
 .muted { color: var(--muted); }
 h2 { font-size: .95rem; margin: 0 0 .7rem; }
-.explorer-tree { margin-top: .8rem; }
-.explorer-tree details { border-top: 1px solid var(--border); padding: .65rem 0; }
-.explorer-tree details details { margin-left: .9rem; }
-.explorer-tree summary { cursor: pointer; overflow-wrap: anywhere; }
-.explorer-tree summary .muted { margin-left: .45rem; font-size: .8rem; }
-.explorer-scope { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .6rem 0; }
+.panel-nav { display: flex; gap: .35rem; max-width: 1200px; margin: 0 auto; padding: .9rem 1.4rem 0; }
+.panel-nav a { padding: .55rem .9rem; border-radius: 8px; color: var(--muted); font-weight: 600; }
+.panel-nav a[aria-current="page"] { background: var(--panel2); color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+[hidden] { display: none !important; }
+.panel { min-width: 0; display: grid; gap: 1.1rem; }
+.panel-title { margin: 0; font-size: 1.2rem; }
+.panel-description { margin: .25rem 0 0; color: var(--muted); }
+.panel-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: .7rem; }
+.breadcrumbs { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin: .2rem 0 1rem; overflow-wrap: anywhere; }
+.breadcrumbs li + li::before { content: "/"; color: var(--muted); margin-right: .4rem; }
+.browse-list { list-style: none; padding: 0; margin: .4rem 0; }
+.browse-row { display: flex; align-items: center; gap: .8rem; padding: .85rem 0; border-top: 1px solid var(--border); }
+.browse-link { display: block; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.browse-link strong { display: block; color: var(--text); font-weight: 600; }
+.browse-link .muted, .dump-info .muted { font-size: .8rem; }
+.browse-link:hover strong { color: var(--accent); text-decoration: underline; }
+.browse-count { color: var(--muted); white-space: nowrap; font-size: .82rem; }
+.dump-row { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; padding: .85rem 0; border-top: 1px solid var(--border); }
+.dump-info { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.explorer-scope { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 .explorer-scope .muted { font-size: .8rem; }
-.dump-row { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; padding: .65rem 0; border-top: 1px solid var(--border); }
-.dump-info { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
-.dump-info .muted { font-size: .8rem; }
-.explorer-tree button { font-size: .8rem; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: .65rem; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: .8rem; margin-top: .5rem; }
+.pager-controls { display: flex; gap: .4rem; }
+.result-status { min-height: 1.45em; color: var(--muted); }
+.report-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.report-summary { min-width: 200px; max-width: 480px; }
+.report-summary details { margin-top: .4rem; }
+.report-summary summary { cursor: pointer; color: var(--accent); }
+.report-summary details p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.filter-field { display: grid; gap: .25rem; font-size: .8rem; color: var(--muted); }
+.filter-field input, .filter-field select { font-size: .875rem; }
+.toolbar .search-field { flex: 1 1 240px; }
+.hint { color: var(--muted); font-size: .8rem; }
+.diagnostics { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .6rem 1rem; margin: 0; }
+.diagnostics dt { color: var(--muted); }
+.diagnostics dd { margin: 0; overflow-wrap: anywhere; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .table-scroll { overflow-x: auto; }
 @media (max-width: 600px) {
@@ -105,7 +130,15 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
   .card { padding: .85rem; min-width: 0; }
   .topbar { flex-wrap: wrap; gap: .5rem; padding: .7rem; }
   .toolbar input[type="search"] { min-width: 0; width: 100%; }
-  .explorer-tree details details { margin-left: .5rem; }
+  .panel-nav { padding: .7rem .8rem 0; gap: .15rem; }
+  .panel-nav a { flex: 1; text-align: center; padding: .55rem .35rem; }
+  .topbar #base { display: none; }
+  .browse-row { flex-wrap: wrap; }
+  .toolbar .search-field { flex-basis: 100%; }
+  .diagnostics { grid-template-columns: 1fr; gap: .2rem; }
+  .diagnostics dd { margin-bottom: .6rem; }
+  .pager { align-items: start; }
+  .pager-controls button { padding: .45rem .6rem; }
 }
 .spin { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
@@ -113,108 +146,124 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
 </head>
 <body>
 <header class="topbar">
-  <span id="live-dot" class="dot"></span>
+  <span id="live-dot" class="dot" role="img" aria-label="Connecting to daemon"></span>
   <h1>DumpAnalyzer <span class="ver" id="ver"></span></h1>
   <span class="muted mono" id="base"></span>
   <span class="spacer"></span>
   <span class="muted" id="updated" title="last update"></span>
   <span class="theme-toggle">
-    <button data-theme="dark" title="dark">◐</button>
-    <button data-theme="light" title="light">◐</button>
-    <button data-theme="system" title="system" class="active">A</button>
+    <button data-theme="dark" aria-label="Dark theme" title="dark">◐</button>
+    <button data-theme="light" aria-label="Light theme" title="light">◐</button>
+    <button data-theme="system" aria-label="System theme" title="system" class="active">A</button>
   </span>
 </header>
+<nav class="panel-nav" aria-label="Dashboard panels">
+  <a href="#queue" data-panel="queue" aria-current="page">Queue</a>
+  <a href="#dumps" data-panel="dumps">Dumps</a>
+  <a href="#reports" data-panel="reports">Reports</a>
+  <a href="#settings" data-panel="settings">Settings</a>
+</nav>
 <main>
-  <section class="grid-cards" id="stats"></section>
-
-  <section class="card">
-    <h2>Queue pipeline</h2>
-    <div class="pipeline" id="pipeline"></div>
-    <div class="pipeline-key" id="pipeline-key"></div>
-  </section>
-
-  <section class="card" id="token-card">
-    <h2>Analyzer token</h2>
-    <div class="toolbar">
-      <input type="password" id="new-token" placeholder="new analyzer token" autocomplete="off">
-      <button id="store-token-btn">Store token</button>
-    </div>
-    <div class="hint">probed against the ledger before storing · used by action forms immediately and by the pipeline from the next boot · action forms may also leave the token empty to use the stored one</div>
-    <div class="toast" id="token-toast"></div>
-  </section>
-
-  <section class="card" id="actions-card" style="display:none">
-    <h2>Actions</h2>
-    <div class="hint" style="margin-bottom:.8rem">actions run with the daemon's stored token (see the Analyzer token card above)</div>
-    <div class="actions-grid">
-      <div id="act-dump"><h3>Analyze dump</h3>
-        <form data-act="dump"><input name="id" placeholder="dump_…" required><button>Run</button></form>
+  <section class="panel" id="panel-queue" aria-labelledby="queue-heading">
+    <div><h2 class="panel-title" id="queue-heading" tabindex="-1">Work queue</h2>
+      <p class="panel-description">Claimed, running, and reporting work. Find available dumps in <a href="#dumps" data-panel="dumps">Dumps explorer</a>.</p></div>
+    <div class="grid-cards" id="stats"></div>
+    <section class="card" aria-labelledby="pipeline-heading">
+      <h2 id="pipeline-heading">Queue pipeline</h2>
+      <div class="pipeline" id="pipeline" role="img" aria-label="No active jobs"></div>
+      <div class="pipeline-key" id="pipeline-key"></div>
+    </section>
+    <section class="card" aria-labelledby="jobs-heading">
+      <div class="toolbar"><h2 id="jobs-heading" style="margin:0">Active jobs</h2>
+        <label class="filter-field search-field" for="job-filter">Filter jobs<input type="search" id="job-filter" placeholder="Dump ID or kind"></label>
+        <span class="chips" id="phase-chips" role="group" aria-label="Filter by phase"></span>
       </div>
-      <div id="act-case"><h3>Analyze case</h3>
-        <form data-act="case"><input name="id" placeholder="case_…" required><button>Run</button></form>
-        <div class="hint">every available dump of the case · sequential · cap 64</div>
-      </div>
-      <div id="act-customer"><h3>Analyze customer</h3>
-        <form data-act="customer"><input name="id" placeholder="customer_… or display name" required><button>Run</button></form>
-        <div class="hint">every available dump of the customer · sequential · cap 64</div>
-      </div>
-      <div id="act-rescan"><h3>Rescan catalog</h3>
-        <form data-act="rescan"><button class="ghost">Rescan now</button></form>
-        <div class="hint">re-reads the catalog and schedules newly available dumps</div>
-      </div>
-    </div>
-    <div class="toast" id="toast"></div>
+      <p class="result-status" id="jobs-status" role="status">Loading jobs…</p>
+      <div class="table-scroll" role="region" aria-label="Active jobs" tabindex="0"><table>
+        <thead><tr><th scope="col">Dump</th><th scope="col">Kind</th><th scope="col">Phase</th><th scope="col">Attempts</th><th scope="col">Updated</th></tr></thead>
+        <tbody id="jobs"></tbody>
+      </table></div>
+    </section>
   </section>
 
-  <section class="card">
-    <div class="toolbar">
-      <h2 style="margin:0">Jobs · work queue</h2>
-      <input type="search" id="job-filter" placeholder="filter by dump id / kind…">
-      <span class="chips" id="phase-chips"></span>
-    </div>
-    <p class="muted">Claimed, running, and reporting work. Browse available dumps in Dumps explorer.</p>
-    <div class="table-scroll"><table>
-      <thead><tr><th>Dump</th><th>Kind</th><th>Phase</th><th>Attempts</th><th>Updated</th></tr></thead>
-      <tbody id="jobs"></tbody>
-    </table></div>
+  <section class="panel" id="panel-dumps" aria-labelledby="explorer-heading" hidden>
+    <div><h2 class="panel-title" id="explorer-heading" tabindex="-1">Dumps explorer</h2>
+      <p class="panel-description">Browse customers, choose a case, then select a dump to analyze.</p></div>
+    <section class="card" id="explorer-card">
+      <nav aria-label="Dump location"><ol class="breadcrumbs" id="dump-breadcrumbs"></ol></nav>
+      <div class="toolbar">
+        <label class="filter-field search-field" for="dump-filter">Search this scope<input type="search" id="dump-filter" placeholder="Customer, case, dump ID, or filename"></label>
+        <div id="explorer-action"></div>
+      </div>
+      <p class="result-status" id="explorer-status" role="status">Choose Dumps to load the catalog.</p>
+      <div class="toast" id="explorer-toast" role="status"></div>
+      <h3 id="browse-heading" tabindex="-1">Customers</h3>
+      <div id="explorer-list" aria-busy="false"></div>
+      <div class="pager"><span class="muted" id="dump-range"></span><div class="pager-controls">
+        <button class="ghost" id="dump-prev" disabled>Previous</button><button class="ghost" id="dump-next" disabled>Next</button>
+      </div></div>
+    </section>
   </section>
 
-  <section class="card" id="explorer-card" aria-labelledby="explorer-heading">
-    <div class="toolbar">
-      <h2 id="explorer-heading" style="margin:0">Dumps explorer</h2>
-      <label class="muted" for="dump-filter">Search dumps</label>
-      <input type="search" id="dump-filter" placeholder="customer, case, dump ID, or filename…">
-    </div>
-    <p class="muted">Available dumps grouped by customer and case. Ready dumps wait here until analysis starts.</p>
-    <p id="explorer-status" class="muted" role="status">Loading dumps…</p>
-    <div class="toast" id="explorer-toast" role="status"></div>
-    <div class="explorer-tree" id="explorer-tree"></div>
+  <section class="panel" id="panel-reports" aria-labelledby="reports-heading" hidden>
+    <div><h2 class="panel-title" id="reports-heading" tabindex="-1">Local reports</h2>
+      <p class="panel-description">Search analysis results and inspect individual summaries.</p></div>
+    <section class="card">
+      <div class="toolbar">
+        <label class="filter-field search-field" for="report-filter">Search reports<input type="search" id="report-filter" placeholder="Dump ID, kind, or summary"></label>
+        <label class="filter-field" for="report-outcome">Outcome<select id="report-outcome"><option value="all">All outcomes</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label>
+        <label class="filter-field" for="report-delivery">Delivery<select id="report-delivery"><option value="all">All delivery states</option><option value="pending">Pending</option><option value="posted">Posted</option></select></label>
+      </div>
+      <p class="result-status" id="reports-status" role="status">Choose Reports to load results.</p>
+      <div class="table-scroll" role="region" aria-label="Local reports" tabindex="0"><table>
+        <thead><tr><th scope="col">Dump</th><th scope="col">Outcome</th><th scope="col">Delivery</th><th scope="col">Created</th><th scope="col">Summary</th></tr></thead>
+        <tbody id="reports"></tbody>
+      </table></div>
+      <div class="pager"><span class="muted" id="report-range"></span><div class="pager-controls">
+        <button class="ghost" id="report-prev" disabled>Previous</button><button class="ghost" id="report-next" disabled>Next</button>
+      </div></div>
+    </section>
   </section>
 
-  <section class="card">
-    <h2>Local reports</h2>
-    <div class="table-scroll"><table>
-      <thead><tr><th>Dump</th><th>Outcome</th><th>Posted</th><th>Created</th><th>Summary</th></tr></thead>
-      <tbody id="reports"></tbody>
-    </table></div>
+  <section class="panel" id="panel-settings" aria-labelledby="settings-heading" hidden>
+    <div><h2 class="panel-title" id="settings-heading" tabindex="-1">Settings</h2>
+      <p class="panel-description">Manage credentials, run actions, and inspect daemon diagnostics.</p></div>
+    <section class="card" id="token-card"><h2>Analyzer token</h2>
+      <div class="toolbar"><label class="filter-field" for="new-token">New analyzer token<input type="password" id="new-token" placeholder="Paste token" autocomplete="off"></label><button id="store-token-btn">Store token</button></div>
+      <p class="hint">Probed against the ledger before storing. Actions can use it immediately; the pipeline uses it from the next boot.</p>
+      <div class="toast" id="token-toast" role="status"></div>
+    </section>
+    <section class="card" id="actions-card" hidden><h2>Actions</h2>
+      <p class="hint">Actions use the daemon's stored analyzer token.</p>
+      <div class="actions-grid">
+        <div id="act-dump"><h3>Analyze dump</h3><form data-act="dump"><label class="filter-field">Dump ID<input name="id" placeholder="dump_…" required></label><button>Run</button></form></div>
+        <div id="act-case"><h3>Analyze case</h3><form data-act="case"><label class="filter-field">Case ID<input name="id" placeholder="case_…" required></label><button>Run</button></form><div class="hint">Every available dump of the case · sequential · cap 64</div></div>
+        <div id="act-customer"><h3>Analyze customer</h3><form data-act="customer"><label class="filter-field">Customer ID or display name<input name="id" placeholder="customer_… or display name" required></label><button>Run</button></form><div class="hint">Every available dump of the customer · sequential · cap 64</div></div>
+        <div id="act-rescan"><h3>Rescan catalog</h3><form data-act="rescan"><button class="ghost">Rescan now</button></form><div class="hint">Re-reads the catalog and discovers newly available dumps.</div></div>
+      </div><div class="toast" id="toast" role="status"></div>
+    </section>
+    <section class="card"><h2>Diagnostics</h2><dl class="diagnostics" id="diagnostics"><dt>Status</dt><dd>Loading…</dd></dl></section>
   </section>
 </main>
-<footer>read-only status · live-updates every 5 s · API: /api/status · /api/jobs · /api/dumps · /api/reports</footer>
+<footer>Queue updates every 5 s · selected catalog or reports panel updates every 15 s</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const PHASES = [
-  ["claimed","blue"],["fetching","amber"],["staged","amber"],
-  ["analyzing","amber"],["reporting","purple"],
-];
-const phaseColor = (p) => (PHASES.find(([n]) => n === p) || ["","gray"])[1];
-let filterText = "", filterPhase = null, capabilities = { analyzer: false, rescan: false, explorer: false };
-let explorerData = null, explorerFilter = "", explorerRequest = null, explorerError = "";
-let explorerSignature = "", actionPending = false, explorerSearchMode = false, explorerShown = 0;
-const expandedScopes = new Map();
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const PHASES = [["claimed","blue"],["fetching","amber"],["staged","amber"],["analyzing","amber"],["reporting","purple"]];
+const phaseColor = (phase) => (PHASES.find(([name]) => name === phase) || ["","gray"])[1];
 const activePhase = (phase) => PHASES.some(([name]) => name === phase);
-const scopeKey = (kind, ...ids) => JSON.stringify([kind, ...ids]);
+const PANELS = ["queue", "dumps", "reports", "settings"];
+const PAGE_SIZE = 25;
+const states = {
+  dumps: { customerId: "", caseId: "", q: "", page: 1, data: null, key: "", loading: false, error: "", controller: null, version: 0, signature: "" },
+  reports: { q: "", outcome: "all", delivery: "all", page: 1, data: null, key: "", loading: false, error: "", controller: null, version: 0, signature: "" },
+};
+let selectedPanel = "queue", filterText = "", filterPhase = null, jobsData = [], jobsLoaded = false;
+let capabilities = { analyzer: false, rescan: false, explorer: false }, capabilitiesLoaded = false;
+let statusRequest = null, jobsRequest = null, actionPending = false;
+let searchTimers = {};
+
 function humanSize(value) {
   if (value == null || value === "") return "Size unavailable";
   const size = Number(value);
@@ -226,258 +275,404 @@ function humanSize(value) {
 function analysisLabel(phase) {
   return !phase || phase === "discovered" ? "Ready" : phase === "done" ? "Completed" : phase;
 }
-function explorerAction(kind, id, label, count, busy, key, unsealed = false) {
-  if (!capabilities.analyzer) return "";
-  const reason = unsealed ? "Waiting for a SHA-256 fingerprint before analysis." : count > 64 ? "More than 64 dumps; choose a smaller scope." : busy ? "Analysis is already in progress in this scope." : "";
-  return `<div class="explorer-scope"><button class="ghost" data-analyze="${kind}" data-id="${esc(id)}" data-focus-key="${esc(key)}" ${reason || actionPending ? "disabled" : ""}>${label}</button>${reason ? `<span class="muted">${esc(reason)}</span>` : ""}</div>`;
+function positivePage(value) {
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
 }
-function renderExplorerStatus() {
-  $("explorer-status").textContent = explorerData
-    ? `${explorerShown} of ${explorerData.total} dump(s)${explorerError ? " · " + explorerError + " Showing the last loaded catalog." : ""}`
-    : explorerError || "Loading dumps…";
+function paramsFor(panel, overrides = {}) {
+  const state = { ...states[panel], ...overrides };
+  const params = new URLSearchParams();
+  if (panel === "dumps") {
+    if (state.customerId) params.set("customerId", state.customerId);
+    if (state.customerId && state.caseId) params.set("caseId", state.caseId);
+  }
+  if (state.q) params.set("q", state.q);
+  if (panel === "reports") {
+    if (state.outcome !== "all") params.set("outcome", state.outcome);
+    if (state.delivery !== "all") params.set("delivery", state.delivery);
+  }
+  if (state.page > 1) params.set("page", state.page);
+  return params;
 }
-function renderExplorer() {
-  const tree = $("explorer-tree");
-  if (!explorerData) return;
-  const signature = JSON.stringify([explorerData, explorerFilter, capabilities.analyzer, actionPending]);
-  if (signature === explorerSignature) { renderExplorerStatus(); return; }
-  tree.querySelectorAll("details[data-scope]").forEach((node) => expandedScopes.set((explorerSearchMode ? "search:" : "") + node.dataset.scope, node.open));
-  const stateKey = (key) => (explorerFilter ? "search:" : "") + key;
-  const focusedKey = tree.contains(document.activeElement) ? document.activeElement.dataset.focusKey : null;
-  const matches = (...values) => values.some((value) => String(value ?? "").toLowerCase().includes(explorerFilter));
-  let shown = 0;
-  const customers = (explorerData.customers || []).map((customer) => {
-    const customerMatch = matches(customer.customerId, customer.displayName);
-    const allDumps = customer.cases.flatMap((item) => item.dumps);
-    const cases = customer.cases.map((item) => {
-      const caseMatch = customerMatch || matches(item.caseId, item.title);
-      const dumps = item.dumps.filter((dump) => !explorerFilter || caseMatch || matches(dump.dumpId, dump.originalName));
-      if (!dumps.length) return "";
-      shown += dumps.length;
-      const key = scopeKey("case", customer.customerId, item.caseId);
-      const open = expandedScopes.get(stateKey(key)) ?? Boolean(explorerFilter);
-      return `<details data-scope="${esc(key)}" ${open ? "open" : ""}><summary data-focus-key="${esc(key)}">${esc(item.title || item.caseId)} <span class="muted">${esc(item.caseId)} · ${esc(item.dumpCount)} dump(s)</span></summary>
-        ${explorerAction("case", item.caseId, "Analyze case", item.dumpCount, item.dumps.some((d) => activePhase(d.analysisPhase)), key + "-action")}
-        ${dumps.map((dump) => `<div class="dump-row"><div class="dump-info"><div>${esc(dump.originalName || dump.dumpId)}</div><div class="muted mono">${esc(dump.dumpId)}</div><div class="muted">${esc(humanSize(dump.byteSize))}</div></div><span class="badge ${dump.analysisPhase === "done" ? "green" : phaseColor(dump.analysisPhase)}">${esc(analysisLabel(dump.analysisPhase))}</span>${explorerAction("dump", dump.dumpId, "Analyze dump", 1, activePhase(dump.analysisPhase), scopeKey("dump", dump.dumpId), !dump.sha256)}</div>`).join("")}
-      </details>`;
-    }).join("");
-    if (!cases) return "";
-    const key = scopeKey("customer", customer.customerId);
-    const open = expandedScopes.get(stateKey(key)) ?? Boolean(explorerFilter);
-    return `<details data-scope="${esc(key)}" ${open ? "open" : ""}><summary data-focus-key="${esc(key)}">${esc(customer.displayName || customer.customerId)} <span class="muted">${esc(customer.customerId)} · ${esc(customer.dumpCount)} dump(s)</span></summary>
-      ${explorerAction("customer", customer.customerId, "Analyze customer", customer.dumpCount, allDumps.some((dump) => activePhase(dump.analysisPhase)), key + "-action")}${cases}</details>`;
-  }).join("");
-  tree.innerHTML = customers || `<p class="muted">${explorerFilter ? "No dumps match this search." : "No available dumps."}</p>`;
-  explorerSignature = signature;
-  explorerSearchMode = Boolean(explorerFilter);
-  explorerShown = shown;
-  renderExplorerStatus();
-  if (focusedKey) Array.from(tree.querySelectorAll("[data-focus-key]")).find((node) => node.dataset.focusKey === focusedKey)?.focus();
+function panelHash(panel, overrides = {}) {
+  const params = states[panel] ? paramsFor(panel, overrides).toString() : "";
+  return "#" + panel + (params ? "?" + params : "");
 }
-function refreshExplorer(force = false) {
-  if (!capabilities.explorer) return Promise.resolve();
-  if (explorerRequest) return force ? explorerRequest.then(() => refreshExplorer()) : explorerRequest;
-  explorerRequest = (async () => {
-    try {
-      explorerData = await api("/api/dumps");
-      explorerError = "";
+function updatePanelLinks() {
+  document.querySelectorAll("a[data-panel]").forEach((link) => {
+    const panel = link.dataset.panel;
+    link.setAttribute("href", panelHash(panel));
+    if (link.closest(".panel-nav") && panel === selectedPanel) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+function replaceHash() {
+  history.replaceState(null, "", panelHash(selectedPanel));
+  updatePanelLinks();
+}
+function cancelSearch(panel) {
+  clearTimeout(searchTimers[panel]);
+  searchTimers[panel] = null;
+}
+function cancelPanelRequest(panel) {
+  const state = states[panel];
+  if (!state) return;
+  state.version++;
+  state.controller?.abort();
+  state.controller = null;
+  state.loading = false;
+}
+function selectRoute(moveFocus = false) {
+  const [rawPanel, query = ""] = location.hash.slice(1).split("?", 2);
+  const panel = PANELS.includes(rawPanel) ? rawPanel : "queue";
+  const changedPanel = selectedPanel !== panel;
+  if (changedPanel) {
+    cancelPanelRequest(selectedPanel);
+    cancelSearch(selectedPanel);
+  }
+  selectedPanel = panel;
+  const state = states[panel];
+  if (state) {
+    const params = new URLSearchParams(query);
+    cancelPanelRequest(panel);
+    cancelSearch(panel);
+    state.q = params.get("q") || "";
+    state.page = positivePage(params.get("page"));
+    if (panel === "dumps") {
+      state.customerId = params.get("customerId") || "";
+      state.caseId = state.customerId ? params.get("caseId") || "" : "";
+      $("dump-filter").value = state.q;
       renderExplorer();
-    } catch (err) {
-      explorerError = "Could not refresh dumps. Retrying in 5 seconds.";
-      renderExplorerStatus();
-    } finally { explorerRequest = null; }
-  })();
-  return explorerRequest;
+    } else {
+      state.outcome = ["completed", "failed"].includes(params.get("outcome")) ? params.get("outcome") : "all";
+      state.delivery = ["pending", "posted"].includes(params.get("delivery")) ? params.get("delivery") : "all";
+      $("report-filter").value = state.q;
+      $("report-outcome").value = state.outcome;
+      $("report-delivery").value = state.delivery;
+    }
+  }
+  for (const name of PANELS) $("panel-" + name).hidden = name !== panel;
+  updatePanelLinks();
+  if (!PANELS.includes(rawPanel)) replaceHash();
+  if (moveFocus) {
+    const heading = { queue: "queue-heading", dumps: "explorer-heading", reports: "reports-heading", settings: "settings-heading" }[panel];
+    $(panel === "dumps" && !changedPanel ? "browse-heading" : heading).focus();
+  }
+  refreshSelected();
 }
+window.addEventListener("hashchange", () => selectRoute(true));
 
-// Theme: System/Light/Dark (persisted per browser; system follows the OS).
+// Theme preference is local to this browser; system mode follows the OS.
 const themeKey = "dump-analyzer-theme";
+function savedTheme() { try { return localStorage.getItem(themeKey) || "system"; } catch { return "system"; } }
 function applyTheme(mode) {
-  document.querySelectorAll(".theme-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.theme === mode));
+  document.querySelectorAll(".theme-toggle button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.theme === mode);
+    button.setAttribute("aria-pressed", String(button.dataset.theme === mode));
+  });
   const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "" : "light";
   try { localStorage.setItem(themeKey, mode); } catch {}
 }
-document.querySelectorAll(".theme-toggle button").forEach((b) => (b.onclick = () => applyTheme(b.dataset.theme)));
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(localStorage.getItem(themeKey) || "system"));
-applyTheme((() => { try { return localStorage.getItem(themeKey) || "system"; } catch { return "system"; } })());
+document.querySelectorAll(".theme-toggle button").forEach((button) => button.addEventListener("click", () => applyTheme(button.dataset.theme)));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(savedTheme()));
+applyTheme(savedTheme());
 
-async function api(path) {
-  const res = await fetch(path, { cache: "no-store" });
-  if (!res.ok) throw new Error(path + " -> " + res.status);
-  return res.json();
+async function api(path, signal) {
+  const response = await fetch(path, { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  return response.json();
 }
-
 function renderStats(status) {
   const phases = status.jobs.byPhase || {};
-  const cursor = status.eventCursor ?? null;
-  const cursorShort = cursor ? cursor.replace(/^0+(?=\d)/, "") : "—";
-  const cards = [
-    ["event cursor", cursorShort, cursor],
-    ["jobs in queue", status.jobs.total],
-    ["pending reports", status.reports.pending],
-    ["up", status.upSeconds + "s"],
-    ["poll", status.pollIntervalMs + " ms"],
-    ["ssh", status.sshConfigured ? "configured" : "NOT configured"],
-  ];
-  $("stats").innerHTML = cards.map(([l, v, title]) =>
-    `<div class="card stat"><div class="num mono" ${title ? `title="${esc(title)}"` : ""}>${esc(v)}</div><div class="lbl">${esc(l)}</div></div>`).join("");
+  const cards = [["jobs in queue", status.jobs.total], ["pending reports", status.reports.pending], ["local reports", status.reports.total ?? "—"]];
+  $("stats").innerHTML = cards.map(([label, value]) => `<div class="card stat"><div class="num">${esc(value)}</div><div class="lbl">${esc(label)}</div></div>`).join("");
   const total = Math.max(1, status.jobs.total);
-  $("pipeline").innerHTML = PHASES.filter(([p]) => phases[p]).map(([p, c]) =>
-    `<div style="width:${(phases[p] / total) * 100}%;background:var(--${c === "dark" ? "gray" : c === "blue" ? "accent" : c})" title="${p}: ${phases[p]}"></div>`).join("");
-  $("pipeline-key").innerHTML = PHASES.filter(([p]) => phases[p]).map(([p, c]) =>
-    `<span class="key"><span class="swatch" style="background:var(--${c === "dark" ? "gray" : c === "blue" ? "accent" : c})"></span>${p} ${phases[p]}</span>`).join("");
-  if (filterPhase && !phases[filterPhase]) filterPhase = null;
-  const chips = [["(all)", null], ...PHASES.filter(([p]) => phases[p]).map(([p]) => [p, p])];
-  $("phase-chips").innerHTML = chips.map(([label, p]) =>
-    `<button class="chip ${filterPhase === p ? "active" : ""}" data-phase="${p ?? ""}">${esc(label)}</button>`).join("");
-  document.querySelectorAll("#phase-chips .chip").forEach((c) =>
-    (c.onclick = () => { filterPhase = c.dataset.phase || null; refresh(); }));
-}
-
-function renderJobs(jobs) {
-  const queue = jobs.filter((j) => activePhase(j.phase));
-  const rows = queue.filter((j) =>
-    (!filterPhase || j.phase === filterPhase) &&
-    (!filterText || (j.dumpId + " " + j.kind).toLowerCase().includes(filterText)));
-  $("jobs").innerHTML = rows.length
-    ? rows.map((j) => `<tr>
-        <td class="mono">${esc(j.dumpId)}</td>
-        <td>${esc(j.kind)}</td>
-        <td><span class="badge ${phaseColor(j.phase)}">${esc(j.phase)}</span></td>
-        <td>${j.attempts}</td>
-        <td class="muted">${esc(j.updatedAt)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="muted">${queue.length ? "No active jobs match these filters." : "No active jobs."}</td></tr>`;
-}
-
-function renderReports(reports) {
-  $("reports").innerHTML = reports.length
-    ? reports.map((r) => `<tr>
-        <td class="mono">${esc(r.dumpId)}</td>
-        <td><span class="badge ${r.outcome === "completed" ? "green" : "red"}">${esc(r.outcome)}</span></td>
-        <td>${r.posted ? "yes" : "no"}</td>
-        <td class="muted">${esc(r.createdAt)}</td>
-        <td>${esc(r.summary)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="muted">no local reports</td></tr>`;
-}
-
-async function refresh() {
-  try {
-    const [status, jobs, reports] = await Promise.all([api("/api/status"), api("/api/jobs"), api("/api/reports")]);
-    $("ver").textContent = "v" + status.version;
-    $("base").textContent = status.baseUrl;
-    renderStats(status);
-    renderJobs(jobs.jobs || []);
-    renderReports(reports.reports || []);
-    $("live-dot").className = "dot ok";
-    $("updated").textContent = new Date().toLocaleTimeString();
-  } catch (e) {
-    $("live-dot").className = "dot err";
+  const color = (name) => name === "blue" ? "accent" : name;
+  $("pipeline").innerHTML = PHASES.filter(([phase]) => phases[phase]).map(([phase, shade]) => `<div style="width:${Number(phases[phase]) / total * 100}%;background:var(--${color(shade)})"></div>`).join("");
+  $("pipeline").setAttribute("aria-label", PHASES.filter(([phase]) => phases[phase]).map(([phase]) => `${phase}: ${phases[phase]}`).join(", ") || "No active jobs");
+  $("pipeline-key").innerHTML = PHASES.filter(([phase]) => phases[phase]).map(([phase, shade]) => `<span class="key"><span class="swatch" style="background:var(--${color(shade)})"></span>${phase} ${esc(phases[phase])}</span>`).join("") || '<span class="muted">No active jobs</span>';
+  const chips = [["All", null], ...PHASES.map(([phase]) => [phase, phase])];
+  const chipSignature = JSON.stringify(filterPhase);
+  if ($("phase-chips").dataset.signature !== chipSignature) {
+    $("phase-chips").innerHTML = chips.map(([label, phase]) => `<button class="chip ${filterPhase === phase ? "active" : ""}" aria-pressed="${filterPhase === phase}" data-phase="${phase || ""}">${esc(label)}</button>`).join("");
+    $("phase-chips").dataset.signature = chipSignature;
   }
+  const values = [["Ledger", status.baseUrl], ["Event cursor", status.eventCursor ?? "—"], ["Uptime", `${status.upSeconds}s`], ["Poll interval", `${status.pollIntervalMs} ms`], ["SSH", status.sshConfigured ? "Configured" : "Not configured"]];
+  $("diagnostics").innerHTML = values.map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`).join("");
 }
-
-async function loadCapabilities() {
+async function refreshStatus() {
+  if (statusRequest) return statusRequest;
+  statusRequest = (async () => {
+    try {
+      const status = await api("/api/status");
+      $("ver").textContent = "v" + status.version;
+      $("base").textContent = status.baseUrl;
+      renderStats(status);
+      $("live-dot").className = "dot ok";
+      $("live-dot").setAttribute("aria-label", "Daemon connected");
+      $("updated").textContent = new Date().toLocaleTimeString();
+      $("updated").title = "Last successful status update";
+    } catch {
+      $("live-dot").className = "dot err";
+      $("live-dot").setAttribute("aria-label", "Daemon unavailable");
+      $("updated").textContent = "Connection lost";
+    } finally { statusRequest = null; }
+  })();
+  return statusRequest;
+}
+function renderJobs() {
+  const queue = jobsData.filter((job) => activePhase(job.phase));
+  const rows = queue.filter((job) => (!filterPhase || job.phase === filterPhase) && (!filterText || `${job.dumpId} ${job.kind}`.toLowerCase().includes(filterText)));
+  $("jobs").innerHTML = rows.length ? rows.map((job) => `<tr><td class="mono">${esc(job.dumpId)}</td><td>${esc(job.kind)}</td><td><span class="badge ${phaseColor(job.phase)}">${esc(job.phase)}</span></td><td>${esc(job.attempts)}</td><td class="muted">${esc(job.updatedAt)}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">${queue.length ? "No active jobs match these filters." : "No active jobs."}</td></tr>`;
+  $("jobs-status").textContent = `${rows.length} of ${queue.length} active job(s)`;
+}
+async function refreshJobs() {
+  if (jobsRequest) return jobsRequest;
+  jobsRequest = (async () => {
+    try {
+      const data = await api("/api/jobs");
+      jobsData = data.jobs || [];
+      jobsLoaded = true;
+      renderJobs();
+    } catch {
+      $("jobs-status").textContent = "Could not refresh jobs." + (jobsLoaded ? " Showing the last loaded queue." : " Retrying shortly.");
+    } finally { jobsRequest = null; }
+  })();
+  return jobsRequest;
+}
+function browseKey() { return paramsFor("dumps").toString(); }
+function reportKey() { return paramsFor("reports").toString(); }
+function restoreFocus(container, key) {
+  if (key && document.activeElement === document.body) Array.from(container.querySelectorAll("[data-focus-key]")).find((node) => node.dataset.focusKey === key)?.focus();
+}
+function actionMarkup(kind, id, label, reason, key) {
+  if (!capabilities.analyzer) return "";
+  return `<div class="explorer-scope"><button class="ghost" data-analyze="${kind}" data-id="${esc(id)}" data-focus-key="${esc(key)}" ${reason || actionPending ? "disabled" : ""} ${reason ? `aria-describedby="${esc(key)}-reason"` : ""}>${esc(label)}</button>${reason ? `<span class="muted" id="${esc(key)}-reason">${esc(reason)}</span>` : ""}</div>`;
+}
+function renderPager(prefix, data, loading) {
+  $(prefix + "-prev").disabled = loading || !data || data.page <= 1;
+  $(prefix + "-next").disabled = loading || !data || data.page >= data.totalPages;
+  const start = data?.matching ? (data.page - 1) * data.pageSize + 1 : 0;
+  const end = data ? Math.min(data.page * data.pageSize, data.matching) : 0;
+  $(prefix + "-range").textContent = data ? `${start}–${end} of ${data.matching} · Page ${data.page} of ${Math.max(1, data.totalPages)}` : "";
+}
+function renderExplorer() {
+  const state = states.dumps, data = state.data;
+  const stale = Boolean(data && state.key !== browseKey());
+  const customer = data?.customer, caseInfo = data?.case;
+  const rootLink = panelHash("dumps", { customerId: "", caseId: "", page: 1 });
+  const crumbs = [`<li>${state.customerId ? `<a href="${esc(rootLink)}">Customers</a>` : '<span aria-current="location">Customers</span>'}</li>`];
+  if (state.customerId) {
+    const label = customer?.customerId === state.customerId ? customer.displayName || state.customerId : state.customerId;
+    const customerLink = panelHash("dumps", { caseId: "", page: 1 });
+    crumbs.push(`<li>${state.caseId ? `<a href="${esc(customerLink)}">${esc(label)}</a>` : `<span aria-current="location">${esc(label)}</span>`}</li>`);
+  }
+  if (state.caseId) crumbs.push(`<li><span aria-current="location">${esc(caseInfo?.caseId === state.caseId ? caseInfo.title || state.caseId : state.caseId)}</span></li>`);
+  const breadcrumbMarkup = crumbs.join("");
+  if ($("dump-breadcrumbs").dataset.signature !== breadcrumbMarkup) {
+    $("dump-breadcrumbs").innerHTML = breadcrumbMarkup;
+    $("dump-breadcrumbs").dataset.signature = breadcrumbMarkup;
+  }
+  $("browse-heading").textContent = state.caseId ? "Dumps" : state.customerId ? "Cases" : "Customers";
+  $("explorer-list").setAttribute("aria-busy", String(state.loading));
+  let message = state.loading ? "Loading…" : state.error;
+  if (!message && data) message = `${data.total} available dump(s) · ${data.scopeDumpCount} in this scope${state.q ? " · search applied" : ""}`;
+  if (!message && !capabilitiesLoaded) message = "Loading capabilities…";
+  if (!message && !capabilities.explorer) message = "Dumps explorer is unavailable on this daemon.";
+  if (state.error && data) message += " Showing the last loaded results.";
+  if (stale && !state.error) message += " Previous results remain visible until the new scope loads.";
+  $("explorer-status").textContent = message;
+  const controlSignature = JSON.stringify([state.customerId, state.caseId, stale, capabilities.analyzer, data?.scopeDumpCount, actionPending]);
+  if ($("explorer-action").dataset.signature !== controlSignature) {
+    const scopeReason = stale ? "Wait for this scope to load." : data?.scopeDumpCount > 64 ? "More than 64 dumps; choose a smaller scope." : !data || !data.scopeDumpCount ? "No available dumps in this scope." : "";
+    $("explorer-action").innerHTML = state.customerId ? actionMarkup(state.caseId ? "case" : "customer", state.caseId || state.customerId, state.caseId ? "Analyze case" : "Analyze customer", scopeReason, "scope-action") : "";
+    $("explorer-action").dataset.signature = controlSignature;
+  }
+  const signature = JSON.stringify([data, stale, actionPending, capabilities.analyzer]);
+  if (state.signature !== signature) {
+    const list = $("explorer-list");
+    const focusKey = list.contains(document.activeElement) ? document.activeElement.dataset.focusKey : null;
+    const navState = { q: state.q, page: 1 };
+    if (!data) list.innerHTML = '<p class="muted">No catalog loaded yet.</p>';
+    else if (data.level === "customers") list.innerHTML = '<ul class="browse-list">' + (data.customers || []).slice(0, PAGE_SIZE).map((item) => `<li class="browse-row"><a class="browse-link" data-focus-key="customer-${esc(item.customerId)}" href="${esc(panelHash("dumps", { ...navState, customerId: item.customerId, caseId: "" }))}"><strong>${esc(item.displayName || item.customerId)}</strong><span class="muted mono">${esc(item.customerId)}</span></a><span class="browse-count">${esc(item.caseCount)} cases · ${esc(item.dumpCount)} dumps</span></li>`).join("") + '</ul>';
+    else if (data.level === "cases") list.innerHTML = '<ul class="browse-list">' + (data.cases || []).slice(0, PAGE_SIZE).map((item) => `<li class="browse-row"><a class="browse-link" data-focus-key="case-${esc(item.caseId)}" href="${esc(panelHash("dumps", { ...navState, customerId: data.customer.customerId, caseId: item.caseId }))}"><strong>${esc(item.title || item.caseId)}</strong><span class="muted mono">${esc(item.caseId)}</span></a><span class="browse-count">${esc(item.dumpCount)} dumps</span></li>`).join("") + '</ul>';
+    else list.innerHTML = (data.dumps || []).slice(0, PAGE_SIZE).map((dump) => {
+      const reason = stale ? "Wait for this scope to load." : !dump.sha256 ? "Waiting for a SHA-256 fingerprint." : activePhase(dump.analysisPhase) ? "Analysis is already in progress." : "";
+      return `<div class="dump-row"><div class="dump-info"><div>${esc(dump.originalName || dump.dumpId)}</div><div class="muted mono">${esc(dump.dumpId)}</div><div class="muted">${esc(humanSize(dump.byteSize))}${dump.receivedAt ? " · " + esc(dump.receivedAt) : ""}</div></div><span class="badge ${dump.analysisPhase === "done" ? "green" : phaseColor(dump.analysisPhase)}">${esc(analysisLabel(dump.analysisPhase))}</span>${actionMarkup("dump", dump.dumpId, "Analyze dump", reason, "dump-" + dump.dumpId)}</div>`;
+    }).join("");
+    if (data && !data.matching) list.innerHTML = `<p class="muted">${state.q ? "No results match this search in this scope." : "No available " + (data.level === "customers" ? "customers" : data.level === "cases" ? "cases" : "dumps") + "."}</p>`;
+    state.signature = signature;
+    restoreFocus(list, focusKey);
+  }
+  renderPager("dump", data, state.loading || stale);
+}
+function renderReports() {
+  const state = states.reports, data = state.data, stale = Boolean(data && state.key !== reportKey());
+  $("reports-status").textContent = state.loading ? "Loading reports…" : state.error ? state.error + (data ? " Showing the last loaded reports." : "") : data ? `${data.total} local report(s) · ${data.pending} pending delivery${state.q || state.outcome !== "all" || state.delivery !== "all" ? " · filters applied" : ""}` : "No reports loaded yet.";
+  $("reports").setAttribute("aria-busy", String(state.loading));
+  const signature = JSON.stringify(data);
+  if (data && state.signature !== signature) {
+    const table = $("reports");
+    const focused = table.contains(document.activeElement) ? document.activeElement.dataset.focusKey : null;
+    const opened = new Set(Array.from(table.querySelectorAll("details[open]")).map((node) => node.dataset.report));
+    table.innerHTML = data.reports.length ? data.reports.slice(0, PAGE_SIZE).map((report) => {
+      const key = String(report.id ?? report.reportId ?? `${report.dumpId}-${report.createdAt}`);
+      return `<tr><td class="mono">${esc(report.dumpId)}</td><td><span class="badge ${report.outcome === "completed" ? "green" : "red"}">${esc(report.outcome)}</span></td><td>${report.posted ? "Posted" : "Pending"}</td><td class="muted">${esc(report.createdAt)}</td><td class="report-summary"><div class="report-preview">${esc(report.summary)}</div><details data-report="${esc(key)}" ${opened.has(key) ? "open" : ""}><summary data-focus-key="report-${esc(key)}" aria-label="Full summary for ${esc(report.dumpId)}">Details</summary><p>${esc(report.summary || "No summary provided.")}</p></details></td></tr>`;
+    }).join("") : '<tr><td colspan="5" class="muted">No local reports match these filters.</td></tr>';
+    state.signature = signature;
+    restoreFocus(table, focused);
+  }
+  renderPager("report", data, state.loading || stale);
+}
+async function refreshList(panel) {
+  if (selectedPanel !== panel) return;
+  if (panel === "dumps" && (!capabilitiesLoaded || !capabilities.explorer)) { renderExplorer(); return; }
+  const state = states[panel];
+  if (state.loading) return;
+  const key = paramsFor(panel).toString();
+  const controller = new AbortController(), version = ++state.version;
+  state.controller = controller;
+  state.loading = true;
+  state.error = "";
+  const render = panel === "dumps" ? renderExplorer : renderReports;
+  render();
+  const params = paramsFor(panel);
+  params.set("pageSize", String(PAGE_SIZE));
+  const path = (panel === "dumps" ? "/api/dumps/browse" : "/api/reports") + "?" + params;
   try {
-    capabilities = await api("/api/capabilities");
-  } catch { capabilities = { analyzer: false, rescan: false, explorer: false }; }
-  $("actions-card").style.display = capabilities.analyzer || capabilities.rescan ? "" : "none";
-  $("act-dump").style.display = capabilities.analyzer ? "" : "none";
-  $("act-case").style.display = capabilities.analyzer ? "" : "none";
-  $("act-customer").style.display = capabilities.analyzer ? "" : "none";
-  $("act-rescan").style.display = capabilities.rescan ? "" : "none";
-  if (capabilities.explorer) await refreshExplorer();
-  else $("explorer-status").textContent = "Dumps explorer is unavailable on this daemon.";
-}
-
-function toast(ok, msg) {
-  const t = $("toast");
-  t.className = "toast " + (ok ? "ok" : "err");
-  t.textContent = msg;
-}
-
-async function runAction(act, id, button, feedbackId = "toast") {
-  if (actionPending || (act === "rescan" ? !capabilities.rescan : !capabilities.analyzer)) return;
-  const routes = {
-    dump: ["/-/analyze", { dumpId: id }],
-    case: ["/-/analyze-case", { caseId: id }],
-    customer: ["/-/analyze-customer", { customerId: id }],
-    rescan: ["/-/rescan", {}],
-  };
-  const [route, payload] = routes[act];
-  const show = (ok, message) => {
-    const target = $(feedbackId);
-    target.className = "toast " + (ok ? "ok" : "err");
-    target.textContent = message;
-  };
-  const label = button.textContent;
-  const actionFocusKey = button.dataset.focusKey;
-  actionPending = true;
-  document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = true; });
-  renderExplorer();
-  button.classList.add("spin"); button.textContent = "Running…";
-  show(true, `${act}: running (a real dump takes minutes)…`);
-  try {
-    const res = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) show(false, `${act}: ${res.status} ${body.message ?? body.error ?? ""}`);
-    else if (act === "rescan") show(true, `rescan: ${body.inserted} new dump(s) discovered`);
-    else if (body.reports) show(true, `${act}: ${body.considered} considered, ${body.reports.length} reported, ${(body.skipped || []).length} skipped`);
-    else show(true, `${act}: ${body.report?.outcome ?? "done"} — ${body.report?.summary ?? ""}`);
-  } catch (err) {
-    show(false, `${act}: ${err.message}`);
+    const data = await api(path, controller.signal);
+    if (version !== state.version || selectedPanel !== panel) return;
+    state.page = positivePage(data.page);
+    state.data = data;
+    state.key = paramsFor(panel).toString();
+    if (key !== state.key) replaceHash();
+  } catch (error) {
+    if (version !== state.version || error.name === "AbortError") return;
+    state.error = "Could not refresh " + (panel === "dumps" ? "dumps" : "reports") + ". " + error.message + ".";
   } finally {
-    // Refresh while controls remain disabled, including when the POST response was lost.
-    await Promise.all([refresh(), refreshExplorer(true)]);
-    actionPending = false;
-    document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = false; });
-    button.classList.remove("spin"); button.textContent = label;
-    renderExplorer();
-    if (actionFocusKey && document.activeElement === document.body) {
-      Array.from($("explorer-tree").querySelectorAll("button[data-focus-key]")).find((node) => node.dataset.focusKey === actionFocusKey)?.focus();
+    if (version === state.version) {
+      state.loading = false;
+      state.controller = null;
+      render();
     }
   }
 }
-document.querySelectorAll(".actions-grid form").forEach((form) => {
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const id = form.querySelector("input[name=id]")?.value.trim() || "";
-    runAction(form.dataset.act, id, form.querySelector("button"));
+function refreshSelected() {
+  if (selectedPanel === "queue") return refreshJobs();
+  if (selectedPanel === "dumps" || selectedPanel === "reports") return refreshList(selectedPanel);
+  return Promise.resolve();
+}
+async function loadCapabilities() {
+  try { capabilities = await api("/api/capabilities"); }
+  catch { capabilities = { analyzer: false, rescan: false, explorer: false }; }
+  capabilitiesLoaded = true;
+  $("actions-card").hidden = !capabilities.analyzer && !capabilities.rescan;
+  for (const act of ["dump", "case", "customer"]) $("act-" + act).hidden = !capabilities.analyzer;
+  $("act-rescan").hidden = !capabilities.rescan;
+  if (selectedPanel === "dumps") refreshList("dumps");
+}
+function applyListChange(panel, updates, debounce = false) {
+  const state = states[panel];
+  cancelPanelRequest(panel);
+  Object.assign(state, updates, { page: 1 });
+  cancelSearch(panel);
+  replaceHash();
+  if (panel === "dumps") renderExplorer();
+  else renderReports();
+  if (debounce) searchTimers[panel] = setTimeout(() => { searchTimers[panel] = null; refreshList(panel); }, 250);
+  else refreshList(panel);
+}
+$("dump-filter").addEventListener("input", (event) => applyListChange("dumps", { q: event.target.value.trim() }, true));
+$("report-filter").addEventListener("input", (event) => applyListChange("reports", { q: event.target.value.trim() }, true));
+$("report-outcome").addEventListener("change", (event) => applyListChange("reports", { outcome: event.target.value }));
+$("report-delivery").addEventListener("change", (event) => applyListChange("reports", { delivery: event.target.value }));
+for (const [prefix, panel] of [["dump", "dumps"], ["report", "reports"]]) {
+  for (const [direction, step] of [["prev", -1], ["next", 1]]) $(prefix + "-" + direction).addEventListener("click", () => {
+    const state = states[panel];
+    const next = state.page + step;
+    if (state.loading || !state.data || next < 1 || next > state.data.totalPages) return;
+    location.hash = panelHash(panel, { page: next });
   });
+}
+$("phase-chips").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-phase]");
+  if (!button) return;
+  filterPhase = button.dataset.phase || null;
+  $("phase-chips").querySelectorAll("button").forEach((chip) => {
+    const active = (chip.dataset.phase || null) === filterPhase;
+    chip.classList.toggle("active", active);
+    chip.setAttribute("aria-pressed", String(active));
+  });
+  $("phase-chips").dataset.signature = JSON.stringify(filterPhase);
+  renderJobs();
 });
-$("explorer-tree").addEventListener("click", (event) => {
+$("job-filter").addEventListener("input", (event) => { filterText = event.target.value.toLowerCase(); renderJobs(); });
+
+async function runAction(act, id, button, feedbackId = "toast") {
+  if (actionPending || (act === "rescan" ? !capabilities.rescan : !capabilities.analyzer)) return;
+  const routes = { dump: ["/-/analyze", { dumpId: id }], case: ["/-/analyze-case", { caseId: id }], customer: ["/-/analyze-customer", { customerId: id }], rescan: ["/-/rescan", {}] };
+  const [route, payload] = routes[act];
+  const show = (ok, message) => { const target = $(feedbackId); target.className = "toast " + (ok ? "ok" : "err"); target.textContent = message; };
+  const label = button.textContent, focusKey = button.dataset.focusKey;
+  actionPending = true;
+  document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = true; });
+  button.classList.add("spin"); button.textContent = "Running…";
+  renderExplorer();
+  show(true, `${act}: running (a real dump takes minutes)…`);
+  try {
+    const response = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) show(false, `${act}: ${response.status} ${body.message ?? body.error ?? ""}`);
+    else if (act === "rescan") show(true, `rescan: ${body.inserted} new dump(s) discovered`);
+    else if (body.reports) show(true, `${act}: ${body.considered} considered, ${body.reports.length} reported, ${(body.skipped || []).length} skipped`);
+    else show(true, `${act}: ${body.report?.outcome ?? "done"} — ${body.report?.summary ?? ""}`);
+  } catch (error) { show(false, `${act}: ${error.message}`); }
+  finally {
+    // Hidden panels fetch on entry; completion refreshes only the current panel and cheap status.
+    cancelPanelRequest("dumps");
+    cancelPanelRequest("reports");
+    await Promise.all([refreshStatus(), refreshSelected()]);
+    actionPending = false;
+    document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = false; });
+    if (button.isConnected) { button.classList.remove("spin"); button.textContent = label; }
+    renderExplorer();
+    if (selectedPanel === "dumps") restoreFocus($("explorer-card"), focusKey);
+  }
+}
+document.querySelectorAll(".actions-grid form").forEach((form) => form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction(form.dataset.act, form.querySelector("input[name=id]")?.value.trim() || "", form.querySelector("button"));
+}));
+$("explorer-card").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-analyze]");
   if (button && !button.disabled) runAction(button.dataset.analyze, button.dataset.id, button, "explorer-toast");
 });
-$("dump-filter").addEventListener("input", (event) => {
-  explorerFilter = event.target.value.trim().toLowerCase();
-  renderExplorer();
-});
-
-$("store-token-btn").addEventListener("click", async (e) => {
-  e.preventDefault();
-  const input = $("new-token");
-  const token = input.value.trim();
-  const t = $("token-toast");
-  const show = (ok, msg) => { t.className = "toast " + (ok ? "ok" : "err"); t.textContent = msg; };
-  if (!token) return show(false, "paste a token first");
+$("store-token-btn").addEventListener("click", async () => {
+  const input = $("new-token"), token = input.value.trim(), button = $("store-token-btn"), target = $("token-toast");
+  const show = (ok, message) => { target.className = "toast " + (ok ? "ok" : "err"); target.textContent = message; };
+  if (!token) return show(false, "Paste a token first.");
+  button.disabled = true;
   try {
-    const res = await fetch("/-/store-token", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) return show(false, body.message ?? ("not stored (" + res.status + ")"));
+    const response = await fetch("/-/store-token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return show(false, body.message ?? `Not stored (${response.status}).`);
     input.value = "";
-    show(true, "stored — action forms can use it immediately; the pipeline uses it from the next boot");
-  } catch (err) {
-    show(false, err.message);
-  }
+    show(true, "Stored. Actions can use it immediately; the pipeline uses it from the next boot.");
+  } catch (error) { show(false, error.message); }
+  finally { button.disabled = false; }
 });
-
-$("job-filter").addEventListener("input", (e) => { filterText = e.target.value.toLowerCase(); refresh(); });
-refresh(); loadCapabilities();
-setInterval(() => { if (!document.hidden) { refresh(); refreshExplorer(); } }, 5000);
+selectRoute();
+refreshStatus();
+loadCapabilities();
+setInterval(() => {
+  if (document.hidden) return;
+  refreshStatus();
+  if (selectedPanel === "queue") refreshJobs();
+}, 5000);
+setInterval(() => {
+  if (!document.hidden && states[selectedPanel] && !searchTimers[selectedPanel]) refreshSelected();
+}, 15000);
 </script>
 </body>
 </html>

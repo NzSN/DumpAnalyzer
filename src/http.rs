@@ -27,8 +27,6 @@ use crate::types::{AnalyzerError, Result};
 
 /// Hard cap on the request head; the surface is GET-only and bodyless.
 const MAX_HEAD_BYTES: usize = 8192;
-/// Rows returned by the reports endpoint/dashboard.
-const REPORTS_LIMIT: u32 = 200;
 
 /// Dependencies backing `POST /-/rescan` (R2): the catalog client, the job
 /// store, and the configuration the scan schedules against.
@@ -313,6 +311,79 @@ fn json_response(status: u16, value: Json) -> Response {
     }
 }
 
+fn invalid_query() -> Response {
+    json_response(400, json!({"error":"invalid_query"}))
+}
+
+fn query_params(
+    request: &Request,
+    allowed: &[&str],
+) -> std::result::Result<std::collections::BTreeMap<String, String>, Response> {
+    let url = reqwest::Url::parse(&format!("http://localhost{}", request.path))
+        .map_err(|_| invalid_query())?;
+    let mut params = std::collections::BTreeMap::new();
+    for (key, value) in url.query_pairs() {
+        if !allowed.contains(&key.as_ref())
+            || (key == "q" && value.chars().count() > 256)
+            || params
+                .insert(key.into_owned(), value.into_owned())
+                .is_some()
+        {
+            return Err(invalid_query());
+        }
+    }
+    Ok(params)
+}
+
+fn query_page(
+    params: &std::collections::BTreeMap<String, String>,
+) -> std::result::Result<(u32, u32), Response> {
+    let number = |key: &str, default| match params.get(key) {
+        None => Ok(default),
+        Some(raw) => raw.parse::<u32>().map_err(|_| invalid_query()),
+    };
+    let page = number("page", 1)?;
+    let size = number("pageSize", 25)?;
+    if page == 0 || !(1..=100).contains(&size) {
+        return Err(invalid_query());
+    }
+    Ok((page, size))
+}
+
+fn catalog_error(err: AnalyzerError) -> Response {
+    let status = match &err {
+        AnalyzerError::Server { status: 400, .. } => 400,
+        AnalyzerError::Server { status: 404, code }
+            if code.as_deref() == Some("scope_not_found") =>
+        {
+            404
+        }
+        _ if err.is_transient() => 503,
+        _ => 500,
+    };
+    json_response(
+        status,
+        json!({"error":"catalog_unavailable", "message":err.to_string()}),
+    )
+}
+
+fn overlay_manual_phases(
+    context: &UiContext,
+    dumps: &mut [crate::explorer::ExplorerDump],
+) -> Result<()> {
+    let active = active_manual_jobs(context)?;
+    for dump in dumps {
+        if let Some(run) = active.iter().find(|run| {
+            run.identity.dump_id == dump.dump_id
+                && dump.sha256.as_ref() == Some(&run.identity.input_sha256)
+                && run.identity.analyzer_version == context.version
+        }) {
+            dump.analysis_phase = Some(run.phase);
+        }
+    }
+    Ok(())
+}
+
 async fn route(request: &Request, context: &UiContext) -> Response {
     if request.method.is_empty() || request.path.is_empty() {
         return json_response(400, json!({ "error": "invalid_request" }));
@@ -337,6 +408,49 @@ async fn route(request: &Request, context: &UiContext) -> Response {
             Ok(jobs) => json_response(200, json!({ "jobs": jobs_json(&jobs) })),
             Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
         },
+        ("GET", "/api/dumps/browse") => {
+            let params =
+                match query_params(request, &["customerId", "caseId", "q", "page", "pageSize"]) {
+                    Ok(params) => params,
+                    Err(response) => return response,
+                };
+            let (page, page_size) = match query_page(&params) {
+                Ok(page) => page,
+                Err(response) => return response,
+            };
+            let customer_id = params.get("customerId").cloned();
+            let case_id = params.get("caseId").cloned();
+            if (case_id.is_some() && customer_id.is_none())
+                || (crate::wire::DumpCatalogQuery {
+                    customer_id: customer_id.clone(),
+                    case_id: case_id.clone(),
+                    ..Default::default()
+                })
+                .validate()
+                .is_err()
+            {
+                return invalid_query();
+            }
+            let Some(explorer) = &context.explorer else {
+                return json_response(503, json!({"error":"explorer_unavailable"}));
+            };
+            let query = crate::explorer::BrowseQuery {
+                customer_id,
+                case_id,
+                q: params.get("q").cloned().unwrap_or_default(),
+                page: page as usize,
+                page_size: page_size as usize,
+            };
+            match explorer.browse(&query).await {
+                Ok(mut result) => {
+                    if let Err(err) = overlay_manual_phases(context, &mut result.dumps) {
+                        return json_response(500, json!({"error":err.to_string()}));
+                    }
+                    json_response(200, json!(result))
+                }
+                Err(err) => catalog_error(err),
+            }
+        }
         ("GET", "/api/dumps") => {
             let Some(explorer) = &context.explorer else {
                 return json_response(503, json!({"error":"explorer_unavailable"}));
@@ -370,10 +484,48 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                 ),
             }
         }
-        ("GET", "/api/reports") => match context.store.local_reports().list_recent(REPORTS_LIMIT) {
-            Ok(reports) => json_response(200, json!({ "reports": reports_json(&reports) })),
-            Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
-        },
+        ("GET", "/api/reports") => {
+            let params =
+                match query_params(request, &["q", "outcome", "delivery", "page", "pageSize"]) {
+                    Ok(params) => params,
+                    Err(response) => return response,
+                };
+            let (page, page_size) = match query_page(&params) {
+                Ok(page) => page,
+                Err(response) => return response,
+            };
+            let outcome = match params.get("outcome").map(String::as_str) {
+                None | Some("all") => None,
+                Some("completed") => Some(crate::types::ReportOutcome::Completed),
+                Some("failed") => Some(crate::types::ReportOutcome::Failed),
+                _ => return invalid_query(),
+            };
+            let posted = match params.get("delivery").map(String::as_str) {
+                None | Some("all") => None,
+                Some("posted") => Some(true),
+                Some("pending") => Some(false),
+                _ => return invalid_query(),
+            };
+            let query = crate::state::ReportQuery {
+                q: params.get("q").cloned().unwrap_or_default(),
+                outcome,
+                posted,
+                page,
+                page_size,
+            };
+            match context.store.local_reports().page(&query) {
+                Ok(result) => json_response(
+                    200,
+                    json!({
+                        "reports": reports_json(&result.reports), "total": result.total,
+                        "matching": result.matching, "page": result.page,
+                        "pageSize": result.page_size, "totalPages": result.total_pages,
+                        "pending": result.pending,
+                    }),
+                ),
+                Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
+            }
+        }
         ("POST", "/-/analyze") => {
             if !authorized(context, request.authorization.as_deref()) {
                 return json_response(401, json!({ "error": "unauthenticated" }));
@@ -918,7 +1070,7 @@ fn queue_jobs(context: &UiContext) -> Result<Vec<JobRow>> {
     let mut jobs: Vec<JobRow> = context
         .store
         .jobs()
-        .list()?
+        .work_queue()?
         .into_iter()
         .filter(|row| {
             matches!(
@@ -953,11 +1105,7 @@ fn active_manual_jobs(context: &UiContext) -> Result<Vec<JobRow>> {
 
 fn status_json(context: &UiContext) -> Json {
     let jobs = queue_jobs(context).unwrap_or_default();
-    let reports = context
-        .store
-        .local_reports()
-        .list_recent(REPORTS_LIMIT)
-        .unwrap_or_default();
+    let (reports, pending) = context.store.local_reports().counts().unwrap_or_default();
     let mut by_phase = serde_json::Map::new();
     for row in &jobs {
         let phase = phase_name(row.phase);
@@ -966,7 +1114,6 @@ fn status_json(context: &UiContext) -> Json {
             .or_insert_with(|| json!(0));
         *entry = json!(entry.as_u64().unwrap_or(0) + 1);
     }
-    let pending = reports.iter().filter(|r| !r.posted).count();
     json!({
         "name": context.name,
         "version": context.version,
@@ -976,7 +1123,7 @@ fn status_json(context: &UiContext) -> Json {
         "sshConfigured": context.ssh_configured,
         "eventCursor": context.store.cursors().get("event_cursor").ok().flatten(),
         "jobs": { "total": jobs.len(), "byPhase": by_phase },
-        "reports": { "shown": reports.len(), "pending": pending },
+        "reports": { "total": reports, "pending": pending },
     })
 }
 

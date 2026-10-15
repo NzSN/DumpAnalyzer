@@ -585,18 +585,31 @@ impl JobStore {
     }
 
     /// Lists discovery candidates and active work with lifecycle timestamps,
-    /// oldest first. The operator queue filters out `Discovered` candidates.
-    /// Read-only observability for the status UI; scheduling order is
+    /// oldest first. Operator queue reads should use [`JobStore::work_queue`]
+    /// to avoid loading the discovery inventory. Scheduling order is
     /// [`JobStore::claim_next`]'s, not this listing's.
     pub fn list(&self) -> Result<Vec<JobRow>> {
+        self.list_where("1")
+    }
+
+    /// Lists only claimed, fetching, staged, analyzing, or reporting work,
+    /// oldest first. Discovery candidates are excluded by SQLite so dashboard
+    /// queue reads allocate and decode only the active work rows.
+    pub fn work_queue(&self) -> Result<Vec<JobRow>> {
+        self.list_where("phase IN ('claimed', 'fetching', 'staged', 'analyzing', 'reporting')")
+    }
+
+    // Predicates are private SQL literals from the two listing methods.
+    fn list_where(&self, predicate: &str) -> Result<Vec<JobRow>> {
         let guard = lock(&self.conn)?;
         let mut stmt = guard
-            .prepare(
+            .prepare(&format!(
                 "SELECT dump_id, input_sha256, kind, analyzer_version,
                         phase, attempts, created_at, updated_at
                    FROM jobs
-                  ORDER BY created_at ASC, rowid ASC",
-            )
+                  WHERE {predicate}
+                  ORDER BY created_at ASC, rowid ASC"
+            ))
             .map_err(sql_err)?;
         let rows = stmt
             .query_map([], |row| {
@@ -905,6 +918,54 @@ impl LocalReport {
     }
 }
 
+/// Filters and pagination for browsing local reports. Search terms are
+/// literal substrings of the dump ID, kind, analyzer version, or summary;
+/// ASCII case is ignored. Page sizes are bounded again by the store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportQuery {
+    pub q: String,
+    pub outcome: Option<ReportOutcome>,
+    pub posted: Option<bool>,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+impl Default for ReportQuery {
+    fn default() -> Self {
+        Self {
+            q: String::new(),
+            outcome: None,
+            posted: None,
+            page: 1,
+            page_size: 25,
+        }
+    }
+}
+
+/// One bounded report page with full-store counts for the dashboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportPage {
+    pub reports: Vec<LocalReport>,
+    pub total: u64,
+    pub matching: u64,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u64,
+    pub pending: u64,
+}
+
+// Keep the count and page predicates identical. The optional LIKE pattern
+// is bound after escaping its metacharacters; SQL syntax never comes from
+// user input. LOWER supplies explicit ASCII-insensitive search semantics.
+const REPORT_PAGE_FILTER: &str = r"
+ WHERE (?1 IS NULL
+        OR LOWER(dump_id) LIKE LOWER(?1) ESCAPE '\'
+        OR LOWER(kind) LIKE LOWER(?1) ESCAPE '\'
+        OR LOWER(analyzer_version) LIKE LOWER(?1) ESCAPE '\'
+        OR LOWER(summary) LIKE LOWER(?1) ESCAPE '\')
+   AND (?2 IS NULL OR outcome = ?2)
+   AND (?3 IS NULL OR posted = ?3)";
+
 /// Local verdicts produced in local-verdict mode (the server write-back
 /// route is absent); kept until POSTed.
 #[derive(Clone)]
@@ -1011,6 +1072,82 @@ impl LocalReportStore {
         rows.into_iter().map(RawLocalReport::into_report).collect()
     }
 
+    /// Counts all reports and all reports awaiting delivery, without a
+    /// recent-report limit and without loading their facts into memory.
+    pub fn counts(&self) -> Result<(u64, u64)> {
+        let guard = lock(&self.conn)?;
+        report_counts(&guard)
+    }
+
+    /// Browses reports newest first with bounded memory use. The shared
+    /// connection lock keeps counts and rows consistent with this process's
+    /// writers. Page zero becomes one, size is clamped to 1..=100, and pages
+    /// beyond the matching result set become its last page. An empty result
+    /// set has page one and zero total pages.
+    pub fn page(&self, query: &ReportQuery) -> Result<ReportPage> {
+        let guard = lock(&self.conn)?;
+        let (total, pending) = report_counts(&guard)?;
+        let pattern = if query.q.is_empty() {
+            None
+        } else {
+            let mut escaped = String::with_capacity(query.q.len() + 2);
+            escaped.push('%');
+            for ch in query.q.chars() {
+                if matches!(ch, '%' | '_' | '\\') {
+                    escaped.push('\\');
+                }
+                escaped.push(ch);
+            }
+            escaped.push('%');
+            Some(escaped)
+        };
+        let outcome = query.outcome.map(outcome_str);
+        let matching: u64 = guard
+            .query_row(
+                &format!("SELECT COUNT(*) FROM local_reports {REPORT_PAGE_FILTER}"),
+                params![pattern, outcome, query.posted],
+                |row| row.get(0),
+            )
+            .map_err(sql_err)?;
+        let page_size = query.page_size.clamp(1, 100);
+        let total_pages = matching.div_ceil(u64::from(page_size));
+        // The minimum is bounded by the requested u32 page. Computing the
+        // offset in i64 is safe even for u32::MAX at the maximum size 100.
+        let page = u64::from(query.page.max(1)).min(total_pages.max(1)) as u32;
+        let offset = i64::from(page - 1) * i64::from(page_size);
+        let mut stmt = guard
+            .prepare(&format!(
+                "SELECT dump_id, input_sha256, kind, analyzer_version, outcome,
+                        summary, facts_json, created_at, posted
+                   FROM local_reports
+                   {REPORT_PAGE_FILTER}
+                  ORDER BY created_at DESC, rowid DESC
+                  LIMIT ?4 OFFSET ?5"
+            ))
+            .map_err(sql_err)?;
+        let rows = stmt
+            .query_map(
+                params![pattern, outcome, query.posted, i64::from(page_size), offset],
+                RawLocalReport::from_row,
+            )
+            .map_err(sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_err)?;
+        let reports = rows
+            .into_iter()
+            .map(RawLocalReport::into_report)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(ReportPage {
+            reports,
+            total,
+            matching,
+            page,
+            page_size,
+            total_pages,
+            pending,
+        })
+    }
+
     /// Marks the stored verdict for `job` as POSTed. An unknown identity is
     /// a state error.
     pub fn mark_posted(&self, job: &JobIdentity) -> Result<()> {
@@ -1036,6 +1173,15 @@ impl LocalReportStore {
         }
         Ok(())
     }
+}
+
+fn report_counts(conn: &Connection) -> Result<(u64, u64)> {
+    conn.query_row(
+        "SELECT COUNT(*), COUNT(CASE WHEN posted = 0 THEN 1 END) FROM local_reports",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(sql_err)
 }
 
 /// Raw `local_reports` row; outcome is parsed after collection so an unknown

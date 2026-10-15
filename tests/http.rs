@@ -124,7 +124,17 @@ async fn http_dashboard_and_json_api() {
         .expect("body");
     assert!(html.contains("<title>DumpAnalyzer</title>"), "shell title");
     assert!(html.contains(r#"id="jobs""#), "jobs container");
-    assert!(html.contains("Jobs · work queue"), "queue heading");
+    assert!(html.contains("Work queue"), "queue heading");
+    for panel in ["queue", "dumps", "reports", "settings"] {
+        assert!(
+            html.contains(&format!("id=\"panel-{panel}\"")),
+            "separate {panel} panel"
+        );
+        assert!(
+            html.contains(&format!("href=\"#{panel}\"")),
+            "{panel} navigation"
+        );
+    }
     assert!(html.contains("No active jobs."), "queue empty state");
     assert!(html.contains("/api/capabilities"), "capabilities probe");
 
@@ -1752,6 +1762,17 @@ async fn manual_execution_is_visible_in_jobs_and_explorer_until_completion() {
         dumps["customers"][0]["cases"][0]["dumps"][0]["analysisPhase"],
         "claimed"
     );
+    let page: serde_json::Value = serde_json::from_str(
+        &read("/api/dumps/browse?customerId=customer_01JAA0XYZ&caseId=case_01JAB0XYZ")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(page["dumps"][0]["analysisPhase"], "claimed");
     analyzer.release.notify_one();
     assert_eq!(request.await.unwrap().status(), 200);
     let jobs: serde_json::Value = serde_json::from_str(
@@ -1767,4 +1788,177 @@ async fn manual_execution_is_visible_in_jobs_and_explorer_until_completion() {
     assert!(jobs["jobs"].as_array().unwrap().is_empty());
     shutdown.cancel();
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn http_reports_are_bounded_and_status_counts_cover_the_complete_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("reports.sqlite")).unwrap();
+    for n in 0..257 {
+        let id = identity(&format!("dump_REPORT{n:04}"), SHA256_A);
+        store
+            .local_reports()
+            .insert(
+                &id,
+                if n % 2 == 0 {
+                    ReportOutcome::Completed
+                } else {
+                    ReportOutcome::Failed
+                },
+                "searchable report",
+                "{}",
+            )
+            .unwrap();
+        if n % 2 == 0 {
+            store.local_reports().mark_posted(&id).unwrap();
+        }
+    }
+    let ui = start(store).await;
+    let client = test_client();
+    let base = format!("http://{}", ui.addr);
+    let get = |path: &str| client.get(format!("{base}{path}"));
+    let result: serde_json::Value = serde_json::from_str(
+        &get("/api/reports")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["total"], 257);
+    assert_eq!(result["matching"], 257);
+    assert_eq!(result["reports"].as_array().unwrap().len(), 25);
+    assert_eq!(result["pageSize"], 25);
+    assert_eq!(result["totalPages"], 11);
+    let result: serde_json::Value = serde_json::from_str(
+        &get("/api/reports?page=2&pageSize=10&outcome=failed&delivery=pending&q=searchable")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["page"], 2);
+    assert_eq!(result["matching"], 128);
+    assert_eq!(result["reports"].as_array().unwrap().len(), 10);
+    assert!(
+        result["reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["outcome"] == "failed" && r["posted"] == false)
+    );
+    let status: serde_json::Value = serde_json::from_str(
+        &get("/api/status")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status["reports"]["total"], 257);
+    assert_eq!(status["reports"]["pending"], 128);
+    for query in [
+        "page=0",
+        "pageSize=101",
+        "pageSize=0",
+        "page=wat",
+        "page=1&page=2",
+        "outcome=unknown",
+        "delivery=unknown",
+        "unknown=1",
+    ] {
+        let response = get(&format!("/api/reports?{query}")).send().await.unwrap();
+        assert_eq!(response.status(), 400, "{query}");
+    }
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn http_dump_browse_returns_one_level_and_one_page() {
+    let server = MockServer::start().await;
+    let dumps: Vec<_> = (0..60)
+        .map(|n| catalog_entry(&format!("dump_PAGE{n:03}")))
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dumps"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"dumps":dumps})))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("browse.sqlite")).unwrap();
+    let ui = start_with_explorer(store, &server.uri()).await;
+    let client = test_client();
+    let base = format!("http://{}", ui.addr);
+    let get = |path: &str| client.get(format!("{base}{path}"));
+    let root: serde_json::Value = serde_json::from_str(
+        &get("/api/dumps/browse")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(root["level"], "customers");
+    assert_eq!(root["total"], 60);
+    assert_eq!(root["customers"].as_array().unwrap().len(), 1);
+    assert!(root["customers"][0].get("cases").is_none());
+    assert!(root["dumps"].as_array().unwrap().is_empty());
+    let cases: serde_json::Value = serde_json::from_str(
+        &get("/api/dumps/browse?customerId=customer_01JAA0XYZ")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cases["level"], "cases");
+    assert_eq!(cases["cases"][0]["dumpCount"], 60);
+    assert!(cases["dumps"].as_array().unwrap().is_empty());
+    let result:serde_json::Value=serde_json::from_str(&get("/api/dumps/browse?customerId=customer_01JAA0XYZ&caseId=case_01JAB0XYZ&page=2&pageSize=25").send().await.unwrap().text().await.unwrap()).unwrap();
+    assert_eq!(result["level"], "dumps");
+    assert_eq!(result["scopeDumpCount"], 60);
+    assert_eq!(result["matching"], 60);
+    assert_eq!(result["dumps"].as_array().unwrap().len(), 25);
+    assert_eq!(result["page"], 2);
+    assert_eq!(result["totalPages"], 3);
+    for query in [
+        "caseId=case_01JAB0XYZ",
+        "page=0",
+        "pageSize=101",
+        "customerId=",
+        "page=1&page=2",
+        "other=1",
+    ] {
+        assert_eq!(
+            get(&format!("/api/dumps/browse?{query}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400,
+            "{query}"
+        );
+    }
+    assert_eq!(
+        get("/api/dumps/browse?customerId=customer_UNKNOWN")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
 }
