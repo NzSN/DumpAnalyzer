@@ -8,14 +8,17 @@
 
 pub mod agent;
 pub mod analyzer;
+pub mod assessment;
 pub mod claude_runner;
 pub mod client;
 pub mod config;
 pub mod explorer;
 pub mod http;
+pub mod report;
 pub mod runner;
 pub mod scheduler;
 pub mod state;
+pub mod symbols;
 pub mod sync;
 pub mod types;
 pub mod verdict;

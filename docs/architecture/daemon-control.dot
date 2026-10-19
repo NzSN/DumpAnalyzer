@@ -1,0 +1,50 @@
+digraph DaemonControl {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.5", fontname="DejaVu Sans", fontsize=15];
+  node [shape=box, style="rounded,filled", fillcolor="#edf3fc", color="#7397c5", fontname="DejaVu Sans", fontsize=12, margin="0.16,0.12"];
+  edge [color="#63758a", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
+  start [label="main\nparse Config · select ToolRunner · install signal watcher", shape=oval];
+  open [label="Acquire state lock → open / migrate SQLite\nResolve env token or persisted token"];
+  recover [label="Recover volatile jobs to Claimed\nReconcile Reporting / pending reports\nSweep orphaned run-* workspaces"];
+  scan [label="Initial catalog scan with retry\nHappens even when scheduler=off"];
+  fork [label="Start HTTP task + three supervised futures\nShared store, configuration and ToolRunner", fillcolor="#fff4d9", color="#c99c39"];
+  start -> open -> recover -> scan -> fork;
+  subgraph cluster_feed {
+    label="Feed follower"; color="#b5c9e2"; style=rounded;
+    feed [label="Read next audit page\nfrom durable cursor"];
+    apply [label="Recheck eligible dump details\nInsert Discovered / archive purged jobs\nThen advance cursor"];
+    feed -> apply;
+    apply -> feed [label="poll / transient backoff"];
+  }
+  subgraph cluster_scheduler {
+    label="Automatic scheduler"; color="#b5c9e2"; style=rounded;
+    enabled [label="scheduler enabled?", shape=diamond];
+    claim [label="Resume Claimed jobs first\nOtherwise claim oldest Discovered"];
+    run [label="Agent::run_job\nWait for this job before next claim"];
+    auto_idle [label="Wait for shutdown\nNo automatic claims", fillcolor="#f0f2f5", color="#8a99aa"];
+    enabled -> claim [label="yes"];
+    enabled -> auto_idle [label="off"];
+    claim -> run [label="job available"];
+    run -> claim [label="next job / backoff"];
+  }
+  subgraph cluster_delivery {
+    label="Independent report delivery"; color="#b5c9e2"; style=rounded;
+    wb [label="write-back enabled?", shape=diamond];
+    replay [label="Every 60 s: replay pending reports\nSettle late Reporting rows"];
+    local [label="Wait for shutdown\nLocal reports only", fillcolor="#eaf6ee", color="#6eac81"];
+    wb -> replay [label="yes"];
+    wb -> local [label="off"];
+    replay -> replay [label="independent of analysis"];
+  }
+  subgraph cluster_http {
+    label="Optional HTTP task"; color="#e3c77b"; style=rounded;
+    listen [label="Bind configured address\nDefault 127.0.0.1:4180", fillcolor="#fff4d9", color="#c99c39"];
+    request [label="GET: read views\nPOST: manual / scope / rescan / token\nSpawn task per connection", fillcolor="#fff4d9", color="#c99c39"];
+    listen -> request;
+  }
+  fork -> feed;
+  fork -> enabled;
+  fork -> wb;
+  fork -> listen [label="if HTTP enabled", style=dashed];
+  signal [label="SIGINT / SIGTERM → cancellation\nFeed stops; scheduled in-flight job drains\nHTTP connection tasks are not joined", shape=note, fillcolor="#f0f2f5", color="#8a99aa"];
+  fork -> signal [style=dotted, arrowhead=none, constraint=false];
+}

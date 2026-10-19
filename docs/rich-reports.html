@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DumpAnalyzer rich reports · implementation and qualification</title><style>body{font:16px/1.65 system-ui,sans-serif;color:#202e40;background:#f5f7fa;margin:0}header{background:#182b42;color:white;padding:24px max(20px,calc((100vw - 1100px)/2))}header strong{display:block;font-size:24px}header p{color:#d4dfed;margin:6px 0}nav{display:flex;flex-wrap:wrap;gap:14px;margin-top:16px}nav a{color:#dceaff;font-size:14px}main{max-width:1140px;margin:auto;padding:35px 20px 80px}h1{font-size:34px;line-height:1.3}h2{margin-top:55px;line-height:1.4;border-top:1px solid #d5dde7;padding-top:20px;scroll-margin-top:15px}h3{margin-top:30px}a{color:#1857a4}p,li{max-width:105ch}table{display:block;overflow:auto;border-collapse:collapse;background:white;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border:1px solid #d5dde7;padding:10px 13px}th{background:#e9eef5}code{font:0.87em ui-monospace,Consolas,monospace;overflow-wrap:anywhere}pre{overflow:auto;background:#e9eef5;border-radius:5px;padding:17px;line-height:1.5}p code,li code{background:#e9eef5;padding:1px 4px}a:focus-visible{outline:3px solid #367ac6;outline-offset:3px}@media(max-width:700px){main{padding:20px 16px}h1{font-size:28px}body{font-size:15px}nav{gap:10px}}</style></head><body><header><strong>DumpAnalyzer 0.2.0</strong><p>Rich report implementation and qualification · 2026-10-15</p><nav aria-label="Report sections"><a href="#report-path">Report path</a><a href="#identity-and-preservation">Identity and preservation</a><a href="#local-interfaces-and-ui">Local interfaces and UI</a><a href="#full-delivery-and-compatibility">Full delivery and compatibility</a><a href="#qualification-and-rollout">Qualification and rollout</a></nav></header><main><h1>Rich reports and operator workflow</h1>
+<p>Status: implementation validated, 2026-10-15. Corrected live Claude qualification awaits explicit external-destination authorization; local DumpAnalyzer 0.2.0 was deployed on 2026-10-15; the companion service was not upgraded. The implementation starts from DumpAnalyzer <code>0bb92ae</code> and the companion DumpLedger <code>80fb95a</code>. This document records the working-tree behavior; it is not a production deployment receipt.</p>
+<h2 id="report-path">Report path</h2>
+<pre><code class="language-text">verified dump bytes → named CDB evidence → deterministic assessment
+                                               ↓
+                    optional Claude host: evidence-only narrative / hypotheses
+                                               ↓
+                         canonical CrashReportV2 + SHA-256 digest
+                                               ↓
+                SQLite transaction: full detail + compact row + phase handoff
+                              ↙                              ↘
+                   lazy report detail                  publication outbox
+                                                       v2 full report
+                                                       v1 bound summary fallback
+</code></pre>
+<p>The canonical report contains exception record/context, address-bearing native stack, module/PDB qualification, causal assessment, retained command excerpts and explicit completeness limits. Addresses and exception parameters are hexadecimal strings. The implemented parser targets native Windows x64; it does not reconstruct JavaScript, asynchronous or managed stacks.</p>
+<p>Deterministic collection precedes reasoning. The underlying cause can be <code>unknown</code> even when the immediate fault mechanism is <code>confirmed</code>. The first mechanism rule verifies a simple register-indirect MOV read against the saved exception address, operation, registers and faulting instruction. It does not establish pointer lifetime, corruption origin or source ownership. No confirmed-origin rule is currently implemented. A model cannot create one by supplying valid citations or a rule name.</p>
+<p>The optional <code>claude-cdb</code> adapter uses the same deterministic collector, then an isolated duplex stream-JSON host with no enabled tools or MCP servers. Its reviewed policy denies every tool request. Model, transport, timeout or validation failure retains the deterministic report and records the missing reasoning stage. Model output cannot replace the captured exception, context, stack, symbols or checked mechanism.</p>
+<h2 id="identity-and-preservation">Identity and preservation</h2>
+<p>Local staging, stream reads and child reaping share a deadline; cleanup has a separate two-second grace. Per-stream SSH reads use the smaller transport/request cap before the combined transcript is reduced to the per-run budget. Optional symbol failures preserve essential evidence. A mandatory acquisition interrupted before usable evidence may still return a runner error. Killing the local SSH client does not prove that a remote CDB process or its children terminated; this release does not implement a Windows Job Object supervisor.</p>
+<p>The default analyzer version is <code>0.2.0</code>. <code>DUMP_ANALYZER_VERSION=0.1.0</code> is rejected because that identity belongs to legacy compact capture. Use a distinct version for intentional new evidence or a changed analysis profile. Discovery, manual requests and explorer overlays share this configured version. Automatic claims are restricted to that version; obsolete active executions are archived <code>Dropped</code> at boot, while historical reports and pending legacy delivery remain intact.</p>
+<p>Report IDs are <code>r2_</code> plus SHA-256 over length-prefixed dump ID, input SHA-256, kind, analyzer name and analyzer version. The JSON digest hashes UTF-8 canonical JSON, with recursively sorted object keys. Delivery transmits the exact JSON string so JavaScript and Rust do not disagree about reserialization. Delivery metadata is stored outside the immutable document.</p>
+<p>Migration 4 adds report detail storage and stable list IDs without replacing jobs, cursors, secrets, cache indexes or old reports. New reports commit full JSON, digest, compact row and eligible <code>Reporting</code> handoff in one transaction. Different evidence under the same immutable identity is an explicit conflict. Manual retries return an existing full report; they refuse to replace a legacy report under the same identity. Late completion preserves a concurrent purge or terminal settlement.</p>
+<p>Dump bytes remain in the filesystem cache. Structured evidence is owned by the report before workspaces are wiped. This release retains bounded command excerpts in canonical JSON; it does not promise a durable complete raw-transcript artifact. Locally retained reports survive a catalog purge, matching the previous local report policy; remote publication is abandoned when the dump is gone. Companion details cascade when the remote analysis row is purged.</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Canonical JSON</td>
+<td>512 KiB; invalid oversized documents are rejected explicitly.</td>
+</tr>
+<tr>
+<td>Native stack</td>
+<td>128 frames with declared truncation.</td>
+</tr>
+<tr>
+<td>Detailed modules</td>
+<td>64. A symbol-looking function name is insufficient for matching.</td>
+</tr>
+<tr>
+<td>Evidence excerpts</td>
+<td>Up to 32 entries, 8 KiB UTF-8 text per entry; truncation is explicit.</td>
+</tr>
+<tr>
+<td>Transcript acquisition ceiling</td>
+<td>4 MiB maximum retained by the report acquisition policy; the configured run output bound can be smaller.</td>
+</tr>
+<tr>
+<td>Legacy projection</td>
+<td>Summary up to 2,000 characters, facts 4 KiB, v1 body 16 KiB. Schema, report ID and digest are reserved fields.</td>
+</tr>
+<tr>
+<td>V2 request</td>
+<td>1 MiB route-specific envelope bound. V1 limits remain unchanged.</td>
+</tr>
+</tbody>
+</table>
+<p>Expected PDB GUID/age come from the dump's RSDS data. Loaded PDB GUID/age are read independently from the actual loaded file. Only equality qualifies <code>matched</code>; unreadable identity remains <code>unverified</code>, and mismatches never gain source/symbol qualification. Exports, missing PDBs and unwind reliability are separate states. Source labels carry the module's qualification and are not a claim that a local source checkout was verified.</p>
+<h2 id="local-interfaces-and-ui">Local interfaces and UI</h2>
+<p><code>GET /api/reports</code> remains a bounded summary page. Rows add <code>reportId</code>, <code>schemaVersion</code>, <code>detailAvailable</code> and <code>fullDelivery</code>; SQL does not load canonical JSON or legacy facts for list rows.</p>
+<p><code>GET /api/reports/:reportId</code> returns one detail wrapper:</p>
+<pre><code class="language-json">{
+  &quot;reportId&quot;: &quot;r2_…&quot;, &quot;schemaVersion&quot;: 2, &quot;detailAvailable&quot;: true,
+  &quot;fullDelivery&quot;: &quot;localOnly&quot;, &quot;digest&quot;: &quot;…&quot;,
+  &quot;report&quot;: { &quot;schemaVersion&quot;: 2, &quot;exception&quot;: {}, &quot;context&quot;: {}, &quot;stack&quot;: {}, &quot;rootCause&quot;: {} },
+  &quot;legacy&quot;: null, &quot;warning&quot;: null
+}
+</code></pre>
+<p><code>GET /api/reports/:reportId/evidence/:evidenceId</code> selects a retained excerpt. Detail and excerpt reads use the dashboard's existing local-viewer read policy: anonymous, with a loopback listener by default. Report IDs are locators, not access credentials. Deployments exposing this listener must supply their intended viewer access controls; this feature does not add a new caller-authentication scheme.</p>
+<p>Details opens <code>#reports?reportId=…</code> with the prior page and filters retained. It fetches on selection, uses a small bounded cache and pauses list polling while inspecting a report. The view shows conclusion/quality, exception and registers/instructions, frames with symbol/unwind quality, module evidence and command excerpts. All debugger/model text is escaped. JSON download exports the selected detail without another full-list request.</p>
+<p>Legacy reports show <strong>Legacy report — detailed sections were not captured</strong>. Their surviving summary/facts remain readable. Reanalysis under a new version is necessary to obtain missing evidence; history is not upgraded by inventing fields.</p>
+<h2 id="full-delivery-and-compatibility">Full delivery and compatibility</h2>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>localOnly</code></td>
+<td>Full report is retained locally; publication was disabled.</td>
+</tr>
+<tr>
+<td><code>pendingFull</code></td>
+<td>Full report awaits a v2 acknowledgement.</td>
+</tr>
+<tr>
+<td><code>summaryOnly</code></td>
+<td>An older server accepted the digest-bound v1 summary; full detail remains outstanding.</td>
+</tr>
+<tr>
+<td><code>fullyDelivered</code></td>
+<td>V2 acknowledged the exact full JSON, digest and compact metadata.</td>
+</tr>
+<tr>
+<td><code>abandoned</code></td>
+<td>The report cannot attach remotely, for example after purge or permanent rejection. Local evidence remains.</td>
+</tr>
+</tbody>
+</table>
+<p>The legacy <code>posted</code> flag continues to support old reports; it is not proof of full delivery. The independent full outbox scans identity metadata and loads one document at a time. Summary acceptance never suppresses later full delivery. Queue settlement remains separate from delivery completeness, so old-server compatibility does not leave a phantom running analysis.</p>
+<p>The companion supports authenticated <code>GET /api/v2/capabilities</code>, <code>POST /api/v2/dumps/:dumpId/analyses</code> and lazy <code>GET /api/v2/dumps/:dumpId/analyses/:analysisId</code>. A v2 submission adds <code>reportJson</code> and <code>reportDigest</code> to the existing compact submission. A response echoes the compact stored analysis and both full-detail fields. The analyzer validates that acknowledgement before marking full delivery.</p>
+<p>Equal identity/content replays. Conflicting content rejects with 409. A v1 summary may be promoted atomically under its existing analysis ID only if its metadata and reserved digest/ID binding match; an unbound legacy summary cannot be promoted by assumption. The companion's old transfer format cannot preserve rich details, so affected exports/imports are explicitly blocked instead of silently discarding them. See the companion's <code>docs/rich-reports.md</code> for its contract and transfer restriction.</p>
+<h2 id="qualification-and-rollout">Qualification and rollout</h2>
+<p>The fixture inventory is in <a href="../tests/fixtures/report-v2/qualification/README.md">tests/fixtures/report-v2/qualification</a>. Binary dump, EXE and PDB artifacts remain outside Git. The fixture has a known null read and independently checked matching/mismatched GUID/age; it is separate from customer dumps.</p>
+<p>An isolated canary helper runs one explicitly selected local dump through the actual configured SSH runner and writes a new canonical file. It does not scan the catalog or publish reports:</p>
+<pre><code class="language-sh">cargo run --offline --locked --example rich-report-canary -- \
+  /tmp/rich-report-canary-20261015/null-read.dmp \
+  D:/da/rich-report-canary-20261015/matching \
+  /tmp/rich-report-matching.json windows-dev cdb-ssh
+</code></pre>
+<p>Before replacing any deployed binary, stop it gracefully, back up SQLite using its backup API, and dry-run the additive migration on a copy. Compare integrity, pre-existing table counts and retained data, then keep the daemon in manual/write-back-off mode. Inspect a bounded canary before widening reanalysis or enabling full publication. Restore the saved binary/config/database checkpoint for rollback, accounting for any writes after upgrade. No catalog-wide automatic reanalysis is part of this rollout.</p>
+<p>The implementation is covered by <strong>355 passing Rust tests</strong>, including MirrorRust replay of 33 traces/20 actions, and <strong>506 passing companion tests</strong>, including contracts, migrations, HTTP and MBT. The two Rust tests ignored by the default run are the existing live TLS probe and the approval-gated live Claude check. Formatting, Clippy with warnings denied, corpus freshness and companion model-interface checks passed.</p>
+<p>Seventeen synthetic browser checks cover a 10,000-report list, lazy selection, Back/Forward, partial/legacy states, escaping, bounded caching and mobile. A GET-only browser canary also inspected the actual captured report from SQLite: five frames, matching PDB, source line 12, raw exception/context and a visible unknown cause, fetched once on selection.</p>
+<p>The native matching canary qualified <code>ReadNull -&gt; CanaryEntry -&gt; main</code> at source lines 12/14/15. The wrong PDB retained raw addresses without qualified source. The exact 24,259-byte report survived Rust publication, idempotent replay, local reopen and an isolated DumpLedger restart under one analysis ID and digest. The live local database migration was proved on private copies: all old table data, including 34 reports, 79 inventory/queue rows and secrets, remained unchanged. Both isolated test services stopped cleanly.</p>
+<p>Receipts and controlled reports: <a href="../tests/fixtures/report-v2/qualification/manifest.json">qualification manifest</a>, <a href="../tests/fixtures/report-v2/qualification/integration-receipt.json">integrated results</a>, <a href="../tests/fixtures/report-v2/qualification/local-migration-receipt.json">migration receipt</a>, <a href="../tests/fixtures/report-v2/qualification/actual-matching-report.json">matching report</a>, <a href="../tests/fixtures/report-v2/qualification/ledger-roundtrip-provenance.json">restart/delivery provenance</a>.</p>
+<h3>Remaining live gate</h3>
+<p>The initial actual Claude host started and recorded its model, but its structured-output path returned an error while preserving deterministic evidence. The adapter now requests plain JSON and validates it locally, avoiding a formatting tool under the deny-all policy. Fake-host tests cover this path. <strong>Successful live reasoning after that correction is not yet verified.</strong> Automatic approval review rejected the authored-fixture live test because it would transmit evidence to an external Claude destination without explicit user authorization. No blocked command was executed or bypassed.</p>
+<p>After explicit approval, the final check sends only authored synthetic debugger evidence, uses no SSH/dump transfer and keeps every model tool denied:</p>
+<pre><code class="language-sh">ANTHROPIC_BASE_URL=https://api.anthropic.com \
+DUMP_ANALYZER_LIVE_TEST_OUTPUT=/tmp/dumpanalyzer-live-reasoner-authorized.json \
+cargo test --offline --locked --test claude_runner \
+  live_reasoner_over_synthetic_fixture_without_remote_dump_transfer -- \
+  --ignored --exact --nocapture
+</code></pre>
+<p>The local DumpAnalyzer daemon is now deployed at 0.2.0 with manual operation and write-back off; see the <a href="local-deployment-2026-10-15.md">local deployment receipt</a>. Its 34 historical reports remain legacy records. The remote companion service was not upgraded, and no full-report publication or catalog-wide reanalysis was performed.</p>
+</main></body></html>

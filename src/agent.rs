@@ -118,7 +118,7 @@ pub struct RecoveryReport {
 /// dump that cannot be analyzed is a report, not an error.
 #[derive(Debug)]
 pub enum Attempt {
-    Completed(RunOutput),
+    Completed(Box<RunOutput>),
     Purged,
     Transient(AnalyzerError),
     Terminal(AnalyzerError),
@@ -332,7 +332,13 @@ impl Agent {
             };
 
             // --- Stage 7: report (spec SubmitAccept/Replay/Purged). ---
-            self.store.jobs().set_phase(identity, JobPhase::Reporting)?;
+            crate::verdict::prepare_report(
+                &self.store,
+                identity,
+                &output,
+                &self.config,
+                crate::state::ReportHandoff::Scheduled,
+            )?;
             return self.report(identity, output).await;
         }
     }
@@ -387,7 +393,7 @@ impl Agent {
         // The per-run workspace is wiped after every attempt.
         drop(workspace);
         match outcome {
-            Ok(output) => Ok(Attempt::Completed(output)),
+            Ok(output) => Ok(Attempt::Completed(Box::new(output))),
             Err(err) if err.is_transient() => Ok(Attempt::Transient(err)),
             Err(err) => Ok(Attempt::Terminal(err)),
         }

@@ -85,7 +85,13 @@ impl VerdictWriter {
 #[async_trait]
 impl VerdictSink for VerdictWriter {
     async fn submit(&self, identity: &JobIdentity, output: RunOutput) -> Result<()> {
-        let submission = verdict::assemble(identity, output, &self.config)?;
+        let (_, submission) = verdict::prepare_report(
+            &self.store,
+            identity,
+            &output,
+            &self.config,
+            crate::state::ReportHandoff::None,
+        )?;
         verdict::submit(&self.client, &self.store, identity, &submission).await
     }
 }
@@ -115,6 +121,14 @@ pub async fn run(
 
     // --- Boot (design: "Restart reconciliation"). ---
     let recovery = Agent::recover(&store)?;
+    for row in store.jobs().work_queue()? {
+        if row.identity.analyzer_version != config.version
+            && row.phase != crate::types::JobPhase::Reporting
+        {
+            tracing::info!(dump_id=%row.identity.dump_id, previous_version=%row.identity.analyzer_version, "retiring execution from an older capture profile; report history retained");
+            store.jobs().drop_job(&row.identity)?;
+        }
+    }
     tracing::info!(
         reset = recovery.reset_to_claimed.len(),
         "crash recovery complete"
@@ -187,7 +201,7 @@ pub async fn run(
         "dump-analyzer started"
     );
 
-    // Read-only status UI (DUMP_ANALYZER_HTTP_ADDR; loopback by default).
+    // Dashboard and explicit actions (HTTP_ADDR; loopback by default).
     // Failure to serve is logged, not fatal: the pipeline is the product.
     if let Some(addr) = config.http_addr {
         // The on-demand component (f : DumpId -> IO Report) backs the UI's
@@ -428,7 +442,10 @@ async fn scheduler_loop(
     let mut recovered = std::collections::VecDeque::from(
         store
             .jobs()
-            .jobs_in_phase(crate::types::JobPhase::Claimed)?,
+            .jobs_in_phase(crate::types::JobPhase::Claimed)?
+            .into_iter()
+            .filter(|(identity, _)| identity.analyzer_version == config.version)
+            .collect::<Vec<_>>(),
     );
     loop {
         if shutdown.is_cancelled() {
@@ -440,7 +457,7 @@ async fn scheduler_loop(
             }
             Ok(Some((identity, attempts)))
         } else {
-            store.jobs().claim_next()
+            store.jobs().claim_next_for_version(&config.version)
         };
         match next {
             Ok(Some((identity, attempts))) => {

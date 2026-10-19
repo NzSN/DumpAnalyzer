@@ -187,6 +187,7 @@ impl BlockingAnalysis {
 
 fn good_output() -> RunOutput {
     RunOutput {
+        capture: None,
         outcome: ReportOutcome::Completed,
         summary: "access violation in app".to_string(),
         facts: serde_json::json!({ "exceptionCode": "0xc0000005" }),
@@ -481,7 +482,7 @@ async fn analyze_manual_completion_preserves_a_scheduled_jobs_execution_phase() 
 }
 
 #[tokio::test]
-async fn analyze_previously_posted_report_settles_without_pending_delivery() {
+async fn analyze_refuses_to_replace_legacy_report_under_same_identity() {
     let server = MockServer::start().await;
     mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
     mount_content(&server).await;
@@ -502,14 +503,30 @@ async fn analyze_previously_posted_report_settles_without_pending_delivery() {
         .mark_posted(&identity())
         .expect("posted");
 
-    analyze_once(config, store.clone()).await;
-
-    assert_eq!(
-        store.jobs().phase_of(&identity()).expect("phase"),
-        Some(JobPhase::Done)
+    let client = dump_analyzer::client::LedgerClient::new(&config).unwrap();
+    let analyzer = PipelineAnalyzer::new(
+        client,
+        store.clone(),
+        config,
+        Arc::new(FakeRunner {
+            queue: Mutex::new(vec![]),
+        }),
     );
-    assert!(store.jobs().list().expect("queue").is_empty());
-    assert!(store.local_reports().pending().expect("pending").is_empty());
+    assert!(matches!(
+        analyzer.analyze(DUMP_ID).await,
+        Err(AnalyzeError::NotAvailable { .. })
+    ));
+    assert_eq!(
+        store
+            .local_reports()
+            .get(&identity())
+            .unwrap()
+            .unwrap()
+            .summary,
+        "previous report"
+    );
+    assert!(store.jobs().work_queue().unwrap().is_empty());
+    assert!(store.local_reports().pending().unwrap().is_empty());
 }
 
 #[tokio::test]

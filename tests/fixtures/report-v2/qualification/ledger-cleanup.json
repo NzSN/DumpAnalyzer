@@ -1,0 +1,23 @@
+{
+  "purpose": "Isolated P6 service cleanup; production services were not touched",
+  "completedAt": "2026-10-15T09:21:01.573Z",
+  "serverPid": 338622,
+  "gracefulExitCode": 0,
+  "processAbsent": true,
+  "loopbackPortClosed": true,
+  "connectionError": "ECONNREFUSED",
+  "temporaryDatabaseRetained": true,
+  "stateDir": "/tmp/dump-ledger-rich-canary-C7W48P",
+  "analysisId": "analysis_3185A765CD97401E925BBA922F",
+  "reportDigest": "1efe8ffd0f1644ac544bb0cfec0f188f14eb5ef7dd407c52ebc048b0fa7276cd",
+  "counts": {
+    "analyses": 1,
+    "details": 1
+  },
+  "integrity": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "foreignKeys": []
+}

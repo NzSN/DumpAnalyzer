@@ -1,0 +1,44 @@
+digraph JobControl {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.5", fontname="DejaVu Sans", fontsize=15];
+  node [shape=box, style="rounded,filled", fillcolor="#edf3fc", color="#7397c5", fontname="DejaVu Sans", fontsize=12, margin="0.16,0.12"];
+  edge [color="#63758a", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
+  subgraph cluster_auto {
+    label="Scheduled entry · persistent phases"; color="#b5c9e2"; style=rounded;
+    discovered [label="Discovered\nInventory candidate; hidden from Jobs", fillcolor="#f0f2f5", color="#8a99aa"];
+    claimed [label="Claimed\nAtomic scheduler claim"];
+    fetch [label="Fetching → Staged\nGet/cache bytes; verify pinned SHA-256"];
+    analyze [label="Analyzing\nToolRunner::run in temporary workspace"];
+    reporting [label="Reporting\nRunner produced a verdict"];
+    discovered -> claimed -> fetch -> analyze -> reporting;
+  }
+  subgraph cluster_manual {
+    label="Manual entry · ephemeral active registry"; color="#e3c77b"; style=rounded;
+    action [label="POST analyze / case / customer\nScope: sequential, at most 64 dumps", fillcolor="#fff4d9", color="#c99c39"];
+    gate [label="Get detail → require available + sealed\nPin identity; register active manual job"];
+    attempt [label="Agent::attempt\nFetch / cache → SHA verify → ToolRunner\nAt most two attempts for transient errors"];
+    action -> gate -> attempt;
+  }
+  assemble [label="verdict::assemble\nBound summary / facts / JSON body", fillcolor="#fff4d9", color="#c99c39"];
+  save [label="Persist compact report in local_reports\nBefore any write-back call", shape=cylinder, fillcolor="#eaf6ee", color="#6eac81"];
+  mode [label="write-back enabled?", shape=diamond];
+  entry [label="entry point?", shape=diamond];
+  pending [label="Manual: return report now\nLeave eligible idle job Reporting\nActive guard clears on return"];
+  post [label="POST analyses\nScheduled: immediate\nPending manual: delivery sweep"];
+  retry [label="Retain pending report\nReplay every 60 s / on restart"];
+  archive [label="Terminal transition\nDone / Failed / Dropped → settled_jobs\nAtomically removed from physical jobs", shape=cylinder, fillcolor="#eaf6ee", color="#6eac81"];
+  reporting -> assemble;
+  attempt -> assemble;
+  assemble -> save -> mode;
+  mode -> archive [label="off: scheduled / eligible idle row\nsettles Done locally"];
+  mode -> entry [label="on"];
+  entry -> post [label="scheduled"];
+  entry -> pending [label="manual"];
+  pending -> post [label="60 s delivery loop"];
+  post -> archive [label="accepted / terminal rejection\nroute absent: local Done + pending copy"];
+  post -> retry [label="transient / route absent"];
+  retry -> post [label="replay"];
+  fetch -> archive [label="purged / retry budget exhausted", style=dashed, constraint=false];
+  analyze -> archive [label="terminal tool failure", style=dashed, constraint=false];
+  note [label="Queue view = persistent active phases + active manual rows\nManual rows show Claimed; scheduled concurrency 1 is not a global limit\nManual completion preserves running or archived identities\nDone is settlement, independent of completed / failed report outcome", shape=note, fillcolor="#f0f2f5", color="#8a99aa"];
+  archive -> note [style=dotted, arrowhead=none];
+}

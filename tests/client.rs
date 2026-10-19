@@ -221,6 +221,183 @@ fn error_envelope(code: &str) -> Value {
     })
 }
 
+fn rich_fixture() -> (
+    dump_analyzer::state::StoredReport,
+    AnalysisReportSubmission,
+    Value,
+) {
+    let job = dump_analyzer::types::JobIdentity {
+        dump_id: DUMP_ID.into(),
+        input_sha256: SHA256.into(),
+        kind: "triage".into(),
+        analyzer_version: "0.2.0".into(),
+    };
+    let report = dump_analyzer::report::CrashReportV2::from_output(
+        &job,
+        "dump-analyzer",
+        &dump_analyzer::types::RunOutput {
+            outcome: ReportOutcome::Completed,
+            summary: "Captured report; origin unknown".into(),
+            facts: json!({}),
+            capture: None,
+        },
+    )
+    .expect("report");
+    let projection = report.compact_output().expect("projection");
+    let compact = AnalysisReportSubmission::new(
+        Analyzer {
+            name: report.identity.analyzer_name.clone(),
+            version: job.analyzer_version,
+        },
+        job.kind,
+        job.input_sha256,
+        projection.outcome,
+        projection.summary,
+        Some(projection.facts),
+        None,
+    )
+    .expect("compact");
+    let stored = dump_analyzer::state::StoredReport {
+        report_json: report.canonical_json().expect("canonical"),
+        digest: report.digest().expect("digest"),
+        report,
+        delivery: dump_analyzer::state::FullDelivery::PendingFull,
+    };
+    let mut response = serde_json::to_value(&compact).expect("metadata");
+    response["analysisId"] = json!("analysis_rich_fixture");
+    response["dumpId"] = json!(DUMP_ID);
+    response["createdAt"] = json!("2026-10-15T03:00:00.000Z");
+    response["reportJson"] = json!(stored.report_json);
+    response["reportDigest"] = json!(stored.digest);
+    (stored, compact, response)
+}
+
+#[tokio::test]
+async fn rich_post_requires_full_ack_echo_and_closed_metadata() {
+    let server = MockServer::start().await;
+    let client = client_for(&server).await;
+    let (stored, compact, response) = rich_fixture();
+    let mut cases = Vec::new();
+    let mut wrong_digest = response.clone();
+    wrong_digest["reportDigest"] = json!("b".repeat(64));
+    cases.push((wrong_digest, true));
+    let mut changed_bytes = response.clone();
+    changed_bytes["reportJson"] = json!(format!("{}\n", stored.report_json));
+    cases.push((changed_bytes, true));
+    let mut changed_metadata = response.clone();
+    changed_metadata["analyzer"]["version"] = json!("different-version");
+    cases.push((changed_metadata, true));
+    let mut changed_binding = response.clone();
+    changed_binding["facts"]["reportDigest"] = json!("b".repeat(64));
+    cases.push((changed_binding, true));
+    let mut summary_only = response.clone();
+    summary_only
+        .as_object_mut()
+        .expect("object")
+        .remove("reportJson");
+    summary_only
+        .as_object_mut()
+        .expect("object")
+        .remove("reportDigest");
+    cases.push((summary_only, false));
+    let mut unknown_field = response;
+    unknown_field["unexpected"] = json!(true);
+    cases.push((unknown_field, false));
+    for (index, (response, integrity)) in cases.into_iter().enumerate() {
+        server.reset().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v2/dumps/{DUMP_ID}/analyses")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let error = client
+            .post_rich_analysis(&stored, &compact)
+            .await
+            .expect_err("false full ACK rejected");
+        if integrity {
+            assert!(
+                matches!(error, AnalyzerError::Integrity(_)),
+                "case {index}: {error}"
+            );
+        } else {
+            assert!(
+                matches!(error, AnalyzerError::Decode(_)),
+                "case {index}: {error}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn rich_get_validates_analysis_locator_and_canonical_metadata() {
+    let server = MockServer::start().await;
+    let client = client_for(&server).await;
+    let (stored, _, response) = rich_fixture();
+    let endpoint = format!("/api/v2/dumps/{DUMP_ID}/analyses/analysis_rich_fixture");
+    Mock::given(method("GET"))
+        .and(path(&endpoint))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let returned = client
+        .get_rich_report(DUMP_ID, "analysis_rich_fixture")
+        .await
+        .expect("full envelope");
+    assert_eq!(returned, stored.report);
+    assert_authorized(&single_request(&server).await);
+    for field in ["analysisId", "dumpId", "kind", "summary"] {
+        server.reset().await;
+        let mut wrong = response.clone();
+        wrong[field] = json!("different");
+        Mock::given(method("GET"))
+            .and(path(&endpoint))
+            .respond_with(ResponseTemplate::new(200).set_body_json(wrong))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let error = client
+            .get_rich_report(DUMP_ID, "analysis_rich_fixture")
+            .await
+            .expect_err("locator/metadata mismatch");
+        assert!(
+            matches!(error, AnalyzerError::Integrity(_)),
+            "{field}: {error}"
+        );
+    }
+    server.reset().await;
+    let mut wrong_binding = response.clone();
+    wrong_binding["facts"]["reportId"] = json!("r2_wrong");
+    Mock::given(method("GET"))
+        .and(path(&endpoint))
+        .respond_with(ResponseTemplate::new(200).set_body_json(wrong_binding))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert!(matches!(
+        client
+            .get_rich_report(DUMP_ID, "analysis_rich_fixture")
+            .await,
+        Err(AnalyzerError::Integrity(_))
+    ));
+    server.reset().await;
+    let mut open_envelope = response;
+    open_envelope["unknown"] = json!("must not be accepted");
+    Mock::given(method("GET"))
+        .and(path(&endpoint))
+        .respond_with(ResponseTemplate::new(200).set_body_json(open_envelope))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert!(matches!(
+        client
+            .get_rich_report(DUMP_ID, "analysis_rich_fixture")
+            .await,
+        Err(AnalyzerError::Decode(_))
+    ));
+}
+
 /// A loopback URL whose listener is already closed, so connects are refused.
 fn refused_local_url() -> Url {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");

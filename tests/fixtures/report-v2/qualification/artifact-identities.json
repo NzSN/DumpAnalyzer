@@ -1,0 +1,82 @@
+{
+  "dump": {
+    "sha256": "31994b27ca9885d54dae6a6f6c0a7fa56c0a4c99e2523a71fb15ed57969a146b",
+    "bytes": 7989357
+  },
+  "minidump": {
+    "fixtureModules": [
+      {
+        "path": "D:\\da\\rich-report-canary-20261015\\matching\\null-read.exe",
+        "base": "0x00007ff7c2810000",
+        "imageSize": "0x5000",
+        "timestamp": "0x6ad0932e",
+        "pdb": {
+          "guid": "B567793D-D929-4C92-A4DA-43554EBE240A",
+          "age": 2,
+          "path": "null-read.pdb"
+        }
+      }
+    ],
+    "exception": {
+      "threadId": 3548,
+      "code": "0xc0000005",
+      "flags": "0x00000000",
+      "address": "0x00007ff7c281100a",
+      "parameters": [
+        "0x0000000000000000",
+        "0x0000000000000000"
+      ],
+      "contextSize": 1232,
+      "registers": {
+        "rax": "0x0000000000000000",
+        "rcx": "0x0000000000000000",
+        "rsp": "0x0000004120b6fe98",
+        "rip": "0x00007ff7c281100a"
+      }
+    }
+  },
+  "builds": {
+    "matching": {
+      "exe": {
+        "sha256": "204fad6ebed95c64b16b3545ddfb464402317513e0c904e426206951f6922756",
+        "bytes": 2560
+      },
+      "pdb": {
+        "sha256": "5397bad65e57e9876c4457b37c7d706c81b56fae89be63122f5166dac1eb62ae",
+        "bytes": 102400,
+        "guid": "B567793D-D929-4C92-A4DA-43554EBE240A",
+        "age": 2
+      },
+      "image": {
+        "timestamp": "0x6ad0932e",
+        "imageSize": "0x5000",
+        "pdb": {
+          "guid": "B567793D-D929-4C92-A4DA-43554EBE240A",
+          "age": 2,
+          "path": "null-read.pdb"
+        }
+      }
+    },
+    "mismatched": {
+      "exe": {
+        "sha256": "88ab113b17f13b37673bd44f3066804dfac8b80ee90f8946fde0f27156be585d",
+        "bytes": 2560
+      },
+      "pdb": {
+        "sha256": "2d952161270b861aa8afd791ee2508566a70df0b7c3b3e5c7c93686264e4c051",
+        "bytes": 102400,
+        "guid": "6D9F3521-DD5B-4888-AD83-03E9EB56A6FB",
+        "age": 1
+      },
+      "image": {
+        "timestamp": "0x6ad0932e",
+        "imageSize": "0x5000",
+        "pdb": {
+          "guid": "6D9F3521-DD5B-4888-AD83-03E9EB56A6FB",
+          "age": 1,
+          "path": "null-read.pdb"
+        }
+      }
+    }
+  }
+}

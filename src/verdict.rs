@@ -140,6 +140,7 @@ pub fn assemble(
         outcome,
         summary,
         facts,
+        ..
     } = output;
     let mut submission = AnalysisReportSubmission::new(
         Analyzer {
@@ -198,6 +199,25 @@ pub fn record_local(
     Ok(())
 }
 
+/// Save the authoritative document and reporting handoff before projection/delivery.
+/// Retries reuse the immutable stored document rather than re-drafting evidence.
+pub fn prepare_report(
+    store: &Store,
+    identity: &JobIdentity,
+    output: &RunOutput,
+    config: &Config,
+    handoff: crate::state::ReportHandoff,
+) -> Result<(crate::state::StoredReport, AnalysisReportSubmission)> {
+    let report = crate::report::CrashReportV2::from_output(identity, &config.name, output)?;
+    // Only this deliberately small projection passes through the v1 envelope.
+    let submission = assemble(identity, report.compact_output()?, config)?;
+    let stored =
+        store
+            .local_reports()
+            .save_rich(&report, &submission, handoff, config.writeback_enabled)?;
+    Ok((stored, submission))
+}
+
 /// Write-back off (`DUMP_ANALYZER_WRITE_BACK=off`): the ledger is a read-only
 /// dump source. A verdict is assembled and recorded locally, and the job
 /// settles `done` immediately — nothing is ever POSTed, and no job waits for
@@ -217,9 +237,16 @@ impl LocalVerdictSink {
 #[async_trait::async_trait]
 impl crate::agent::VerdictSink for LocalVerdictSink {
     async fn submit(&self, identity: &JobIdentity, output: RunOutput) -> Result<()> {
-        let submission = assemble(identity, output, &self.config)?;
-        record_local(&self.store, identity, &submission)?;
-        self.store.jobs().set_phase(identity, JobPhase::Done)?;
+        prepare_report(
+            &self.store,
+            identity,
+            &output,
+            &self.config,
+            crate::state::ReportHandoff::None,
+        )?;
+        self.store
+            .jobs()
+            .set_phase_if(identity, JobPhase::Reporting, JobPhase::Done)?;
         Ok(())
     }
 }
@@ -251,10 +278,12 @@ pub async fn submit(
     submission: &AnalysisReportSubmission,
 ) -> Result<()> {
     record_local(store, identity, submission)?;
-    match client.post_analysis(&identity.dump_id, submission).await {
+    match publish(client, store, identity, submission).await {
         Ok(PostAnalysisResult::Created(_) | PostAnalysisResult::Replayed(_)) => {
             store.local_reports().mark_posted(identity)?;
-            store.jobs().set_phase(identity, JobPhase::Done)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Done)?;
             Ok(())
         }
         Err(AnalyzerError::Server { status, code }) if route_missing(status, code.as_deref()) => {
@@ -262,7 +291,9 @@ pub async fn submit(
                 job = %job_key(identity),
                 "analyses route absent (pre-AI3 server): keeping the verdict in local-verdict mode"
             );
-            store.jobs().set_phase(identity, JobPhase::Done)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Done)?;
             Ok(())
         }
         Err(AnalyzerError::Server { status, code }) if dump_gone(status, code.as_deref()) => {
@@ -282,7 +313,9 @@ pub async fn submit(
                  against the dump is a bug signal; dequeuing the verdict and failing the job"
             );
             store.local_reports().mark_posted(identity)?;
-            store.jobs().set_phase(identity, JobPhase::Failed)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Failed)?;
             Ok(())
         }
         Err(err) if err.is_transient() => Err(err),
@@ -292,8 +325,72 @@ pub async fn submit(
                 %err,
                 "terminal analysis write-back error; failing the job"
             );
-            store.jobs().set_phase(identity, JobPhase::Failed)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Failed)?;
             Ok(())
+        }
+    }
+}
+
+/// Full delivery is independent of the legacy posted bit. An old server can
+/// accept a digest-bound summary without pretending to have the full evidence.
+async fn publish(
+    client: &LedgerClient,
+    store: &Store,
+    identity: &JobIdentity,
+    submission: &AnalysisReportSubmission,
+) -> Result<PostAnalysisResult> {
+    use crate::state::FullDelivery;
+    let Some(stored) = store.local_reports().get_rich(identity)? else {
+        return client.post_analysis(&identity.dump_id, submission).await;
+    };
+    let mut compact = submission.clone();
+    compact.analyzer.name = stored.report.identity.analyzer_name.clone();
+    compact.analyzer.version = stored.report.identity.analyzer_version.clone();
+    match client.post_rich_analysis(&stored, &compact).await {
+        Ok(result) => {
+            store
+                .local_reports()
+                .set_full_delivery(identity, FullDelivery::FullyDelivered)?;
+            Ok(result)
+        }
+        Err(AnalyzerError::Server { status, code })
+            if route_missing(status, code.as_deref()) || matches!(status, 405 | 501) =>
+        {
+            let result = client.post_analysis(&identity.dump_id, &compact).await;
+            if result.is_ok() {
+                store
+                    .local_reports()
+                    .set_full_delivery(identity, FullDelivery::SummaryOnly)?;
+            } else if result.as_ref().is_err_and(|err| is_invalid_request(err) || matches!(err, AnalyzerError::Server{status,code} if dump_gone(*status,code.as_deref()) || *status == 409)) {
+                store.local_reports().set_full_delivery(identity,FullDelivery::Abandoned)?;
+                if matches!(&result, Err(AnalyzerError::Server{status:409,..})) {
+                    store.local_reports().mark_posted(identity)?;
+                    store.jobs().set_phase_if(identity, JobPhase::Reporting, JobPhase::Failed)?;
+                }
+            }
+            result
+        }
+        Err(err @ AnalyzerError::Server { status: 409, .. }) => {
+            store
+                .local_reports()
+                .set_full_delivery(identity, FullDelivery::Abandoned)?;
+            store.local_reports().mark_posted(identity)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Failed)?;
+            Err(err)
+        }
+        Err(err) => {
+            if is_invalid_request(&err)
+                || matches!(&err, AnalyzerError::Server{status,code} if dump_gone(*status,code.as_deref()))
+            {
+                store
+                    .local_reports()
+                    .set_full_delivery(identity, FullDelivery::Abandoned)?;
+            }
+            Err(err)
         }
     }
 }
@@ -390,14 +487,19 @@ pub async fn replay_pending(
                 .set_phase_if(&identity, JobPhase::Reporting, JobPhase::Done)?;
         }
     }
-    for row in store.local_reports().pending()? {
+    let pending = store.local_reports().pending()?;
+    let attempted: std::collections::HashSet<_> =
+        pending.iter().map(LocalReport::identity).collect();
+    for row in pending {
         let identity = row.identity();
         match replay_row(client, store, config, &row).await {
             Ok(ReplayOutcome::Replayed) => {
                 report.replayed += 1;
                 // A `reporting` job whose verdict just posted is done.
                 if store.jobs().phase_of(&identity)? == Some(JobPhase::Reporting) {
-                    store.jobs().set_phase(&identity, JobPhase::Done)?;
+                    store
+                        .jobs()
+                        .set_phase_if(&identity, JobPhase::Reporting, JobPhase::Done)?;
                 }
             }
             Ok(ReplayOutcome::Abandoned(reason)) => {
@@ -448,6 +550,35 @@ pub async fn replay_pending(
                 report
                     .errors
                     .push(format!("replay {}: {err}", job_key(&identity)));
+            }
+        }
+    }
+    // Summary-only acceptance must never suppress a later v2 promotion.
+    if config.writeback_enabled {
+        for identity in store.local_reports().pending_full_identities()? {
+            if attempted.contains(&identity) {
+                continue;
+            }
+            let Some(row) = store.local_reports().get(&identity)? else {
+                continue;
+            };
+            let submission = submission_from_row(&row, config)?;
+            match publish(client, store, &identity, &submission).await {
+                Ok(_) => {
+                    store.local_reports().mark_posted(&identity)?;
+                    store
+                        .jobs()
+                        .set_phase_if(&identity, JobPhase::Reporting, JobPhase::Done)?;
+                }
+                Err(AnalyzerError::State(message)) => return Err(AnalyzerError::State(message)),
+                Err(err) => {
+                    report
+                        .errors
+                        .push(format!("full delivery {}: {err}", job_key(&identity)));
+                    if err.is_transient() {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -508,7 +639,9 @@ async fn reconcile_reporting(
                 .any(|report| report_matches(report, identity, config))
             {
                 store.local_reports().mark_posted(identity)?;
-                store.jobs().set_phase(identity, JobPhase::Done)?;
+                store
+                    .jobs()
+                    .set_phase_if(identity, JobPhase::Reporting, JobPhase::Done)?;
                 return Ok(ReportingOutcome::Confirmed);
             }
         }
@@ -534,18 +667,24 @@ async fn reconcile_reporting(
                 "stored verdict copy is unusable; the report cannot be re-posted, failing the job"
             );
             store.local_reports().mark_posted(identity)?;
-            store.jobs().set_phase(identity, JobPhase::Failed)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Failed)?;
             return Err(err);
         }
     };
-    match client.post_analysis(&identity.dump_id, &submission).await {
+    match publish(client, store, identity, &submission).await {
         Ok(_) => {
             store.local_reports().mark_posted(identity)?;
-            store.jobs().set_phase(identity, JobPhase::Done)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Done)?;
             Ok(ReportingOutcome::Reposted)
         }
         Err(AnalyzerError::Server { status, code }) if route_missing(status, code.as_deref()) => {
-            store.jobs().set_phase(identity, JobPhase::Done)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Done)?;
             Ok(ReportingOutcome::LocalMode)
         }
         Err(AnalyzerError::Server { status, code }) if dump_gone(status, code.as_deref()) => {
@@ -560,7 +699,9 @@ async fn reconcile_reporting(
                 "re-posted verdict rejected as invalid_request (sha mismatch); failing the job"
             );
             store.local_reports().mark_posted(identity)?;
-            store.jobs().set_phase(identity, JobPhase::Failed)?;
+            store
+                .jobs()
+                .set_phase_if(identity, JobPhase::Reporting, JobPhase::Failed)?;
             Err(err)
         }
         Err(err) => Err(err),
@@ -588,7 +729,7 @@ async fn replay_row(
             return Ok(ReplayOutcome::Abandoned(AbandonReason::Rejected));
         }
     };
-    match client.post_analysis(&row.dump_id, &submission).await {
+    match publish(client, store, &identity, &submission).await {
         Ok(PostAnalysisResult::Created(_) | PostAnalysisResult::Replayed(_)) => {
             store.local_reports().mark_posted(&identity)?;
             Ok(ReplayOutcome::Replayed)

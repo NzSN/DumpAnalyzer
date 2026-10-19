@@ -206,6 +206,11 @@ impl Config {
             Some(raw) => raw,
             None => env!("CARGO_PKG_VERSION").to_owned(),
         };
+        if version == "0.1.0" {
+            return Err(AnalyzerError::Config(format!(
+                "{VERSION_VAR}=0.1.0 is reserved for legacy compact reports; use the new default 0.2.0 or a distinct reanalysis version"
+            )));
+        }
         let poll_interval_ms = Self::u64_value(&vars, POLL_INTERVAL_VAR, DEFAULT_POLL_INTERVAL_MS)?;
         if !(MIN_POLL_INTERVAL_MS..=MAX_POLL_INTERVAL_MS).contains(&poll_interval_ms) {
             return Err(AnalyzerError::Config(format!(

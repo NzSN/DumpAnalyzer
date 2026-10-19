@@ -56,6 +56,7 @@ fn job(dump_id: &str, sha256: &str) -> JobIdentity {
 
 fn sample_output() -> RunOutput {
     RunOutput {
+        capture: None,
         outcome: ReportOutcome::Completed,
         summary: "triage completed: access violation in electron".to_owned(),
         facts: json!({"exception": {"code": "0xc0000005"}}),
@@ -626,6 +627,7 @@ async fn runner_failure_then_success_retries_once_and_completes() {
 #[tokio::test]
 async fn failed_verdict_is_reported_not_retried() {
     let verdict = RunOutput {
+        capture: None,
         outcome: ReportOutcome::Failed,
         summary: "triage failed: could not open the dump".to_owned(),
         facts: json!({"failure": {"reason": "dump_corrupt"}}),

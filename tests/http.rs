@@ -1962,3 +1962,137 @@ async fn http_dump_browse_returns_one_level_and_one_page() {
     ui.shutdown.cancel();
     ui.task.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn rich_report_is_lazy_and_legacy_detail_is_explicit() {
+    use dump_analyzer::report::{CrashReportV2, Evidence, ReportCapture, legacy_id};
+    use dump_analyzer::state::ReportHandoff;
+    use dump_analyzer::types::RunOutput;
+    let directory = tempfile::tempdir().unwrap();
+    let store = Store::open(directory.path().join("reports.sqlite")).unwrap();
+    seed(&store);
+    let mut job = identity("dump_rich_detail", SHA256_A);
+    job.analyzer_version = "0.2.0".into();
+    let mut capture = ReportCapture::default();
+    capture.evidence.push(Evidence {
+        id: "exception".into(),
+        command: ".exr -1".into(),
+        text: "retained evidence <script>unsafe()</script>\n".repeat(150),
+        ..Default::default()
+    });
+    capture
+        .context
+        .registers
+        .insert("rip".into(), "0xffffffffffffffff".into());
+    let output = RunOutput {
+        outcome: ReportOutcome::Completed,
+        summary: "Rich report; origin unknown".into(),
+        facts: serde_json::json!({}),
+        capture: Some(capture),
+    };
+    let config = test_config();
+    let report = CrashReportV2::from_output(&job, &config.name, &output).unwrap();
+    let compact =
+        dump_analyzer::verdict::assemble(&job, report.compact_output().unwrap(), &config).unwrap();
+    store
+        .local_reports()
+        .save_rich(&report, &compact, ReportHandoff::None, false)
+        .unwrap();
+    let ui = start(store).await;
+    let base = format!("http://{}", ui.addr);
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let list = client
+        .get(format!("{base}/api/reports"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(list.len() < 3000);
+    assert!(!list.contains("retained evidence"));
+    assert!(!list.contains("ffffffffff"));
+    let page: serde_json::Value = serde_json::from_str(&list).unwrap();
+    assert!(
+        page["reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["reportId"] == report.report_id
+                && r["detailAvailable"] == true
+                && r["fullDelivery"] == "localOnly")
+    );
+    let detail: serde_json::Value = serde_json::from_str(
+        &client
+            .get(format!("{base}/api/reports/{}", report.report_id))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        detail["report"]["context"]["registers"]["rip"],
+        "0xffffffffffffffff"
+    );
+    assert_eq!(detail["digest"], report.digest().unwrap());
+    assert_eq!(
+        detail["report"]["evidence"][0]["text"],
+        report.capture.evidence[0].text
+    );
+    let evidence: serde_json::Value = serde_json::from_str(
+        &client
+            .get(format!(
+                "{base}/api/reports/{}/evidence/exception",
+                report.report_id
+            ))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["command"], ".exr -1");
+    let old = legacy_id(&identity("dump_01AAA", SHA256_A));
+    let legacy: serde_json::Value = serde_json::from_str(
+        &client
+            .get(format!("{base}/api/reports/{old}"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(legacy["schemaVersion"], 1);
+    assert_eq!(legacy["detailAvailable"], false);
+    assert_eq!(
+        legacy["warning"],
+        "Legacy report — detailed sections were not captured"
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/api/reports/r2_missing"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/api/reports/{old}?unknown=1"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
+}

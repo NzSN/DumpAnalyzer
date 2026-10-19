@@ -1,0 +1,68 @@
+{
+  "purpose": "Actual Rust client against actual local DumpLedger HTTP with isolated temporary data; no production deployment",
+  "date": "2026-10-15",
+  "inputDumpSha256": "31994b27ca9885d54dae6a6f6c0a7fa56c0a4c99e2523a71fb15ed57969a146b",
+  "reportDigest": "1efe8ffd0f1644ac544bb0cfec0f188f14eb5ef7dd407c52ebc048b0fa7276cd",
+  "analysisId": "analysis_3185A765CD97401E925BBA922F",
+  "reportId": "r2_f8a53de0654ae075491ee6e6d9b64e6f317a55ef397188b84bbf82f7c8ba7a3f",
+  "nodeVersion": "v24.19.0",
+  "backendHead": "80fb95a5066865e4633cb5c917d5d14e6b070d28",
+  "backendWorkingTree": "P5 rich report implementation changes, not a deployed release",
+  "files": {
+    "serve-local-ledger-canary.mjs": {
+      "bytes": 5331,
+      "sha256": "4213dbe8523a1e5fc93903d536b7deee2d89f26fcb7cf0a82bbf3b95ec070be6"
+    },
+    "ledger-before-restart.json": {
+      "bytes": 545,
+      "sha256": "231247605c3d80afa9b826c0ab22b4ae13b4e0dc7a552772353600627ba850f6"
+    },
+    "ledger-after-restart.json": {
+      "bytes": 605,
+      "sha256": "92b6f54127c57a07067902d4384216ec267b87fef2b7b35fd926f1bb5a15b977"
+    },
+    "ledger-after-rust-replay.json": {
+      "bytes": 524,
+      "sha256": "ecf0888a907e7143d404e6a4278b7dcaf744a356e51215cedc844a8598494e46"
+    },
+    "ledger-cleanup.json": {
+      "bytes": 641,
+      "sha256": "6f7e2fe94cc5a3ab1fdcd7e47deb9b5fe985006db39deb2a3af78078f52bc724"
+    }
+  },
+  "builtArtifacts": {
+    "dist/src/http/routes/analysis-routes.js": {
+      "sha256": "695b53bd38db2c13ca41c687058c1a53403225fb121bc4dc311a6c62cfacbd05",
+      "bytes": 5115
+    },
+    "dist/src/http/application.js": {
+      "sha256": "dbecbb47b8f76bd7b7f3d3c1ef83800cb0e7e2a4a88da3b7c1c4be03925ec01e",
+      "bytes": 42766
+    },
+    "dist/src/engine/dump-ledger-engine.js": {
+      "sha256": "3fd3b85eccd9fe7595fd68285066a38793252ed9df003a0020b1ae799d07d29d",
+      "bytes": 34738
+    },
+    "dist/src/ledger/sqlite-ledger.js": {
+      "sha256": "ea2f47a4c153dfa9243ef9a6825fdda077f953fa72d504631be1f490d5779dfe",
+      "bytes": 53474
+    },
+    "dist/src/ledger/migrations.js": {
+      "sha256": "a585d3e18aa6b3120020ce4b0c3aefac9635fe8fd808739ae5dce84bacffabe3",
+      "bytes": 11473
+    },
+    "dist/src/domain/rich-report.js": {
+      "sha256": "388d74e9fe48ae16b707fb0036be5e1c40859721cc1216593c2461215cb1d328",
+      "bytes": 13570
+    },
+    "packages/http-contracts/dist/src/rich-analyses.js": {
+      "sha256": "70badb75810bd371cbdc28eafe3532ed68a5b72b1b3288987e7cb10a1f97baf7",
+      "bytes": 13696
+    },
+    "pnpm-lock.yaml": {
+      "sha256": "37e7b032e793c7faf65cadc61e7c8967c16e0669836c6e40ef8396bb8cc555d1",
+      "bytes": 63175
+    }
+  },
+  "serviceCleanup": "SIGTERM, exit 0, PID absent, loopback port closed; temporary evidence retained"
+}

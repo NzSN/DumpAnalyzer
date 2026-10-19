@@ -301,6 +301,35 @@ impl Analyzer for PipelineAnalyzer {
             kind: "triage".to_owned(),
             analyzer_version: self.config.version.clone(),
         };
+        if let Some(stored) = self
+            .store
+            .local_reports()
+            .get_rich(&identity)
+            .map_err(AnalyzeError::Terminal)?
+        {
+            if stored.report.identity.analyzer_name != self.config.name {
+                return Err(AnalyzeError::Terminal(AnalyzerError::Integrity("stored report attribution belongs to another analyzer name; use a distinct version".into())));
+            }
+            let projection = stored
+                .report
+                .compact_output()
+                .map_err(AnalyzeError::Terminal)?;
+            return Ok(Report {
+                identity,
+                outcome: projection.outcome,
+                summary: projection.summary,
+                facts: Some(projection.facts),
+            });
+        }
+        if self
+            .store
+            .local_reports()
+            .get(&identity)
+            .map_err(AnalyzeError::Terminal)?
+            .is_some()
+        {
+            return Err(AnalyzeError::NotAvailable {dump_id:dump_id.into(),reason:"A legacy report already uses this identity; select a new analyzer version for rich reanalysis".into()});
+        }
         let _active_job = self.register_active_job(&identity)?;
 
         // Bounded retries, identical budget to the scheduled path; no
@@ -313,7 +342,7 @@ impl Analyzer for PipelineAnalyzer {
                 .await
                 .map_err(AnalyzeError::Terminal)?;
             match attempt {
-                Attempt::Completed(output) => break output,
+                Attempt::Completed(output) => break *output,
                 Attempt::Purged => return Err(AnalyzeError::NotFound(dump_id.to_owned())),
                 Attempt::Terminal(err) => return Err(AnalyzeError::Terminal(err)),
                 Attempt::Transient(err) => {
@@ -325,49 +354,16 @@ impl Analyzer for PipelineAnalyzer {
             }
         };
 
-        // Assemble (and bound-check) the report exactly as write-back does.
-        let submission =
-            verdict::assemble(&identity, output, &self.config).map_err(AnalyzeError::Terminal)?;
-        // Preserve the report independently of the work queue. When write-back
-        // is enabled, reconciliation posts an unposted report lazily.
-        let facts_json = match &submission.facts {
-            Some(facts) => facts.to_string(),
-            None => "null".to_owned(),
-        };
-        self.store
-            .local_reports()
-            .insert(
-                &identity,
-                submission.outcome,
-                &submission.summary,
-                &facts_json,
-            )
-            .map_err(AnalyzeError::Terminal)?;
-
-        let posted = self
-            .store
-            .local_reports()
-            .get(&identity)
-            .map_err(AnalyzeError::Terminal)?
-            .is_some_and(|report| report.posted);
-        let next_phase = if self.config.writeback_enabled && !posted {
-            JobPhase::Reporting
-        } else {
-            JobPhase::Done
-        };
-
-        // Only idle work belongs to this manual completion. Preserve any
-        // scheduled run already executing and never reopen a settled identity.
-        // Compare-and-set also protects a scheduler claim after our phase read.
-        let jobs = self.store.jobs();
-        jobs.upsert_discovered(&identity)
-            .map_err(AnalyzeError::Terminal)?;
-        if let Some(phase @ (JobPhase::Discovered | JobPhase::Reporting)) =
-            jobs.phase_of(&identity).map_err(AnalyzeError::Terminal)?
-        {
-            jobs.set_phase_if(&identity, phase, next_phase)
-                .map_err(AnalyzeError::Terminal)?;
-        }
+        // Canonical evidence, compact projection and the idle-job handoff are
+        // committed together. Scheduled active and terminal rows are preserved.
+        let (_, submission) = verdict::prepare_report(
+            &self.store,
+            &identity,
+            &output,
+            &self.config,
+            crate::state::ReportHandoff::Manual,
+        )
+        .map_err(AnalyzeError::Terminal)?;
         Ok(Report {
             identity,
             outcome: submission.outcome,

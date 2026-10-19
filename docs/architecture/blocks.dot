@@ -1,0 +1,53 @@
+digraph Blocks {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.7", fontname="DejaVu Sans", fontsize=15, compound=true];
+  node [shape=box, style="rounded,filled", fillcolor="#edf3fc", color="#7397c5", fontname="DejaVu Sans", fontsize=12, margin="0.16,0.12"];
+  edge [color="#63758a", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
+  browser [label="Operator browser\nQueue · Dumps · Reports · Settings", fillcolor="#fff4d9", color="#c99c39"];
+  subgraph cluster_local {
+    label="Linux / WSL host"; color="#a7b5c4"; style="rounded";
+    subgraph cluster_process {
+      label="dump-analyzer process · Rust / Tokio"; color="#6088b6"; style="rounded";
+      http [label="HTTP + dashboard\nhttp.rs / dashboard.html\nloopback :4180 by default", fillcolor="#fff4d9", color="#c99c39"];
+      explorer [label="DumpsExplorer\nexplorer.rs\ncatalog cache + hierarchy pages"];
+      manual [label="PipelineAnalyzer\nanalyzer.rs\nmanual / scope requests"];
+      sync [label="Intake\nsync.rs\nboot scan + event feed"];
+      schedule [label="Scheduler\nscheduler.rs\none automatic job at a time"];
+      agent [label="Agent\nagent.rs\nfetch · verify · stage · run"];
+      verdict [label="Verdict + delivery\nverdict.rs / scheduler.rs\nlocal record · POST · replay"];
+      client [label="LedgerClient\nclient.rs\ncatalog / events / content / analyses"];
+      runner [label="ToolRunner interface\ntypes.rs\ncdb-ssh OR claude-cdb", fillcolor="#f1ebfc", color="#9c7bc5"];
+    }
+    db [label="SQLite · WAL\nstate.rs\njobs · settled_jobs · cursors\nlocal_reports · byte_cache · secrets", shape=cylinder, fillcolor="#eaf6ee", color="#6eac81"];
+    disk [label="Local filesystem\nSHA-addressed bytes cache\nrun-* temporary workspaces", shape=folder, fillcolor="#eaf6ee", color="#6eac81"];
+    cli [label="Optional local Claude CLI\nclaude-cdb provider only", fillcolor="#f1ebfc", color="#9c7bc5"];
+  }
+  subgraph cluster_external {
+    label="External services · may share a Windows host"; color="#a7b5c4"; style="rounded,dashed";
+    ledger [label="DumpLedger service\nHTTPS catalog / events / content\nanalyses + /symbols", fillcolor="#f0f2f5", color="#8a99aa"];
+    cdb [label="Windows analysis process\nCDB + remote scratch / symbol cache\nconfigured SSH target", fillcolor="#f0f2f5", color="#8a99aa"];
+  }
+  browser -> http [label="GET views / POST actions"];
+  http -> explorer [label="browse"];
+  http -> manual [label="analyze"];
+  http -> db [label="queue / reports / counts"];
+  http -> sync [label="rescan", style=dashed];
+  manual -> agent [label="attempt"];
+  schedule -> agent [label="run_job"];
+  sync -> db [label="discover / drop / cursor"];
+  db -> schedule [label="claim / resume"];
+  agent -> db [label="phases / attempts"];
+  agent -> disk [label="cache / workspace"];
+  agent -> runner [label="RunRequest"];
+  agent -> verdict [label="RunOutput"];
+  manual -> verdict [label="assemble + save"];
+  verdict -> db [label="report / settle"];
+  explorer -> client [label="catalog + labels"];
+  sync -> client [label="scan + feed"];
+  agent -> client [label="detail + bytes"];
+  verdict -> client [label="write-back enabled"];
+  client -> ledger [label="HTTPS + analyzer credential"];
+  runner -> cdb [label="SCP staging / SSH CDB"];
+  runner -> cli [label="claude-cdb", style=dashed];
+  cli -> cdb [label="SSH commands", style=dashed];
+  cdb -> ledger [label="HTTP symbol lookup", style=dashed];
+}

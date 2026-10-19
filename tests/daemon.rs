@@ -126,6 +126,7 @@ fn analysis_report(dump_id: &str, sha: &str) -> Value {
 
 fn completed_output(label: &str) -> RunOutput {
     RunOutput {
+        capture: None,
         outcome: ReportOutcome::Completed,
         summary: format!("triage completed for {label}"),
         facts: json!({ "exception": { "code": "0xc0000005" } }),
@@ -444,7 +445,9 @@ async fn daemon_analyzes_two_dumps_end_to_end() {
     let requests = server.received_requests().await.expect("recorded requests");
     let posts: Vec<&Request> = requests
         .iter()
-        .filter(|request| request.url.path().ends_with("/analyses"))
+        .filter(|request| {
+            request.url.path().starts_with("/api/v1/") && request.url.path().ends_with("/analyses")
+        })
         .collect();
     assert_eq!(posts.len(), 2, "one analysis report per dump");
     for request in posts {
@@ -577,7 +580,9 @@ async fn purge_event_mid_run_drops_the_queued_job() {
         .await
         .expect("recorded requests")
         .into_iter()
-        .filter(|request| request.url.path().ends_with("/analyses"))
+        .filter(|request| {
+            request.url.path().starts_with("/api/v1/") && request.url.path().ends_with("/analyses")
+        })
         .map(|request| request.url.path().to_owned())
         .collect();
     assert_eq!(

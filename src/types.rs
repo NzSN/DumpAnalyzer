@@ -135,6 +135,8 @@ pub struct RunBounds {
 /// infrastructure failures are `Err(AnalyzerError::Runner(_))` instead.
 #[derive(Debug, Clone)]
 pub struct RunOutput {
+    /// Owned, typed evidence collected before per-run cleanup.
+    pub capture: Option<crate::report::ReportCapture>,
     pub outcome: ReportOutcome,
     /// Plain text, bounded, no raw dump memory (design: Security).
     pub summary: String,

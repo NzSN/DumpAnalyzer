@@ -1,0 +1,33 @@
+digraph UiData {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.4", ranksep="0.65", fontname="DejaVu Sans", fontsize=15];
+  node [shape=box, style="rounded,filled", fillcolor="#edf3fc", color="#7397c5", fontname="DejaVu Sans", fontsize=12, margin="0.16,0.12"];
+  edge [color="#63758a", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
+  ledger [label="DumpLedger catalog + metadata\nAll available dumps / customer names\nRepresentative detail per case", fillcolor="#f0f2f5", color="#8a99aa"];
+  cache [label="DumpsExplorer snapshot\nShared daemon cache: 30 s\nFull catalog remains in server memory"];
+  browse [label="GET /api/dumps/browse\nSearch + scope + one hierarchy level\nDefault 25 rows; maximum 100"];
+  db [label="SQLite\njobs / settled_jobs / local_reports", shape=cylinder, fillcolor="#eaf6ee", color="#6eac81"];
+  manual [label="Ephemeral manual active registry\nClears on return / error / cancellation"];
+  queue [label="GET /api/jobs\nPersistent active phases + manual rows\nExcludes discovered and terminal jobs"];
+  reports [label="GET /api/reports\nSQL filter + count + stable page\nFacts omitted from JSON"];
+  status [label="GET /api/status\nActive queue + report counts\nNo full catalog or report list"];
+  subgraph cluster_browser {
+    label="Browser · one visible panel"; color="#e3c77b"; style=rounded;
+    dumps_panel [label="Dumps panel\nCustomer name → case title → dumps\nActive panel refresh: 15 s", fillcolor="#fff4d9", color="#c99c39"];
+    queue_panel [label="Queue panel\nActive work only\nActive panel refresh: 5 s", fillcolor="#fff4d9", color="#c99c39"];
+    reports_panel [label="Reports panel\n25 rows + filters + summary disclosure\nActive panel refresh: 15 s", fillcolor="#fff4d9", color="#c99c39"];
+    chrome [label="Status / navigation / Settings\nCheap status refresh: 5 s\nHidden panels make no list requests", fillcolor="#fff4d9", color="#c99c39"];
+  }
+  ledger -> cache [label="paged upstream fetch; metadata concurrency 8"];
+  cache -> browse [label="bounded page of groups OR dumps"];
+  db -> browse [label="fresh phase overlay for returned dumps"];
+  manual -> browse [label="active overlay"];
+  db -> queue [label="work_queue query"];
+  manual -> queue [label="merge / deduplicate"];
+  db -> reports [label="selected rows; includes facts internally"];
+  db -> status [label="counts / cursor"];
+  queue -> status [label="active totals"];
+  browse -> dumps_panel [label="JSON page"];
+  queue -> queue_panel [label="JSON rows"];
+  reports -> reports_panel [label="JSON summary page"];
+  status -> chrome [label="JSON counts"];
+}

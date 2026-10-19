@@ -116,6 +116,25 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
 .report-summary details { margin-top: .4rem; }
 .report-summary summary { cursor: pointer; color: var(--accent); }
 .report-summary details p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-detail { min-width: 0; display: grid; gap: 1rem; }
+.report-detail h3 { overflow-wrap: anywhere; margin: 0 0 .7rem; font-size: 1rem; }
+.report-detail h4 { margin: 1rem 0 .4rem; }
+.report-detail p, .report-detail li, .report-detail dd, .report-detail summary { overflow-wrap: anywhere; }
+.report-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; padding: .8rem; background: var(--panel2); border-radius: 8px; }
+.report-detail details { border-top: 1px solid var(--border); padding: .7rem 0; }
+.report-detail summary { cursor: pointer; }
+.detail-fields { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); gap: .45rem 1rem; margin: .6rem 0; }
+.detail-fields dt { color: var(--muted); }
+.detail-fields dd { margin: 0; min-width: 0; }
+.quality-strip { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0; }
+.quality-item { border: 1px solid var(--border); padding: .4rem .65rem; border-radius: 8px; }
+.quality-item span { display: block; font-size: .75rem; color: var(--muted); }
+.detail-warning { padding: .7rem .9rem; border-left: 3px solid var(--amber); background: color-mix(in srgb, var(--amber) 8%, transparent); overflow-wrap: anywhere; }
+.reference { padding: .1rem .35rem; font-size: .75rem; background: transparent; color: var(--accent); border-color: var(--border); margin: .15rem; }
+.stack-table { font-size: .8rem; }
+.stack-table td { vertical-align: top; }
+.stack-table .mono { white-space: nowrap; }
+.report-detail-link { display: inline-block; margin-top: .4rem; }
 .filter-field { display: grid; gap: .25rem; font-size: .8rem; color: var(--muted); }
 .filter-field input, .filter-field select { font-size: .875rem; }
 .toolbar .search-field { flex: 1 1 240px; }
@@ -135,6 +154,8 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
   .topbar #base { display: none; }
   .browse-row { flex-wrap: wrap; }
   .toolbar .search-field { flex-basis: 100%; }
+  .detail-fields { grid-template-columns: 1fr; gap: .2rem; }
+  .detail-fields dd { margin-bottom: .5rem; }
   .diagnostics { grid-template-columns: 1fr; gap: .2rem; }
   .diagnostics dd { margin-bottom: .6rem; }
   .pager { align-items: start; }
@@ -207,8 +228,8 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
 
   <section class="panel" id="panel-reports" aria-labelledby="reports-heading" hidden>
     <div><h2 class="panel-title" id="reports-heading" tabindex="-1">Local reports</h2>
-      <p class="panel-description">Search analysis results and inspect individual summaries.</p></div>
-    <section class="card">
+      <p class="panel-description">Search analysis results and inspect captured crash evidence.</p></div>
+    <section class="card" id="reports-list-view">
       <div class="toolbar">
         <label class="filter-field search-field" for="report-filter">Search reports<input type="search" id="report-filter" placeholder="Dump ID, kind, or summary"></label>
         <label class="filter-field" for="report-outcome">Outcome<select id="report-outcome"><option value="all">All outcomes</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label>
@@ -223,6 +244,13 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
         <button class="ghost" id="report-prev" disabled>Previous</button><button class="ghost" id="report-next" disabled>Next</button>
       </div></div>
     </section>
+    <div class="report-detail" id="report-detail-view" hidden>
+      <div class="toolbar"><a id="report-detail-back" href="#reports">← Back to reports</a><span class="spacer"></span><button class="ghost" id="report-download" disabled>Download JSON</button></div>
+      <h3 id="report-detail-heading" tabindex="-1">Report detail</h3>
+      <p class="result-status" id="report-detail-status" role="status"></p>
+      <button class="ghost" id="report-detail-retry" hidden>Retry report</button>
+      <div class="report-detail" id="report-detail-content" aria-busy="false"></div>
+    </div>
   </section>
 
   <section class="panel" id="panel-settings" aria-labelledby="settings-heading" hidden>
@@ -245,7 +273,7 @@ h2 { font-size: .95rem; margin: 0 0 .7rem; }
     <section class="card"><h2>Diagnostics</h2><dl class="diagnostics" id="diagnostics"><dt>Status</dt><dd>Loading…</dd></dl></section>
   </section>
 </main>
-<footer>Queue updates every 5 s · selected catalog or reports panel updates every 15 s</footer>
+<footer>Queue updates every 5 s · selected catalog or report list updates every 15 s · report detail loads on selection</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -257,12 +285,15 @@ const PANELS = ["queue", "dumps", "reports", "settings"];
 const PAGE_SIZE = 25;
 const states = {
   dumps: { customerId: "", caseId: "", q: "", page: 1, data: null, key: "", loading: false, error: "", controller: null, version: 0, signature: "" },
-  reports: { q: "", outcome: "all", delivery: "all", page: 1, data: null, key: "", loading: false, error: "", controller: null, version: 0, signature: "" },
+  reports: { reportId: "", q: "", outcome: "all", delivery: "all", page: 1, data: null, key: "", loading: false, error: "", controller: null, version: 0, signature: "" },
 };
 let selectedPanel = "queue", filterText = "", filterPhase = null, jobsData = [], jobsLoaded = false;
 let capabilities = { analyzer: false, rescan: false, explorer: false }, capabilitiesLoaded = false;
 let statusRequest = null, jobsRequest = null, actionPending = false;
 let searchTimers = {};
+const detailCache = new Map();
+const DETAIL_CACHE_LIMIT = 3;
+const detailState = { id: "", data: null, loading: false, error: "", controller: null, version: 0, signature: "" };
 
 function humanSize(value) {
   if (value == null || value === "") return "Size unavailable";
@@ -290,6 +321,7 @@ function paramsFor(panel, overrides = {}) {
   if (panel === "reports") {
     if (state.outcome !== "all") params.set("outcome", state.outcome);
     if (state.delivery !== "all") params.set("delivery", state.delivery);
+    if (state.reportId) params.set("reportId", state.reportId);
   }
   if (state.page > 1) params.set("page", state.page);
   return params;
@@ -330,6 +362,7 @@ function selectRoute(moveFocus = false) {
     cancelPanelRequest(selectedPanel);
     cancelSearch(selectedPanel);
   }
+  cancelDetailRequest();
   selectedPanel = panel;
   const state = states[panel];
   if (state) {
@@ -344,11 +377,13 @@ function selectRoute(moveFocus = false) {
       $("dump-filter").value = state.q;
       renderExplorer();
     } else {
+      state.reportId = params.get("reportId") || "";
       state.outcome = ["completed", "failed"].includes(params.get("outcome")) ? params.get("outcome") : "all";
       state.delivery = ["pending", "posted"].includes(params.get("delivery")) ? params.get("delivery") : "all";
       $("report-filter").value = state.q;
       $("report-outcome").value = state.outcome;
       $("report-delivery").value = state.delivery;
+      syncReportView();
     }
   }
   for (const name of PANELS) $("panel-" + name).hidden = name !== panel;
@@ -356,7 +391,7 @@ function selectRoute(moveFocus = false) {
   if (!PANELS.includes(rawPanel)) replaceHash();
   if (moveFocus) {
     const heading = { queue: "queue-heading", dumps: "explorer-heading", reports: "reports-heading", settings: "settings-heading" }[panel];
-    $(panel === "dumps" && !changedPanel ? "browse-heading" : heading).focus();
+    $(panel === "reports" && states.reports.reportId ? "report-detail-heading" : panel === "dumps" && !changedPanel ? "browse-heading" : heading).focus();
   }
   refreshSelected();
 }
@@ -442,7 +477,7 @@ async function refreshJobs() {
   return jobsRequest;
 }
 function browseKey() { return paramsFor("dumps").toString(); }
-function reportKey() { return paramsFor("reports").toString(); }
+function reportKey() { const params = paramsFor("reports"); params.delete("reportId"); return params.toString(); }
 function restoreFocus(container, key) {
   if (key && document.activeElement === document.body) Array.from(container.querySelectorAll("[data-focus-key]")).find((node) => node.dataset.focusKey === key)?.focus();
 }
@@ -511,26 +546,189 @@ function renderReports() {
   const state = states.reports, data = state.data, stale = Boolean(data && state.key !== reportKey());
   $("reports-status").textContent = state.loading ? "Loading reports…" : state.error ? state.error + (data ? " Showing the last loaded reports." : "") : data ? `${data.total} local report(s) · ${data.pending} pending delivery${state.q || state.outcome !== "all" || state.delivery !== "all" ? " · filters applied" : ""}` : "No reports loaded yet.";
   $("reports").setAttribute("aria-busy", String(state.loading));
-  const signature = JSON.stringify(data);
+  const signature = JSON.stringify([data, reportKey()]);
   if (data && state.signature !== signature) {
     const table = $("reports");
     const focused = table.contains(document.activeElement) ? document.activeElement.dataset.focusKey : null;
-    const opened = new Set(Array.from(table.querySelectorAll("details[open]")).map((node) => node.dataset.report));
     table.innerHTML = data.reports.length ? data.reports.slice(0, PAGE_SIZE).map((report) => {
-      const key = String(report.id ?? report.reportId ?? `${report.dumpId}-${report.createdAt}`);
-      return `<tr><td class="mono">${esc(report.dumpId)}</td><td><span class="badge ${report.outcome === "completed" ? "green" : "red"}">${esc(report.outcome)}</span></td><td>${report.posted ? "Posted" : "Pending"}</td><td class="muted">${esc(report.createdAt)}</td><td class="report-summary"><div class="report-preview">${esc(report.summary)}</div><details data-report="${esc(key)}" ${opened.has(key) ? "open" : ""}><summary data-focus-key="report-${esc(key)}" aria-label="Full summary for ${esc(report.dumpId)}">Details</summary><p>${esc(report.summary || "No summary provided.")}</p></details></td></tr>`;
+      const key = String(report.reportId || "");
+      const detailLink = key ? `<a class="report-detail-link" href="${esc(panelHash("reports", { reportId: key }))}" data-focus-key="report-${esc(key)}" aria-label="Report details for ${esc(report.dumpId)}">Details</a>` : '<span class="muted">Detail unavailable</span>';
+      return `<tr><td class="mono">${esc(report.dumpId)}</td><td><span class="badge ${report.outcome === "completed" ? "green" : "red"}">${esc(report.outcome)}</span></td><td>${esc(deliveryLabel(report.fullDelivery))}</td><td class="muted">${esc(report.createdAt)}</td><td class="report-summary"><div class="report-preview">${esc(report.summary)}</div>${detailLink}${report.schemaVersion === 1 ? ' <span class="muted">Legacy</span>' : ""}</td></tr>`;
     }).join("") : '<tr><td colspan="5" class="muted">No local reports match these filters.</td></tr>';
     state.signature = signature;
     restoreFocus(table, focused);
   }
   renderPager("report", data, state.loading || stale);
 }
+function deliveryLabel(value) {
+  return ({ localOnly: "Local only", pendingFull: "Full delivery pending", summaryOnly: "Summary only", fullyDelivered: "Fully delivered", abandoned: "Delivery abandoned" })[value] || "Delivery unknown";
+}
+function deliveryDescription(value) {
+  return ({ localOnly: "Stored locally; full remote delivery has not been requested.", pendingFull: "The full report is awaiting remote delivery.", summaryOnly: "Only the compact summary was delivered. Full detail remains local.", fullyDelivered: "The full report was acknowledged by the remote store.", abandoned: "Full delivery was abandoned. Local evidence remains available." })[value] || "Remote delivery has not been established.";
+}
+function statusLabel(value) {
+  return ({ timedOut: "Timed out", exportsOnly: "Exports only", otherThread: "Other thread", unavailable: "Unavailable", unverified: "Unverified", unknown: "Unknown" })[value] || (value ? String(value).replace(/([a-z])([A-Z])/g, "$1 $2") : "Unknown");
+}
+const arrayOf = (value) => Array.isArray(value) ? value : [];
+const known = (value) => value === null || value === undefined || value === "" ? "Unknown / not captured" : String(value);
+function detailFields(rows) {
+  return '<dl class="detail-fields">' + rows.map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(known(value))}</dd>`).join("") + '</dl>';
+}
+function detailItems(title, values, empty) {
+  const items = arrayOf(values);
+  return `<h4>${esc(title)}</h4>` + (items.length ? `<ul>${items.map((value) => `<li>${esc(value)}</li>`).join("")}</ul>` : `<p class="muted">${esc(empty)}</p>`);
+}
+function evidenceReferences(refs, report) {
+  const evidence = arrayOf(report.evidence);
+  const references = arrayOf(refs);
+  return references.length ? '<div class="hint">Evidence: ' + references.map((id) => {
+    const index = evidence.findIndex((entry) => entry.id === id);
+    return index < 0 ? `<span>${esc(id)} (unavailable)</span>` : `<button class="reference" data-evidence-index="${index}">${esc(id)}</button>`;
+  }).join(" ") + '</div>' : '<p class="hint">No evidence references recorded.</p>';
+}
+function cancelDetailRequest() {
+  detailState.version++;
+  detailState.controller?.abort();
+  detailState.controller = null;
+  detailState.loading = false;
+}
+function syncReportView() {
+  const id = states.reports.reportId;
+  $("reports-list-view").hidden = Boolean(id);
+  $("report-detail-view").hidden = !id;
+  $("report-detail-back").setAttribute("href", panelHash("reports", { reportId: "" }));
+  if (detailState.id !== id) {
+    detailState.id = id;
+    detailState.data = null;
+    detailState.error = "";
+    detailState.signature = "";
+  }
+  if (id) renderReportDetail();
+}
+function richReportMarkup(envelope) {
+  const report = envelope.report, identity = report.identity || {}, root = report.rootCause || {}, mechanism = root.mechanism || {};
+  const exception = report.exception || {}, context = report.context || {}, stack = report.stack || {}, symbols = report.symbols || {}, provenance = report.provenance || {}, completeness = report.completeness || {};
+  const modules = arrayOf(symbols.modules), frames = arrayOf(stack.frames), evidence = arrayOf(report.evidence);
+  const matched = modules.filter((module) => module.quality === "matched").length;
+  const symbolSummary = modules.length ? `${matched}/${modules.length} modules matched; ${Array.from(new Set(modules.map((module) => statusLabel(module.quality)))).join(", ")}` : "No module identity verification captured";
+  const quality = [["Exception", statusLabel(exception.status)], ["Stack coverage", `${statusLabel(stack.status)} · ${frames.length} frames`], ["Symbols", symbolSummary], ["Underlying cause", statusLabel(root.status)]];
+  let markup = `<section class="card"><h3>Analysis conclusion</h3><p>${esc(report.summary || "No summary captured.")}</p><div class="quality-strip">${quality.map(([label, value]) => `<div class="quality-item"><span>${esc(label)}</span>${esc(value)}</div>`).join("")}</div>`;
+  if (envelope.warning) markup += `<p class="detail-warning">${esc(envelope.warning)}</p>`;
+  if (completeness.truncated) markup += '<p class="detail-warning">Report truncated — captured sections may be incomplete.</p>';
+  markup += detailFields([["Underlying cause", statusLabel(root.status)], ["Conclusion", root.conclusion || "The underlying cause is unknown."], ["Immediate mechanism", mechanism.description || "No immediate mechanism established."], ["Mechanism status", statusLabel(mechanism.status)], ["Confirmation rule", root.ruleId]]);
+  markup += evidenceReferences(root.evidenceRefs, report) + evidenceReferences(mechanism.evidenceRefs, report);
+  markup += detailItems("Missing evidence", root.missingEvidence, "No missing evidence was recorded; this does not establish completeness.");
+  markup += detailItems("Next verification steps", root.nextChecks, "No next checks recorded.");
+  if (arrayOf(root.hypotheses).length) markup += '<h4>Competing hypotheses</h4>' + root.hypotheses.map((hypothesis) => `<details><summary>${esc(hypothesis.explanation || "Unspecified hypothesis")}</summary>${evidenceReferences(hypothesis.evidenceRefs, report)}${detailItems("Missing evidence", hypothesis.missingEvidence, "Not recorded.")}${detailItems("Next checks", hypothesis.nextChecks, "Not recorded.")}</details>`).join("");
+  markup += detailItems("Capture omissions", completeness.omissions, "No omissions were recorded.") + '</section>';
+  markup += `<section class="card"><h3>Exception record and context</h3>${detailFields([["Capture status", statusLabel(exception.status)], ["Exception code", exception.code], ["Flags", exception.flags], ["Exception address", exception.address], ["Associated record", exception.recordPointer], ["Parameter count", exception.parameterCount]])}<h4>Raw exception parameters</h4>`;
+  markup += arrayOf(exception.parameters).length ? '<ol start="0" class="mono">' + exception.parameters.map((value) => `<li>${esc(value)}</li>`).join("") + '</ol>' : `<p class="muted">${exception.parameterCount === 0 ? "No exception parameters." : "Parameters were not captured."}</p>`;
+  if (exception.access) markup += detailFields([["Decoded operation", exception.access.operation], ["Access target address", exception.access.address], ["Underlying status", exception.access.underlyingStatus]]);
+  markup += evidenceReferences(exception.evidenceRefs, report);
+  markup += '<h4>Saved context</h4>' + detailFields([["Context source", statusLabel(context.source)], ["Context thread", context.threadId], ["Process", provenance.processId], ["Architecture", provenance.architecture], ["Pointer width", provenance.pointerWidth]]);
+  if (context.source !== "exception") markup += '<p class="detail-warning">Exception context was not established. These registers must not be assumed to describe the faulting context.</p>';
+  markup += evidenceReferences(context.evidenceRefs, report);
+  const registers = context.registers && typeof context.registers === "object" ? Object.entries(context.registers) : [];
+  markup += '<h4>Registers</h4>' + (registers.length ? detailFields(registers) : '<p class="muted">Registers were not captured.</p>');
+  markup += '<h4>Fault-site instruction</h4>';
+  const instruction = context.faultInstruction;
+  markup += instruction ? detailFields([["Instruction address", instruction.address], ["Bytes", instruction.bytes], ["Disassembly", instruction.disassembly], ["Effective address", instruction.effectiveAddress]]) + evidenceReferences(instruction.evidenceRefs, report) : '<p class="muted">Instruction bytes and disassembly were not captured.</p>';
+  markup += '</section>';
+  markup += `<section class="card"><h3>Native stack</h3>${detailFields([["Stack status", statusLabel(stack.status)], ["Stack thread", stack.threadId]])}<p class="hint">Symbol attribution and unwind reliability are independent. Addresses retain their captured precision. This is the captured native stack.</p>`;
+  if (frames.length) markup += '<div class="table-scroll" role="region" aria-label="Captured native stack" tabindex="0"><table class="stack-table"><thead><tr><th scope="col">Frame</th><th scope="col">Location</th><th scope="col">Addresses</th><th scope="col">Resolution / unwind</th></tr></thead><tbody>' + frames.map((frame) => `<tr><td>${esc(frame.index)}</td><td>${esc(frame.module || "Unknown module")}<br><span class="mono">${esc(frame.function || "Unresolved function")}${frame.displacement ? " + " + esc(frame.displacement) : ""}</span>${frame.sourceFile ? '<div class="muted">' + esc(frame.sourceFile) + (frame.sourceLine != null ? ":" + esc(frame.sourceLine) : " · line unavailable") + '</div>' : '<div class="muted">Source location not captured</div>'}${evidenceReferences(frame.evidenceRefs, report)}</td><td class="mono">${detailFields([["Instruction pointer", frame.instructionPointer], ["Stack pointer", frame.stackPointer], ["Frame pointer", frame.framePointer], ["Return address", frame.returnAddress], ["Module RVA", frame.moduleRva]])}</td><td>${esc(statusLabel(frame.resolution))}<br><span class="muted">Unwind: ${esc(statusLabel(frame.unwind))}</span></td></tr>`).join("") + '</tbody></table></div>';
+  else markup += '<p class="muted">No stack frames were captured.</p>';
+  markup += detailItems("Stack limitations", stack.limitations, "No stack limitations recorded; unwind quality still follows each frame's status.") + '</section>';
+  markup += '<section class="card"><h3>Symbols and evidence</h3><h4>Module and PDB provenance</h4>';
+  const pdb = (value) => value ? `${known(value.guid)} · age ${known(value.age)}` : "Not captured";
+  markup += modules.length ? modules.map((module) => `<details><summary>${esc(module.module || "Unknown module")} · ${esc(statusLabel(module.quality))}</summary>${detailFields([["Image base", module.imageBase], ["Image size", module.imageSize], ["Timestamp", module.timestamp], ["Expected PDB GUID / age", pdb(module.expectedPdb)], ["Loaded PDB GUID / age", pdb(module.loadedPdb)], ["PDB path", module.pdbPath]])}${evidenceReferences(module.evidenceRefs, report)}</details>`).join("") : '<p class="muted">No module identity records were captured. Function names alone do not establish matching symbols.</p>';
+  markup += detailItems("Symbol limitations", symbols.limitations, "No symbol limitations recorded.");
+  markup += '<h4>Captured command evidence</h4>';
+  markup += evidence.length ? evidence.map((entry, index) => `<details id="report-evidence-${index}"><summary>${esc(entry.id)} · ${esc(entry.command || "Acquisition method unavailable")} · ${esc(statusLabel(entry.status))}${entry.truncated ? " · Truncated" : ""}</summary>${entry.error ? `<p class="detail-warning">${esc(entry.error)}</p>` : ""}${entry.truncated ? '<p class="detail-warning">This evidence section was truncated.</p>' : ""}<pre>${esc(entry.text || "No retained evidence text.")}</pre></details>`).join("") : '<p class="muted">No command evidence was retained.</p>';
+  markup += '</section>';
+  markup += `<section class="card"><h3>Report provenance and delivery</h3>${detailFields([["Report ID", envelope.reportId], ["Schema version", envelope.schemaVersion], ["Dump ID", identity.dumpId], ["Input SHA-256", identity.inputSha256], ["Kind", identity.kind], ["Analyzer", identity.analyzerName], ["Analyzer version", identity.analyzerVersion], ["Execution outcome", report.outcome], ["Provider", provenance.provider], ["Debugger version", provenance.debuggerVersion], ["Model", provenance.model], ["Analysis revision", provenance.analysisRevision], ["Document digest", envelope.digest], ["Full report delivery", deliveryLabel(envelope.fullDelivery)]])}<p class="hint">${esc(deliveryDescription(envelope.fullDelivery))}</p></section>`;
+  return markup;
+}
+function legacyReportMarkup(envelope) {
+  const legacy = envelope.legacy;
+  if (!legacy) return `<section class="card"><h3>Detailed report unavailable</h3><p class="detail-warning">${esc(envelope.warning || "The saved detail is unavailable. Missing exception, stack, and root-cause sections cannot be reconstructed from a summary.")}</p>${detailFields([["Report ID", envelope.reportId], ["Schema version", envelope.schemaVersion], ["Delivery", deliveryLabel(envelope.fullDelivery)]])}</section>`;
+  return `<section class="card"><h3>Legacy report — detailed sections were not captured</h3><p>${esc(legacy.summary || "No summary retained.")}</p>${envelope.warning ? `<p class="detail-warning">${esc(envelope.warning)}</p>` : ""}${detailFields([["Report ID", envelope.reportId], ["Dump ID", legacy.identity?.dumpId ?? legacy.identity?.dump_id], ["Outcome", legacy.outcome], ["Created", legacy.createdAt], ["Summary posted", legacy.posted ? "Yes — summary only" : "No"], ["Full delivery", deliveryLabel(envelope.fullDelivery)]])}<p class="muted">Exception records, registers, resolved stack, and causal assessment were not captured in this legacy report. Reanalysis is required to obtain them.</p><details><summary>Retained legacy facts</summary><pre>${esc(JSON.stringify(legacy.facts ?? {}, null, 2))}</pre></details></section>`;
+}
+function renderReportDetail() {
+  const id = states.reports.reportId;
+  if (!id) return;
+  const data = detailState.id === id ? detailState.data : null;
+  $("report-detail-heading").textContent = data?.report?.identity?.dumpId ? "Report · " + data.report.identity.dumpId : "Report detail";
+  $("report-detail-status").textContent = detailState.loading ? "Loading selected report…" : detailState.error || (data ? "Saved report detail. No background evidence refresh." : "");
+  $("report-detail-retry").hidden = !detailState.error;
+  $("report-download").disabled = !data || detailState.loading;
+  $("report-detail-content").setAttribute("aria-busy", String(detailState.loading));
+  const signature = JSON.stringify([id, data]);
+  if (detailState.signature !== signature) {
+    $("report-detail-content").innerHTML = data ? (data.report ? richReportMarkup(data) : legacyReportMarkup(data)) : "";
+    detailState.signature = signature;
+  }
+}
+async function loadReportDetail(retry = false) {
+  const id = states.reports.reportId;
+  if (selectedPanel !== "reports" || !id || detailState.loading) return;
+  if (detailState.id !== id) syncReportView();
+  if (detailCache.has(id)) {
+    const data = detailCache.get(id);
+    detailCache.delete(id);
+    detailCache.set(id, data);
+    detailState.data = data;
+    detailState.error = "";
+    renderReportDetail();
+    return;
+  }
+  if (detailState.error && !retry) return;
+  const controller = new AbortController(), version = ++detailState.version;
+  detailState.controller = controller;
+  detailState.loading = true;
+  detailState.error = "";
+  renderReportDetail();
+  try {
+    const data = await api("/api/reports/" + encodeURIComponent(id), controller.signal);
+    if (version !== detailState.version || selectedPanel !== "reports" || states.reports.reportId !== id) return;
+    if (data.reportId !== id) throw new Error("The response belongs to a different report");
+    detailState.data = data;
+    detailCache.set(id, data);
+    while (detailCache.size > DETAIL_CACHE_LIMIT) detailCache.delete(detailCache.keys().next().value);
+  } catch (error) {
+    if (version !== detailState.version || error.name === "AbortError") return;
+    detailState.error = "Could not load this report. " + error.message + ".";
+  } finally {
+    if (version === detailState.version) {
+      detailState.controller = null;
+      detailState.loading = false;
+      renderReportDetail();
+    }
+  }
+}
+$("report-detail-retry").addEventListener("click", () => loadReportDetail(true));
+$("report-detail-content").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-evidence-index]");
+  if (!button) return;
+  const evidence = $("report-evidence-" + button.dataset.evidenceIndex);
+  if (evidence) { evidence.open = true; evidence.querySelector("summary").focus(); evidence.scrollIntoView({ block: "nearest" }); }
+});
+$("report-download").addEventListener("click", () => {
+  const data = detailState.data;
+  if (!data || detailState.id !== states.reports.reportId) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "report-" + detailState.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120) + ".json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
 async function refreshList(panel) {
-  if (selectedPanel !== panel) return;
+  if (selectedPanel !== panel || (panel === "reports" && states.reports.reportId)) return;
   if (panel === "dumps" && (!capabilitiesLoaded || !capabilities.explorer)) { renderExplorer(); return; }
   const state = states[panel];
   if (state.loading) return;
-  const key = paramsFor(panel).toString();
+  const key = panel === "reports" ? reportKey() : browseKey();
   const controller = new AbortController(), version = ++state.version;
   state.controller = controller;
   state.loading = true;
@@ -538,6 +736,7 @@ async function refreshList(panel) {
   const render = panel === "dumps" ? renderExplorer : renderReports;
   render();
   const params = paramsFor(panel);
+  params.delete("reportId");
   params.set("pageSize", String(PAGE_SIZE));
   const path = (panel === "dumps" ? "/api/dumps/browse" : "/api/reports") + "?" + params;
   try {
@@ -545,7 +744,7 @@ async function refreshList(panel) {
     if (version !== state.version || selectedPanel !== panel) return;
     state.page = positivePage(data.page);
     state.data = data;
-    state.key = paramsFor(panel).toString();
+    state.key = panel === "reports" ? reportKey() : browseKey();
     if (key !== state.key) replaceHash();
   } catch (error) {
     if (version !== state.version || error.name === "AbortError") return;
@@ -560,6 +759,7 @@ async function refreshList(panel) {
 }
 function refreshSelected() {
   if (selectedPanel === "queue") return refreshJobs();
+  if (selectedPanel === "reports" && states.reports.reportId) return loadReportDetail();
   if (selectedPanel === "dumps" || selectedPanel === "reports") return refreshList(selectedPanel);
   return Promise.resolve();
 }
@@ -671,7 +871,7 @@ setInterval(() => {
   if (selectedPanel === "queue") refreshJobs();
 }, 5000);
 setInterval(() => {
-  if (!document.hidden && states[selectedPanel] && !searchTimers[selectedPanel]) refreshSelected();
+  if (!document.hidden && states[selectedPanel] && !searchTimers[selectedPanel] && !(selectedPanel === "reports" && states.reports.reportId)) refreshSelected();
 }, 15000);
 </script>
 </body>

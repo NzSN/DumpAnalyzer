@@ -449,3 +449,8 @@ fn config_writeback_flag() {
     let err = parse_err(&[("DUMP_ANALYZER_WRITE_BACK", "maybe")]);
     assert!(err.contains("DUMP_ANALYZER_WRITE_BACK"), "{err}");
 }
+
+#[test]
+fn legacy_version_cannot_be_reused_for_new_capture_profile() {
+    assert!(parse_err(&[("DUMP_ANALYZER_VERSION", "0.1.0")]).contains("reserved for legacy"));
+}

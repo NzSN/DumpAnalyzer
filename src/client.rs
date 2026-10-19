@@ -524,6 +524,133 @@ impl LedgerClient {
         })
     }
 
+    /// Publish the exact canonical bytes; the server hashes this string without
+    /// Rust/JavaScript JSON reserialization differences.
+    pub async fn post_rich_analysis(
+        &self,
+        report: &crate::state::StoredReport,
+        compact: &AnalysisReportSubmission,
+    ) -> Result<PostAnalysisResult> {
+        const WHAT: &str = "POST /api/v2/dumps/:dumpId/analyses";
+        report.report.validate()?;
+        if report.digest != crate::report::digest_json(&report.report_json)
+            || report.report.canonical_json()? != report.report_json
+        {
+            return Err(AnalyzerError::Integrity(
+                "stored report digest mismatch".into(),
+            ));
+        }
+        compact.validate()?;
+        validate_rich_binding(&report.report, compact, &report.digest)?;
+        let mut body =
+            serde_json::to_value(compact).map_err(|e| AnalyzerError::Decode(e.to_string()))?;
+        body["reportJson"] = serde_json::Value::String(report.report_json.clone());
+        body["reportDigest"] = serde_json::Value::String(report.digest.clone());
+        let url = self.endpoint(&[
+            "api",
+            "v2",
+            "dumps",
+            &report.report.identity.dump_id,
+            "analyses",
+        ])?;
+        let encoded =
+            serde_json::to_vec(&body).map_err(|e| AnalyzerError::Decode(e.to_string()))?;
+        if encoded.len() > 1024 * 1024 {
+            return Err(AnalyzerError::Integrity(
+                "v2 publication exceeds the 1 MiB request budget".into(),
+            ));
+        }
+        let request = self
+            .http
+            .post(url)
+            .header(AUTHORIZATION, self.authorization.clone())
+            .header(ACCEPT, JSON)
+            .header(CONTENT_TYPE, JSON)
+            .timeout(self.api_timeout)
+            .body(encoded);
+        let response = self.send(request).await?;
+        let status = response.status();
+        let bytes = read_bounded_body(response, WHAT, 1024 * 1024).await?;
+        if status != StatusCode::OK && status != StatusCode::CREATED {
+            return Err(unexpected_status(status, &bytes, WHAT));
+        }
+        let acknowledgement = decode_rich_response(&bytes, WHAT)?;
+        if acknowledgement.report_json != report.report_json
+            || acknowledgement.report_digest != report.digest
+        {
+            return Err(AnalyzerError::Integrity(
+                "v2 acknowledgement does not preserve the submitted document/digest".into(),
+            ));
+        }
+        let acknowledgement = acknowledgement.analysis;
+        if acknowledgement.dump_id != report.report.identity.dump_id
+            || acknowledgement.analyzer != compact.analyzer
+            || acknowledgement.kind != compact.kind
+            || acknowledgement.input_sha256 != compact.input_sha256
+            || acknowledgement.outcome != compact.outcome
+            || acknowledgement.summary != compact.summary
+            || acknowledgement.facts != compact.facts
+            || acknowledgement.duplicate_of != compact.duplicate_of
+        {
+            return Err(AnalyzerError::Integrity(
+                "v2 acknowledgement does not match the submitted report".into(),
+            ));
+        }
+        Ok(if status == StatusCode::CREATED {
+            PostAnalysisResult::Created(acknowledgement)
+        } else {
+            PostAnalysisResult::Replayed(acknowledgement)
+        })
+    }
+
+    /// Lazy remote detail retrieval with byte, digest, schema and dump-pin checks.
+    pub async fn get_rich_report(
+        &self,
+        dump_id: &str,
+        analysis_id: &str,
+    ) -> Result<crate::report::CrashReportV2> {
+        const WHAT: &str = "GET /api/v2/dumps/:dumpId/analyses/:analysisId";
+        check_identifier_arg("dumpId", dump_id)?;
+        check_identifier_arg("analysisId", analysis_id)?;
+        let url = self.endpoint(&["api", "v2", "dumps", dump_id, "analyses", analysis_id])?;
+        let response = self.send(self.get_json(url)).await?;
+        let status = response.status();
+        let bytes = read_bounded_body(response, WHAT, 1024 * 1024).await?;
+        if status != StatusCode::OK {
+            return Err(unexpected_status(status, &bytes, WHAT));
+        }
+        let detail = decode_rich_response(&bytes, WHAT)?;
+        if detail.report_json.len() > crate::report::MAX_REPORT_BYTES
+            || detail.report_digest != crate::report::digest_json(&detail.report_json)
+        {
+            return Err(AnalyzerError::Integrity(
+                "remote canonical report digest/size mismatch".into(),
+            ));
+        }
+        let report: crate::report::CrashReportV2 = serde_json::from_str(&detail.report_json)
+            .map_err(|e| AnalyzerError::Decode(format!("{WHAT}: {e}")))?;
+        report.validate()?;
+        if detail.analysis.analysis_id != analysis_id
+            || detail.analysis.dump_id != dump_id
+            || report.identity.dump_id != dump_id
+        {
+            return Err(AnalyzerError::Integrity(
+                "remote canonical report locator does not match the requested analysis".into(),
+            ));
+        }
+        let compact = AnalysisReportSubmission::new(
+            detail.analysis.analyzer,
+            detail.analysis.kind,
+            detail.analysis.input_sha256,
+            detail.analysis.outcome,
+            detail.analysis.summary,
+            detail.analysis.facts,
+            detail.analysis.duplicate_of,
+        )?;
+        validate_rich_binding(&report, &compact, &detail.report_digest)?;
+        Ok(report)
+    }
+
     /// `GET /api/v1/dumps/:dumpId/analyses` (AI3): the reports recorded for
     /// one dump, for restart reconciliation.
     ///
@@ -542,6 +669,71 @@ impl LedgerClient {
             .await?;
         Ok(response.analyses)
     }
+}
+
+/// Closed v2 envelope: exactly the v1 metadata fields plus two detail fields.
+/// Decode the compact subset with its existing strict wire contract after
+/// removing only those two fields, rather than weakening v1 deserialization.
+struct RichAnalysisResponse {
+    analysis: AnalysisReport,
+    report_json: String,
+    report_digest: String,
+}
+
+fn decode_rich_response(bytes: &[u8], what: &str) -> Result<RichAnalysisResponse> {
+    let mut value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|err| AnalyzerError::Decode(format!("{what}: {err}")))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| AnalyzerError::Decode(format!("{what}: v2 response must be an object")))?;
+    let mut take_string = |key: &str| {
+        object
+            .remove(key)
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .ok_or_else(|| AnalyzerError::Decode(format!("{what}: {key} must be a string")))
+    };
+    let report_json = take_string("reportJson")?;
+    let report_digest = take_string("reportDigest")?;
+    let analysis: AnalysisReport = serde_json::from_value(value)
+        .map_err(|err| AnalyzerError::Decode(format!("{what}: {err}")))?;
+    analysis.validate()?;
+    Ok(RichAnalysisResponse {
+        analysis,
+        report_json,
+        report_digest,
+    })
+}
+
+fn validate_rich_binding(
+    report: &crate::report::CrashReportV2,
+    compact: &AnalysisReportSubmission,
+    digest: &str,
+) -> Result<()> {
+    let facts = compact.facts.as_ref();
+    if compact.analyzer.name != report.identity.analyzer_name
+        || compact.analyzer.version != report.identity.analyzer_version
+        || compact.kind != report.identity.kind
+        || compact.input_sha256 != report.identity.input_sha256
+        || compact.outcome != report.outcome
+        || compact.summary != report.summary
+        || facts
+            .and_then(|value| value.get("schemaVersion"))
+            .and_then(serde_json::Value::as_u64)
+            != Some(2)
+        || facts
+            .and_then(|value| value.get("reportId"))
+            .and_then(serde_json::Value::as_str)
+            != Some(report.report_id.as_str())
+        || facts
+            .and_then(|value| value.get("reportDigest"))
+            .and_then(serde_json::Value::as_str)
+            != Some(digest)
+    {
+        return Err(AnalyzerError::Integrity(
+            "canonical report does not match its compact identity and digest binding".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl fmt::Debug for LedgerClient {
@@ -581,6 +773,23 @@ where
 }
 
 /// Reads the full response body, mapping read failures to `Transport`.
+async fn read_bounded_body(mut response: Response, what: &str, maximum: usize) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| AnalyzerError::Transport(format!("{what}: {}", describe_reqwest(&e))))?
+    {
+        if chunk.len() > maximum.saturating_sub(bytes.len()) {
+            return Err(AnalyzerError::Decode(format!(
+                "{what}: response exceeds byte budget"
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 async fn read_body(response: Response, what: &str) -> Result<Vec<u8>> {
     response
         .bytes()

@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-15",
+  "scope": "Uncommitted rich-report implementation on DumpAnalyzer 0bb92ae and DumpLedger 80fb95a; controlled fixture and isolated services only",
+  "rust": {
+    "passed": 355,
+    "failed": 0,
+    "ignored": 2,
+    "ignoredReasons": [
+      "live TLS field probe",
+      "corrected live Claude reasoner requires explicit external-destination authorization"
+    ],
+    "log": "/tmp/dumpanalyzer-rich-full-test-final.log",
+    "logSha256": "e8f9d2e3d765028c0bc5a379a4bec21ecca0ccb7a1551c88abb9b67cef9f0bce",
+    "mbtTraces": 33,
+    "mbtActions": 20
+  },
+  "ledger": {
+    "passed": 506,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/tmp/dump-ledger-rich-p5-final-full.log",
+    "modelInterface": "passed"
+  },
+  "browser": {
+    "syntheticChecks": 17,
+    "actualReportChecks": "actual-browser-receipt.json",
+    "selectedDetailFetches": 1,
+    "postRequests": 0
+  },
+  "native": {
+    "dumpSha256": "31994b27ca9885d54dae6a6f6c0a7fa56c0a4c99e2523a71fb15ed57969a146b",
+    "matchingReport": "actual-matching-report.json",
+    "mismatchedReport": "actual-mismatched-report.json",
+    "sourceLines": [
+      12,
+      14,
+      15
+    ],
+    "frames": 5,
+    "exception": "0xc0000005",
+    "mechanism": "confirmed",
+    "rootCause": "unknown",
+    "moduleQuality": "matched"
+  },
+  "durability": {
+    "analysisId": "analysis_3185A765CD97401E925BBA922F",
+    "canonicalDigest": "1efe8ffd0f1644ac544bb0cfec0f188f14eb5ef7dd407c52ebc048b0fa7276cd",
+    "bytes": 24259,
+    "analyses": 1,
+    "details": 1,
+    "recordAnalysisEvents": 1,
+    "idempotentReplay": true,
+    "localAndLedgerReopen": true,
+    "provenance": "ledger-roundtrip-provenance.json"
+  },
+  "migration": "local-migration-receipt.json",
+  "claude": {
+    "initialActualHostStarted": true,
+    "observedModel": "claude-opus-5-5",
+    "initialAssessment": "failed; deterministic evidence preserved",
+    "correction": "replace CLI structured-output formatter with plain JSON validated locally",
+    "correctedLiveSuccessVerified": false,
+    "blockedAction": "authored-fixture live Claude test",
+    "approvalReviewReason": "Fixture evidence would be transmitted to an external Claude destination without explicit user authorization",
+    "tools": "disabled; every permission request denied"
+  },
+  "serviceCleanup": {
+    "isolatedAnalyzer4181": "SIGTERM and exit0",
+    "isolatedLedger36515": "SIGTERM and exit0, closed port",
+    "existingServicesRestarted": false,
+    "existingDatabasesModified": false
+  },
+  "limitations": [
+    "No deterministic confirmed-origin rule; underlying cause remains unknown or a supported hypothesis",
+    "Local SSH termination does not prove remote CDB process-tree termination",
+    "Unsupported legacy transfer formats explicitly block rich-detail export/import"
+  ]
+}

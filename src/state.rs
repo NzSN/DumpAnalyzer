@@ -37,8 +37,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
 
+use crate::report::{CrashReportV2, digest_json, legacy_id};
 use crate::types::{AnalyzerError, JobIdentity, JobPhase, ReportOutcome, Result};
+use crate::wire::AnalysisReportSubmission;
 
 /// One SQLite connection shared by every sub-store in this module.
 type SharedConn = Arc<Mutex<Connection>>;
@@ -203,6 +206,25 @@ INSERT INTO settled_jobs
 DELETE FROM jobs WHERE phase IN ('done', 'dropped', 'failed');
 ";
 
+/// Canonical details are independent from compact compatibility verdicts.
+/// Historical rows receive a stable locator without changing their evidence.
+const MIGRATION_4_SQL: &str = "
+ALTER TABLE local_reports ADD COLUMN report_id TEXT;
+CREATE UNIQUE INDEX local_reports_report_id ON local_reports(report_id);
+CREATE TABLE report_details (
+    report_id        TEXT PRIMARY KEY NOT NULL,
+    dump_id          TEXT NOT NULL,
+    input_sha256     TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    analyzer_version TEXT NOT NULL,
+    digest           TEXT NOT NULL,
+    report_json      TEXT NOT NULL,
+    full_delivery    TEXT NOT NULL,
+    UNIQUE (dump_id, input_sha256, kind, analyzer_version)
+);
+CREATE INDEX report_details_delivery ON report_details(full_delivery);
+";
+
 /// Applies any pending migrations. Reads and writes the ledger inside one
 /// immediate transaction, so concurrent openers serialize and the second one
 /// observes each migration as already applied.
@@ -252,6 +274,51 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         tx.execute_batch(MIGRATION_3_SQL).map_err(sql_err)?;
         tx.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?1)",
+            params![now_utc()],
+        )
+        .map_err(sql_err)?;
+    }
+    let applied_v4: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 4",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_err)?;
+    if applied_v4 == 0 {
+        tx.execute_batch(MIGRATION_4_SQL).map_err(sql_err)?;
+        let identities = {
+            let mut stmt = tx
+                .prepare("SELECT dump_id, input_sha256, kind, analyzer_version FROM local_reports")
+                .map_err(sql_err)?;
+            stmt.query_map([], |row| {
+                Ok(JobIdentity {
+                    dump_id: row.get(0)?,
+                    input_sha256: row.get(1)?,
+                    kind: row.get(2)?,
+                    analyzer_version: row.get(3)?,
+                })
+            })
+            .map_err(sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_err)?
+        };
+        for identity in identities {
+            tx.execute(
+                "UPDATE local_reports SET report_id = ?1 WHERE dump_id = ?2
+                   AND input_sha256 = ?3 AND kind = ?4 AND analyzer_version = ?5",
+                params![
+                    legacy_id(&identity),
+                    identity.dump_id,
+                    identity.input_sha256,
+                    identity.kind,
+                    identity.analyzer_version
+                ],
+            )
+            .map_err(sql_err)?;
+        }
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (4, ?1)",
             params![now_utc()],
         )
         .map_err(sql_err)?;
@@ -306,6 +373,15 @@ impl JobStore {
     /// The read-and-update runs in one immediate transaction, so two claimers
     /// can never take the same row.
     pub fn claim_next(&self) -> Result<Option<(JobIdentity, u32)>> {
+        self.claim_matching_version(None)
+    }
+
+    /// A new capture profile must never execute an older analyzer's identity.
+    pub fn claim_next_for_version(&self, version: &str) -> Result<Option<(JobIdentity, u32)>> {
+        self.claim_matching_version(Some(version))
+    }
+
+    fn claim_matching_version(&self, version: Option<&str>) -> Result<Option<(JobIdentity, u32)>> {
         let mut guard = lock(&self.conn)?;
         let tx = guard
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -314,10 +390,10 @@ impl JobStore {
             .query_row(
                 "SELECT dump_id, input_sha256, kind, analyzer_version, attempts
                    FROM jobs
-                  WHERE phase = ?1
+                  WHERE phase = ?1 AND (?2 IS NULL OR analyzer_version = ?2)
                   ORDER BY created_at ASC, rowid ASC
                   LIMIT 1",
-                params![phase_str(JobPhase::Discovered)],
+                params![phase_str(JobPhase::Discovered), version],
                 |row| Ok((identity_from_row(row)?, row.get::<_, i64>(4)?)),
             )
             .optional()
@@ -918,6 +994,80 @@ impl LocalReport {
     }
 }
 
+/// Full-detail publication is independent from v1 summary acceptance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FullDelivery {
+    LocalOnly,
+    PendingFull,
+    SummaryOnly,
+    FullyDelivered,
+    Abandoned,
+}
+
+impl FullDelivery {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalOnly => "localOnly",
+            Self::PendingFull => "pendingFull",
+            Self::SummaryOnly => "summaryOnly",
+            Self::FullyDelivered => "fullyDelivered",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "localOnly" => Ok(Self::LocalOnly),
+            "pendingFull" => Ok(Self::PendingFull),
+            "summaryOnly" => Ok(Self::SummaryOnly),
+            "fullyDelivered" => Ok(Self::FullyDelivered),
+            "abandoned" => Ok(Self::Abandoned),
+            _ => Err(AnalyzerError::State(format!(
+                "unknown full report delivery {value:?}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportHandoff {
+    Scheduled,
+    Manual,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredReport {
+    pub report: CrashReportV2,
+    pub report_json: String,
+    pub digest: String,
+    pub delivery: FullDelivery,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReportDetail {
+    Rich(Box<StoredReport>),
+    Legacy(LocalReport),
+}
+
+/// List projection: never contains or deserializes facts or canonical JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportListRow {
+    pub dump_id: String,
+    pub input_sha256: String,
+    pub kind: String,
+    pub analyzer_version: String,
+    pub outcome: ReportOutcome,
+    pub summary: String,
+    pub created_at: String,
+    pub posted: bool,
+    pub report_id: String,
+    pub schema_version: u32,
+    pub detail_available: bool,
+    pub full_delivery: FullDelivery,
+}
+
 /// Filters and pagination for browsing local reports. Search terms are
 /// literal substrings of the dump ID, kind, analyzer version, or summary;
 /// ASCII case is ignored. Page sizes are bounded again by the store.
@@ -945,7 +1095,7 @@ impl Default for ReportQuery {
 /// One bounded report page with full-store counts for the dashboard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportPage {
-    pub reports: Vec<LocalReport>,
+    pub reports: Vec<ReportListRow>,
     pub total: u64,
     pub matching: u64,
     pub page: u32,
@@ -974,6 +1124,219 @@ pub struct LocalReportStore {
 }
 
 impl LocalReportStore {
+    /// Atomically preserve authoritative evidence, its compatibility projection,
+    /// and the queue handoff. Canonical identities are immutable.
+    pub fn save_rich(
+        &self,
+        report: &CrashReportV2,
+        compact: &AnalysisReportSubmission,
+        handoff: ReportHandoff,
+        writeback_enabled: bool,
+    ) -> Result<StoredReport> {
+        report.validate()?;
+        compact.validate()?;
+        let job = report.identity.job();
+        let report_json = report.canonical_json()?;
+        let digest = digest_json(&report_json);
+        let facts_json = compact
+            .facts
+            .as_ref()
+            .map_or_else(|| "null".into(), ToString::to_string);
+        let binding = compact.facts.as_ref();
+        if compact.analyzer.name != report.identity.analyzer_name
+            || compact.analyzer.version != job.analyzer_version
+            || compact.kind != job.kind
+            || compact.input_sha256 != job.input_sha256
+            || compact.outcome != report.outcome
+            || compact.summary != report.summary
+            || binding
+                .and_then(|f| f.get("reportId"))
+                .and_then(|v| v.as_str())
+                != Some(report.report_id.as_str())
+            || binding
+                .and_then(|f| f.get("reportDigest"))
+                .and_then(|v| v.as_str())
+                != Some(digest.as_str())
+            || binding
+                .and_then(|f| f.get("schemaVersion"))
+                .and_then(|v| v.as_u64())
+                != Some(2)
+            || facts_json.len() > 4096
+        {
+            return Err(AnalyzerError::Integrity(
+                "compact report does not preserve its canonical binding".into(),
+            ));
+        }
+        let mut guard = lock(&self.conn)?;
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_err)?;
+        let existing = rich_for_identity(&tx, &job)?;
+        if existing
+            .as_ref()
+            .is_some_and(|stored| stored.digest != digest || stored.report_json != report_json)
+        {
+            return Err(AnalyzerError::Integrity(format!(
+                "immutable rich report conflict {}",
+                job_key(&job)
+            )));
+        }
+        let existing_compact = tx
+            .query_row(
+                "SELECT outcome, summary, facts_json, posted FROM local_reports
+              WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3 AND analyzer_version = ?4",
+                params![
+                    job.dump_id,
+                    job.input_sha256,
+                    job.kind,
+                    job.analyzer_version
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, bool>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sql_err)?;
+        if existing_compact
+            .as_ref()
+            .is_some_and(|(outcome, summary, facts, _)| {
+                outcome != outcome_str(compact.outcome)
+                    || summary != &compact.summary
+                    || facts != &facts_json
+            })
+        {
+            return Err(AnalyzerError::Integrity(format!(
+                "immutable compact report conflict {}",
+                job_key(&job)
+            )));
+        }
+        let now = now_utc();
+        tx.execute(
+            "INSERT OR IGNORE INTO local_reports
+              (dump_id,input_sha256,kind,analyzer_version,outcome,summary,facts_json,created_at,posted,report_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9)",
+            params![job.dump_id,job.input_sha256,job.kind,job.analyzer_version,
+                outcome_str(compact.outcome),compact.summary,facts_json,now,report.report_id],
+        ).map_err(sql_err)?;
+        tx.execute(
+            "UPDATE local_reports SET report_id = ?1 WHERE dump_id = ?2 AND input_sha256 = ?3
+              AND kind = ?4 AND analyzer_version = ?5",
+            params![
+                report.report_id,
+                job.dump_id,
+                job.input_sha256,
+                job.kind,
+                job.analyzer_version
+            ],
+        )
+        .map_err(sql_err)?;
+        let delivery = existing.as_ref().map_or(
+            if writeback_enabled {
+                FullDelivery::PendingFull
+            } else {
+                FullDelivery::LocalOnly
+            },
+            |stored| stored.delivery,
+        );
+        tx.execute(
+            "INSERT OR IGNORE INTO report_details
+              (report_id,dump_id,input_sha256,kind,analyzer_version,digest,report_json,full_delivery)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![report.report_id,job.dump_id,job.input_sha256,job.kind,job.analyzer_version,
+                digest,report_json,delivery.as_str()],
+        ).map_err(sql_err)?;
+        rich_handoff(
+            &tx,
+            &job,
+            handoff,
+            writeback_enabled,
+            existing_compact
+                .as_ref()
+                .is_some_and(|(_, _, _, posted)| *posted),
+        )?;
+        tx.commit().map_err(sql_err)?;
+        Ok(StoredReport {
+            report: report.clone(),
+            report_json,
+            digest,
+            delivery,
+        })
+    }
+
+    pub fn get_rich(&self, job: &JobIdentity) -> Result<Option<StoredReport>> {
+        let guard = lock(&self.conn)?;
+        rich_for_identity(&guard, job)
+    }
+
+    /// One lazy detail lookup. Legacy rows expose only their surviving v1 facts.
+    pub fn get_detail(&self, report_id: &str) -> Result<Option<ReportDetail>> {
+        let guard = lock(&self.conn)?;
+        let rich = guard.query_row(
+            "SELECT report_id, digest, report_json, full_delivery FROM report_details WHERE report_id = ?1",
+            params![report_id], RawRichReport::from_row,
+        ).optional().map_err(sql_err)?;
+        if let Some(rich) = rich {
+            return Ok(Some(ReportDetail::Rich(Box::new(rich.into_report()?))));
+        }
+        let raw = guard.query_row(
+            "SELECT dump_id,input_sha256,kind,analyzer_version,outcome,summary,facts_json,created_at,posted
+               FROM local_reports WHERE report_id = ?1", params![report_id], RawLocalReport::from_row,
+        ).optional().map_err(sql_err)?;
+        raw.map(|row| row.into_report().map(ReportDetail::Legacy))
+            .transpose()
+    }
+
+    /// Full documents awaiting a v2 ACK, including summaries accepted by v1.
+    /// Local-only reports require an explicit policy change before publication.
+    pub fn pending_full(&self) -> Result<Vec<StoredReport>> {
+        let guard = lock(&self.conn)?;
+        let mut stmt = guard
+            .prepare(
+                "SELECT report_id,digest,report_json,full_delivery FROM report_details
+              WHERE full_delivery IN ('pendingFull','summaryOnly') ORDER BY rowid ASC LIMIT 32",
+            )
+            .map_err(sql_err)?;
+        let rows = stmt
+            .query_map([], RawRichReport::from_row)
+            .map_err(sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_err)?;
+        rows.into_iter().map(RawRichReport::into_report).collect()
+    }
+
+    /// Outbox scan loads only identity columns. The caller fetches one full
+    /// document at a time, independently of backlog size.
+    pub fn pending_full_identities(&self) -> Result<Vec<JobIdentity>> {
+        let guard = lock(&self.conn)?;
+        let mut statement=guard.prepare("SELECT dump_id,input_sha256,kind,analyzer_version FROM report_details WHERE full_delivery IN ('pendingFull','summaryOnly') ORDER BY rowid").map_err(sql_err)?;
+        statement
+            .query_map([], identity_from_row)
+            .map_err(sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_err)
+    }
+
+    pub fn set_full_delivery(&self, job: &JobIdentity, delivery: FullDelivery) -> Result<()> {
+        let guard = lock(&self.conn)?;
+        let changed = guard.execute(
+            "UPDATE report_details SET full_delivery = ?1 WHERE dump_id = ?2 AND input_sha256 = ?3
+              AND kind = ?4 AND analyzer_version = ?5",
+            params![delivery.as_str(),job.dump_id,job.input_sha256,job.kind,job.analyzer_version],
+        ).map_err(sql_err)?;
+        if changed != 1 {
+            return Err(AnalyzerError::State(format!(
+                "unknown rich report {}",
+                job_key(job)
+            )));
+        }
+        Ok(())
+    }
+
     /// Records a locally assembled verdict, inserting only when the identity
     /// is new (a re-draft for an existing identity is ignored; the server's
     /// idempotent identity is the correctness boundary). `created_at` is
@@ -990,8 +1353,8 @@ impl LocalReportStore {
             .execute(
                 "INSERT OR IGNORE INTO local_reports
                      (dump_id, input_sha256, kind, analyzer_version, outcome,
-                      summary, facts_json, created_at, posted)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
+                      summary, facts_json, created_at, posted, report_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9)",
                 params![
                     job.dump_id,
                     job.input_sha256,
@@ -1000,7 +1363,8 @@ impl LocalReportStore {
                     outcome_str(outcome),
                     summary,
                     facts_json,
-                    now_utc()
+                    now_utc(),
+                    legacy_id(job)
                 ],
             )
             .map_err(sql_err)?;
@@ -1118,7 +1482,10 @@ impl LocalReportStore {
         let mut stmt = guard
             .prepare(&format!(
                 "SELECT dump_id, input_sha256, kind, analyzer_version, outcome,
-                        summary, facts_json, created_at, posted
+                        summary, created_at, posted, report_id,
+                        EXISTS(SELECT 1 FROM report_details d WHERE d.report_id = local_reports.report_id),
+                        COALESCE((SELECT full_delivery FROM report_details d
+                                   WHERE d.report_id = local_reports.report_id), CASE WHEN posted = 1 THEN 'summaryOnly' ELSE 'localOnly' END)
                    FROM local_reports
                    {REPORT_PAGE_FILTER}
                   ORDER BY created_at DESC, rowid DESC
@@ -1128,14 +1495,14 @@ impl LocalReportStore {
         let rows = stmt
             .query_map(
                 params![pattern, outcome, query.posted, i64::from(page_size), offset],
-                RawLocalReport::from_row,
+                RawReportListRow::from_row,
             )
             .map_err(sql_err)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(sql_err)?;
         let reports = rows
             .into_iter()
-            .map(RawLocalReport::into_report)
+            .map(RawReportListRow::into_report)
             .collect::<Result<Vec<_>>>()?;
         Ok(ReportPage {
             reports,
@@ -1172,6 +1539,210 @@ impl LocalReportStore {
             )));
         }
         Ok(())
+    }
+}
+
+fn rich_handoff(
+    tx: &rusqlite::Transaction<'_>,
+    job: &JobIdentity,
+    handoff: ReportHandoff,
+    writeback_enabled: bool,
+    posted: bool,
+) -> Result<()> {
+    if handoff == ReportHandoff::None {
+        return Ok(());
+    }
+    let current: Option<String> = tx.query_row(
+        "SELECT phase FROM jobs WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3 AND analyzer_version = ?4",
+        params![job.dump_id,job.input_sha256,job.kind,job.analyzer_version], |row| row.get(0),
+    ).optional().map_err(sql_err)?;
+    let settled: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM settled_jobs WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3 AND analyzer_version = ?4)",
+        params![job.dump_id,job.input_sha256,job.kind,job.analyzer_version], |row| row.get(0),
+    ).map_err(sql_err)?;
+    // A purge or another completion can race the capture. Keep its evidence,
+    // while never resurrecting a settled identity.
+    if settled {
+        return Ok(());
+    }
+    let now = now_utc();
+    match handoff {
+        ReportHandoff::Scheduled => {
+            if !matches!(current.as_deref(), Some("analyzing" | "reporting")) {
+                return Err(AnalyzerError::State(format!(
+                    "rich report handoff requires analyzing job {}",
+                    job_key(job)
+                )));
+            }
+            tx.execute(
+                "UPDATE jobs SET phase = 'reporting', updated_at = ?1 WHERE dump_id = ?2
+                  AND input_sha256 = ?3 AND kind = ?4 AND analyzer_version = ?5",
+                params![
+                    now,
+                    job.dump_id,
+                    job.input_sha256,
+                    job.kind,
+                    job.analyzer_version
+                ],
+            )
+            .map_err(sql_err)?;
+        }
+        ReportHandoff::Manual => {
+            if current.is_none() {
+                tx.execute(
+                    "INSERT INTO jobs (dump_id,input_sha256,kind,analyzer_version,phase,attempts,created_at,updated_at)
+                     VALUES (?1,?2,?3,?4,'discovered',0,?5,?5)",
+                    params![job.dump_id,job.input_sha256,job.kind,job.analyzer_version,now],
+                ).map_err(sql_err)?;
+            }
+            if current
+                .as_deref()
+                .is_some_and(|phase| !matches!(phase, "discovered" | "reporting"))
+            {
+                return Ok(());
+            }
+            if writeback_enabled && !posted {
+                tx.execute(
+                    "UPDATE jobs SET phase = 'reporting', updated_at = ?1 WHERE dump_id = ?2
+                      AND input_sha256 = ?3 AND kind = ?4 AND analyzer_version = ?5",
+                    params![
+                        now,
+                        job.dump_id,
+                        job.input_sha256,
+                        job.kind,
+                        job.analyzer_version
+                    ],
+                )
+                .map_err(sql_err)?;
+            } else {
+                tx.execute(
+                    "INSERT INTO settled_jobs (dump_id,input_sha256,kind,analyzer_version,phase,attempts,workspace_path,created_at,updated_at)
+                     SELECT dump_id,input_sha256,kind,analyzer_version,'done',attempts,workspace_path,created_at,?1
+                       FROM jobs WHERE dump_id = ?2 AND input_sha256 = ?3 AND kind = ?4 AND analyzer_version = ?5",
+                    params![now,job.dump_id,job.input_sha256,job.kind,job.analyzer_version],
+                ).map_err(sql_err)?;
+                tx.execute(
+                    "DELETE FROM jobs WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3 AND analyzer_version = ?4",
+                    params![job.dump_id,job.input_sha256,job.kind,job.analyzer_version],
+                ).map_err(sql_err)?;
+            }
+        }
+        ReportHandoff::None => (),
+    }
+    Ok(())
+}
+
+struct RawRichReport {
+    report_id: String,
+    digest: String,
+    report_json: String,
+    delivery: String,
+}
+
+impl RawRichReport {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            report_id: row.get(0)?,
+            digest: row.get(1)?,
+            report_json: row.get(2)?,
+            delivery: row.get(3)?,
+        })
+    }
+    fn into_report(self) -> Result<StoredReport> {
+        if digest_json(&self.report_json) != self.digest {
+            return Err(AnalyzerError::Integrity(
+                "stored canonical report digest mismatch".into(),
+            ));
+        }
+        let report: CrashReportV2 = serde_json::from_str(&self.report_json)
+            .map_err(|err| AnalyzerError::Integrity(format!("stored canonical report: {err}")))?;
+        report.validate()?;
+        if report.report_id != self.report_id {
+            return Err(AnalyzerError::Integrity(
+                "stored canonical report locator mismatch".into(),
+            ));
+        }
+        Ok(StoredReport {
+            report,
+            report_json: self.report_json,
+            digest: self.digest,
+            delivery: FullDelivery::parse(&self.delivery)?,
+        })
+    }
+}
+
+fn rich_for_identity(conn: &Connection, job: &JobIdentity) -> Result<Option<StoredReport>> {
+    let raw = conn
+        .query_row(
+            "SELECT report_id,digest,report_json,full_delivery FROM report_details
+          WHERE dump_id = ?1 AND input_sha256 = ?2 AND kind = ?3 AND analyzer_version = ?4",
+            params![
+                job.dump_id,
+                job.input_sha256,
+                job.kind,
+                job.analyzer_version
+            ],
+            RawRichReport::from_row,
+        )
+        .optional()
+        .map_err(sql_err)?;
+    let stored = raw.map(RawRichReport::into_report).transpose()?;
+    if stored
+        .as_ref()
+        .is_some_and(|stored| stored.report.identity.job() != *job)
+    {
+        return Err(AnalyzerError::Integrity(
+            "stored canonical report identity mismatch".into(),
+        ));
+    }
+    Ok(stored)
+}
+
+struct RawReportListRow {
+    job: JobIdentity,
+    outcome: String,
+    summary: String,
+    created_at: String,
+    posted: bool,
+    report_id: Option<String>,
+    detail_available: bool,
+    full_delivery: String,
+}
+
+impl RawReportListRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            job: JobIdentity {
+                dump_id: row.get(0)?,
+                input_sha256: row.get(1)?,
+                kind: row.get(2)?,
+                analyzer_version: row.get(3)?,
+            },
+            outcome: row.get(4)?,
+            summary: row.get(5)?,
+            created_at: row.get(6)?,
+            posted: row.get(7)?,
+            report_id: row.get(8)?,
+            detail_available: row.get(9)?,
+            full_delivery: row.get(10)?,
+        })
+    }
+    fn into_report(self) -> Result<ReportListRow> {
+        let report_id = self.report_id.unwrap_or_else(|| legacy_id(&self.job));
+        Ok(ReportListRow {
+            dump_id: self.job.dump_id,
+            input_sha256: self.job.input_sha256,
+            kind: self.job.kind,
+            analyzer_version: self.job.analyzer_version,
+            outcome: outcome_from_str(&self.outcome)?,
+            summary: self.summary,
+            created_at: self.created_at,
+            posted: self.posted,
+            report_id,
+            schema_version: if self.detail_available { 2 } else { 1 },
+            detail_available: self.detail_available,
+            full_delivery: FullDelivery::parse(&self.full_delivery)?,
+        })
     }
 }
 

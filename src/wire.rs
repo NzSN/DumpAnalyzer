@@ -1189,6 +1189,10 @@ pub struct ErrorEnvelope {
 pub struct CustomerSummary {
     pub customer_id: String,
     pub display_name: String,
+    /// Sequential display number (DumpLedger `69eb3d3`); absent from older
+    /// ledger builds, so it decodes optionally.
+    #[serde(default)]
+    pub customer_no: Option<u64>,
 }
 
 /// `GET /api/v1/customers` response.

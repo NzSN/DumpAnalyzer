@@ -394,9 +394,7 @@ fn cdb_transport(stdout: &str, status: Option<i32>) -> FakeTransport {
 }
 
 fn expected_script() -> String {
-    format!(
-        "$$ DumpAnalyzer CDB triage script (v1)\n.sympath {SYMBOL_PATH}\n.reload\n.ecxr\nkc\nlm\n|\nq\n"
-    )
+    dump_analyzer::runner::essential_script()
 }
 
 #[tokio::test]
@@ -677,3 +675,433 @@ async fn runner_missing_staged_dump_is_rejected_before_staging() {
 
 // Keep `RunOutput` referenced so the payload type is checked here too.
 fn _assert_run_output(_: &RunOutput) {}
+
+const RICH: &str = include_str!("fixtures/report-v2/marked-av.log");
+#[test]
+fn rich_exception_context_stack_and_evidence_are_retained() {
+    use dump_analyzer::report::{CaptureStatus, ContextSource, SymbolQuality};
+    let output = parse_triage(RICH).expect("rich transcript");
+    let c = output.capture.unwrap();
+    assert_eq!(c.exception.status, CaptureStatus::Present);
+    assert_eq!(c.exception.flags.as_deref(), Some("0x00000000"));
+    assert_eq!(c.exception.parameter_count, Some(2));
+    assert_eq!(c.exception.parameters.len(), 2);
+    assert_eq!(c.exception.access.as_ref().unwrap().operation, "read");
+    assert_eq!(c.context.source, ContextSource::Exception);
+    assert_eq!(c.context.thread_id.as_deref(), Some("0x5f18"));
+    assert_eq!(c.context.registers["rcx"], "0x0000000000000000");
+    assert_eq!(
+        c.context
+            .fault_instruction
+            .as_ref()
+            .unwrap()
+            .bytes
+            .as_deref(),
+        Some("488b01")
+    );
+    assert_eq!(c.stack.frames.len(), 2);
+    assert_eq!(
+        c.stack.frames[0].stack_pointer.as_deref(),
+        Some("0x000000d1f27fe6b8")
+    );
+    assert_eq!(
+        c.stack.frames[0].return_address.as_deref(),
+        Some("0x00007ff6e2d02b99")
+    );
+    assert_eq!(
+        c.stack.frames[0].instruction_pointer.as_deref(),
+        Some("0x00007ff6e2d02a41")
+    );
+    assert!(
+        c.stack.frames[1].instruction_pointer.is_none(),
+        "return address is not an instruction pointer"
+    );
+    assert_eq!(c.stack.frames[0].function.as_deref(), Some("CrashHandler"));
+    assert_eq!(c.stack.frames[0].source_line, Some(42));
+    assert_eq!(
+        c.symbols.modules[0].quality,
+        SymbolQuality::Unverified,
+        "PDB label cannot establish GUID/age equality"
+    );
+    assert_eq!(c.evidence.len(), 8);
+    assert!(c.evidence.iter().all(|e| e.text.len() <= 8192));
+}
+#[test]
+fn rich_missing_exception_and_cut_section_are_explicit() {
+    use dump_analyzer::report::CaptureStatus;
+    let log = RICH.replace(
+        "ExceptionCode: c0000005 (Access violation)",
+        "No exception record available",
+    );
+    let c = dump_analyzer::runner::capture_triage(&log);
+    assert_ne!(c.exception.status, CaptureStatus::Present);
+    let c = dump_analyzer::runner::capture_triage(RICH.split("DA_END:stack").next().unwrap());
+    assert!(c.completeness.truncated);
+    assert!(c.evidence.iter().any(|e| e.truncated));
+}
+#[test]
+fn rich_excerpt_and_frame_limits_declare_truncation() {
+    let mut log = String::from("Loading Dump File [authored]\nDA_BEGIN:stack\n");
+    for n in 0..200 {
+        log.push_str(&format!(
+            "{n:02x} 000000d1`f27fe6b8 00007ff6`e2d02b99 electron!{}+0x41\n",
+            "LongName".repeat(12)
+        ));
+    }
+    log.push_str("DA_END:stack\n0:000> q\n");
+    let c = dump_analyzer::runner::capture_triage(&log);
+    assert_eq!(c.stack.frames.len(), 128);
+    assert!(c.completeness.truncated);
+    assert!(c.evidence[0].text.len() <= 8192);
+    assert!(!c.stack.limitations.is_empty());
+}
+#[test]
+fn rich_script_records_exception_before_forcing_symbols_and_never_ignores_identity() {
+    let script = dump_analyzer::runner::triage_script(SYMBOL_PATH);
+    assert!(script.find(".exr -1").unwrap() < script.find(".reload /f").unwrap());
+    assert!(script.contains("kn 0n128"));
+    assert!(!script.contains("/i"));
+    assert!(script.contains("DA_BEGIN:context"));
+}
+
+#[derive(Clone, Default)]
+struct StalledStaging {
+    cleaned: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+#[async_trait]
+impl ExecTransport for StalledStaging {
+    async fn exec(
+        &self,
+        program: &str,
+        _args: &[&str],
+        _stdin: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<TransportOutput, AnalyzerError> {
+        if program == "rm" {
+            self.cleaned
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(TransportOutput {
+            status: Some(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+    async fn put_file(&self, _local: &Path, _remote: &str) -> Result<(), AnalyzerError> {
+        std::future::pending().await
+    }
+}
+#[tokio::test]
+async fn runner_shared_deadline_bounds_staging_even_if_transport_ignores_timeout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fake = StalledStaging::default();
+    let runner = SshCdbRunner::new(fake.clone());
+    let mut bounds = default_bounds();
+    bounds.wall_timeout = Duration::from_millis(50);
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        runner.run(make_request(tmp.path().join("deadline"), bounds)),
+    )
+    .await
+    .expect("stalled staging must be bounded");
+    assert!(result.is_err());
+    assert!(fake.cleaned.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+fn authored_rsds_dump() -> Vec<u8> {
+    fn u32put(b: &mut [u8], at: usize, v: u32) {
+        b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    let mut b = vec![0; 300];
+    b[..4].copy_from_slice(b"MDMP");
+    u32put(&mut b, 8, 1);
+    u32put(&mut b, 12, 32);
+    u32put(&mut b, 32, 4);
+    u32put(&mut b, 36, 112);
+    u32put(&mut b, 40, 44);
+    u32put(&mut b, 44, 1);
+    b[48..56].copy_from_slice(&0x00007ff6e2b10000u64.to_le_bytes());
+    u32put(&mut b, 56, 0x0a0f0000);
+    u32put(&mut b, 64, 0x68c24ddb);
+    u32put(&mut b, 68, 156);
+    u32put(&mut b, 124, 24);
+    u32put(&mut b, 128, 208);
+    let name: Vec<u8> = "electron.exe"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    u32put(&mut b, 156, name.len() as u32);
+    b[160..160 + name.len()].copy_from_slice(&name);
+    b[208..212].copy_from_slice(b"RSDS");
+    b[212..228].copy_from_slice(&[
+        0x33, 0x22, 0x11, 0, 0x55, 0x44, 0x77, 0x66, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+    ]);
+    u32put(&mut b, 228, 2);
+    b
+}
+#[tokio::test]
+async fn runner_independently_qualifies_loaded_pdb_and_rejects_wrong_age() {
+    use dump_analyzer::report::SymbolQuality;
+    for (age, quality) in [(2, SymbolQuality::Matched), (3, SymbolQuality::Mismatched)] {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = FakeTransport::new(move |program, _| {
+            match program {
+            "cdb"=>Some(Ok(TransportOutput {status:Some(0),stdout:RICH.as_bytes().to_vec(),stderr:vec![]})),
+            "powershell.exe"=>Some(Ok(TransportOutput {status:Some(0),stdout:format!("{{\"module\":\"electron\",\"guid\":\"00112233-4455-6677-8899-aabbccddeeff\",\"age\":{age}}}\n").into_bytes(),stderr:vec![]})),
+            _=>None,
+        }
+        });
+        let request = make_request(tmp.path().join("authored"), default_bounds());
+        std::fs::write(&request.dump_path, authored_rsds_dump()).unwrap();
+        let capture = SshCdbRunner::new(fake)
+            .run(request)
+            .await
+            .unwrap()
+            .capture
+            .unwrap();
+        assert_eq!(capture.symbols.modules[0].quality, quality);
+        assert_eq!(capture.stack.frames[0].resolution, quality);
+        assert_eq!(
+            capture.stack.frames[0].function.is_none(),
+            quality == SymbolQuality::Mismatched
+        );
+        assert!(capture.evidence.iter().any(|e| e.id == "pdb-info"));
+    }
+}
+
+#[derive(Clone, Default)]
+struct TwoPhaseTransport {
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    cleaned: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    hang_optional: bool,
+}
+fn authored_essential_log() -> String {
+    let mut log = RICH
+        .split("DA_BEGIN:symbols-load")
+        .next()
+        .unwrap()
+        .to_owned();
+    log.push_str("DA_BEGIN:modules-initial\n00007ff6`e2b10000 00007ff6`ecc00000 electron (deferred)\nDA_END:modules-initial\n0:000> q\n");
+    log
+}
+#[async_trait]
+impl ExecTransport for TwoPhaseTransport {
+    async fn exec(
+        &self,
+        program: &str,
+        _args: &[&str],
+        _stdin: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<TransportOutput, AnalyzerError> {
+        if program == "rm" {
+            self.cleaned
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if program == "cdb" {
+            if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                return Ok(TransportOutput {
+                    status: Some(0),
+                    stdout: authored_essential_log().into_bytes(),
+                    stderr: vec![],
+                });
+            }
+            if self.hang_optional {
+                return std::future::pending().await;
+            }
+            return Err(AnalyzerError::Transport(
+                "authored symbol load failure".into(),
+            ));
+        }
+        Ok(TransportOutput {
+            status: Some(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+    async fn put_file(&self, _local: &Path, _remote: &str) -> Result<(), AnalyzerError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn optional_symbol_timeout_preserves_essential_evidence_and_cleans_workspace() {
+    use dump_analyzer::report::{CaptureStatus, CauseStatus};
+    for hang_optional in [false, true] {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = TwoPhaseTransport {
+            hang_optional,
+            ..TwoPhaseTransport::default()
+        };
+        let mut bounds = default_bounds();
+        bounds.wall_timeout = Duration::from_millis(300);
+        let output = tokio::time::timeout(
+            Duration::from_secs(1),
+            SshCdbRunner::new(fake.clone()).run(make_request(tmp.path().join("two-phase"), bounds)),
+        )
+        .await
+        .expect("optional phase must be bounded")
+        .expect("essential evidence survives");
+        let c = output.capture.unwrap();
+        assert_eq!(c.exception.code.as_deref(), Some("0xc0000005"));
+        assert_eq!(c.stack.frames.len(), 2);
+        assert_eq!(c.root_cause.mechanism.status, CauseStatus::Confirmed);
+        assert_eq!(c.root_cause.status, CauseStatus::Unknown);
+        assert_eq!(
+            c.evidence
+                .iter()
+                .find(|e| e.id == "symbols-load")
+                .unwrap()
+                .status,
+            if hang_optional {
+                CaptureStatus::TimedOut
+            } else {
+                CaptureStatus::Failed
+            }
+        );
+        assert!(!c.completeness.omissions.is_empty());
+        assert!(fake.cleaned.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(fake.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+}
+#[test]
+fn missing_exception_parameter_count_remains_partial() {
+    use dump_analyzer::report::CaptureStatus;
+    let c = dump_analyzer::runner::capture_triage(
+        &RICH.replace("NumberParameters: 2", "NoParameterCountAvailable"),
+    );
+    assert_eq!(c.exception.status, CaptureStatus::Partial);
+    assert!(c.exception.parameter_count.is_none());
+    assert_eq!(c.exception.parameters.len(), 2);
+}
+
+#[test]
+fn module_limit_keeps_fault_and_stack_modules_and_reports_omissions() {
+    let mut log = String::from(
+        "Loading Dump File [authored]\nDA_BEGIN:exception\nExceptionCode: c0000005\nExceptionFlags: 00000000\nExceptionAddress: 99990001\nNumberParameters: 0\nDA_END:exception\nDA_BEGIN:modules\n",
+    );
+    for i in 0..70u32 {
+        log.push_str(&format!(
+            "{:08x} {:08x} filler{i} (deferred)\n",
+            0x10000000 + i * 0x10000,
+            0x10010000 + i * 0x10000
+        ));
+    }
+    log.push_str("99990000 999a0000 critical (private pdb symbols) C:\\critical.pdb\nDA_END:modules\nDA_BEGIN:stack\n00 00000041`20b6fe98 00007ff7`c2811030 critical!Fault+0x1\nDA_END:stack\n0:000> q\n");
+    let capture = dump_analyzer::runner::capture_triage(&log);
+    assert_eq!(capture.symbols.modules.len(), 64);
+    assert_eq!(capture.symbols.modules[0].module, "critical");
+    assert!(capture.completeness.truncated);
+    assert!(
+        capture
+            .completeness
+            .omissions
+            .iter()
+            .any(|s| s.contains("7 module"))
+    );
+}
+#[test]
+fn failed_saved_context_never_labels_fallback_stack_with_exception_ip() {
+    use dump_analyzer::report::{CauseStatus, ContextSource};
+    let changed = RICH.replace(
+        "DA_BEGIN:context\n",
+        "DA_BEGIN:context\nUnable to get exception context for this dump\n",
+    );
+    let capture = dump_analyzer::runner::capture_triage(&changed);
+    assert_eq!(capture.context.source, ContextSource::Initial);
+    assert!(capture.stack.frames[0].instruction_pointer.is_none());
+    assert_eq!(capture.root_cause.mechanism.status, CauseStatus::Unknown);
+}
+#[test]
+fn in_page_error_preserves_and_decodes_underlying_status() {
+    let changed = RICH
+        .replace("ExceptionCode: c0000005", "ExceptionCode: c0000006")
+        .replace("NumberParameters: 2", "NumberParameters: 3")
+        .replace(
+            "Attempt to read from address",
+            "   Parameter[2]: 00000000c0000185\nAttempt to read from address",
+        );
+    let capture = dump_analyzer::runner::capture_triage(&changed);
+    assert_eq!(capture.exception.parameters.len(), 3);
+    assert_eq!(
+        capture
+            .exception
+            .access
+            .as_ref()
+            .unwrap()
+            .underlying_status
+            .as_deref(),
+        Some("0x00000000c0000185")
+    );
+}
+
+#[test]
+fn top_frame_rva_uses_saved_ip_and_image_base() {
+    let capture = dump_analyzer::runner::capture_triage(RICH);
+    assert_eq!(
+        capture.stack.frames[0].module_rva.as_deref(),
+        Some("0x1f2a41")
+    );
+    assert!(capture.stack.frames[1].module_rva.is_none());
+    assert_ne!(
+        capture.stack.frames[0].instruction_pointer,
+        capture.stack.frames[0].return_address
+    );
+}
+
+#[derive(Clone)]
+struct CapAwareTransport {
+    inner: FakeTransport,
+    caps: std::sync::Arc<Mutex<Vec<(String, usize)>>>,
+}
+#[async_trait]
+impl ExecTransport for CapAwareTransport {
+    async fn exec(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<TransportOutput, AnalyzerError> {
+        self.inner.exec(program, args, stdin, timeout).await
+    }
+    async fn exec_bounded(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+        cap: usize,
+    ) -> Result<TransportOutput, AnalyzerError> {
+        self.caps.lock().unwrap().push((program.into(), cap));
+        self.inner.exec(program, args, stdin, timeout).await
+    }
+    async fn put_file(&self, local: &Path, remote: &str) -> Result<(), AnalyzerError> {
+        self.inner.put_file(local, remote).await
+    }
+}
+#[tokio::test]
+async fn runner_and_box_forward_phase_caps_and_metadata_has_its_own_small_budget() {
+    let tmp = tempfile::tempdir().unwrap();
+    let caps = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let fake = CapAwareTransport {
+        caps: caps.clone(),
+        inner: FakeTransport::new(|program, _| {
+            match program {
+        "cdb"=>Some(Ok(TransportOutput {status:Some(0),stdout:RICH.as_bytes().to_vec(),stderr:vec![]})),
+        "powershell.exe"=>Some(Ok(TransportOutput {status:Some(0),stdout:b"{\"module\":\"electron\",\"guid\":\"00112233-4455-6677-8899-aabbccddeeff\",\"age\":2}\n".to_vec(),stderr:vec![]})),
+        _=>None,
+    }
+        }),
+    };
+    let mut bounds = default_bounds();
+    bounds.max_output_bytes = 8 * 1024 * 1024;
+    let request = make_request(tmp.path().join("phase-caps"), bounds);
+    std::fs::write(&request.dump_path, authored_rsds_dump()).unwrap();
+    let boxed: Box<dyn ExecTransport> = Box::new(fake);
+    let output = SshCdbRunner::new(boxed).run(request).await.unwrap();
+    assert!(output.capture.is_some());
+    let caps = caps.lock().unwrap();
+    assert_eq!(caps.len(), 3);
+    assert_eq!(caps[0], ("cdb".into(), 4 * 1024 * 1024));
+    assert_eq!(caps[1], ("cdb".into(), 4 * 1024 * 1024 - RICH.len()));
+    assert_eq!(caps[2], ("powershell.exe".into(), 32 * 1024));
+}

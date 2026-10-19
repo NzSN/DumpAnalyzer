@@ -1,0 +1,46 @@
+{
+  "result": "PASS",
+  "realCapturedReport": true,
+  "realSqlite": true,
+  "sourceLines": true,
+  "matchingPdb": true,
+  "frames": 5,
+  "exceptionCode": "0xc0000005",
+  "rootCause": "unknown",
+  "mechanism": "confirmed",
+  "lazyDetailRequests": 1,
+  "noPostRequests": true,
+  "mobileOverflow": false,
+  "errors": [],
+  "requests": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/api/reports?pageSize=25"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/api/status"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/api/capabilities"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/favicon.ico"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/api/reports/r2_f8a53de0654ae075491ee6e6d9b64e6f317a55ef397188b84bbf82f7c8ba7a3f"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:4181/api/reports?pageSize=25"
+    }
+  ],
+  "evidence": "/tmp/rich-real-browser-evidence"
+}

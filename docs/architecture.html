@@ -3,174 +3,1513 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DumpAnalyzer — current architecture</title>
+<title>DumpAnalyzer architecture · blocks, control flow and data flow</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0 auto; max-width: 1180px; padding: 1.5rem; background: #f7f8fa; color: #1c2430; }
-  h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
-  h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
-  .muted { color: #667; font-size: .85rem; }
-  svg { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; width: 100%; height: auto; display: block; }
-  .mod { fill: #eef4ff; stroke: #4a78c2; }
-  .modtext { font: 12px ui-sans-serif, system-ui; fill: #17325c; text-anchor: middle; }
-  .modsub { font: 10px ui-sans-serif, system-ui; fill: #5a7299; text-anchor: middle; }
-  .ext { fill: #f3f4f6; stroke: #8a93a0; stroke-dasharray: 5 3; }
-  .exttext { font: 12px ui-sans-serif, system-ui; fill: #3c4450; text-anchor: middle; font-weight: 600; }
-  .proc { fill: none; stroke: #1a56c4; stroke-width: 2; }
-  .store { fill: #eefaf1; stroke: #3d9958; }
-  .ui { fill: #fdf6e3; stroke: #b58900; }
-  .prov { fill: #f5eefe; stroke: #7c3aed; }
-  .flow { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
-  .flowlabel { font: 10px ui-sans-serif, system-ui; fill: #64748b; text-anchor: middle; }
-  .dashed { stroke-dasharray: 4 3; }
+:root { color-scheme: light; --ink:#202e40; --muted:#546477; --line:#d5dde7; }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; scroll-padding-top:1rem; }
+body { margin:0; background:#f5f7fa; color:var(--ink); font:16px/1.65 system-ui,sans-serif; }
+nav { position:fixed; inset:0 auto 0 0; width:240px; padding:28px 18px; background:#182b42; color:white; overflow:auto; }
+nav strong { display:block; font-size:19px; margin-bottom:5px; }
+nav small { display:block; color:#c2cfde; margin-bottom:24px; }
+nav a { display:block; color:#e2eaf5; text-decoration:none; padding:10px 8px; border-radius:5px; line-height:1.45; font-size:14px; }
+nav a:hover, nav a:focus-visible { background:#304a68; color:white; }
+main { margin-left:240px; padding:40px clamp(20px,4vw,70px) 80px; max-width:2100px; }
+h1 { font-size:clamp(28px,3vw,42px); line-height:1.2; margin:0 0 14px; letter-spacing:-.025em; }
+h1 + p { font-size:13px; color:var(--muted); overflow-wrap:anywhere; }
+h2 { font-size:25px; line-height:1.3; margin:64px 0 18px; padding-top:16px; border-top:1px solid var(--line); }
+p,li { max-width:105ch; }
+a { color:#1857a4; text-underline-offset:3px; }
+code { font:0.87em ui-monospace,SFMono-Regular,Consolas,monospace; overflow-wrap:anywhere; }
+p code,li code,td code { background:#e9eef5; padding:2px 4px; border-radius:3px; }
+pre { background:#e9eef5; padding:18px; overflow:auto; border-radius:5px; }
+table { width:100%; border-collapse:collapse; margin:22px 0; font-size:14px; background:white; }
+th,td { text-align:left; padding:12px 14px; border:1px solid var(--line); vertical-align:top; }
+th { background:#e9eef5; }
+th:first-child,td:first-child { width:23%; }
+.diagram { margin:22px 0 28px; background:white; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.diagram-tools { display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:#fbfcfe; }
+button { font:inherit; line-height:1.2; min-height:36px; min-width:38px; padding:5px 12px; background:white; color:var(--ink); border:1px solid #9aabbe; border-radius:4px; cursor:pointer; }
+button:hover { background:#edf3fc; }
+button:focus-visible,a:focus-visible,.diagram-scroll:focus-visible { outline:3px solid #367ac6; outline-offset:3px; }
+output { font-size:13px; font-variant-numeric:tabular-nums; color:var(--muted); min-width:45px; }
+.diagram-tools a { font-size:13px; margin-left:auto; }
+.diagram-scroll { overflow:auto; padding:14px; }
+.diagram.zoomed .diagram-scroll { max-height:85vh; }
+.diagram-scroll svg { display:block; width:100%; height:auto; max-width:none; }
+figcaption { padding:8px 14px; font-size:12px; color:var(--muted); border-top:1px solid var(--line); }
+@media (max-width:800px) {
+  nav { position:static; width:auto; padding:18px; }
+  nav small { margin-bottom:10px; }
+  nav a { display:inline-block; padding:7px; font-size:12px; }
+  main { margin-left:0; padding:25px 16px 60px; }
+  h2 { font-size:22px; margin-top:40px; }
+  table { font-size:12px; }
+  th,td { padding:8px; }
+  .diagram-scroll { padding:6px; }
+}
+@media print {
+  nav,.diagram-tools { display:none; }
+  main { margin:0; padding:0; }
+  body { background:white; font-size:11px; }
+  h2 { break-before:page; margin-top:0; }
+  .diagram-scroll { overflow:visible; max-height:none; }
+  .diagram-scroll svg { width:100% !important; }
+}
 </style>
 </head>
 <body>
-<h1>DumpAnalyzer — current architecture</h1>
-<p class="muted">Rendered from <code>docs/analyzer-design.md</code> + <code>src/</code> as built on 2026-10-13 (200 tests green; TLA+ TLC/Apalache clean; 33-trace MirrorRust MBT corpus replayed).</p>
-
-<h2>Runtime</h2>
-<svg viewBox="0 0 1140 640" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
-    </marker>
-  </defs>
-
-  <!-- DumpAnalyzer process -->
-  <rect x="300" y="30" width="560" height="470" rx="12" class="proc"/>
-  <text x="580" y="52" class="modtext" style="font-weight:700">dump-analyzer process (Rust · tokio · no unsafe)</text>
-
-  <!-- status UI -->
-  <rect x="330" y="70" width="200" height="58" rx="8" class="ui"/>
-  <text x="430" y="94" class="modtext">http — status UI</text>
-  <text x="430" y="110" class="modsub">GET-only dashboard + JSON, 127.0.0.1:4180</text>
-
-  <!-- sync / scheduler -->
-  <rect x="330" y="150" width="150" height="64" rx="8" class="mod"/>
-  <text x="405" y="176" class="modtext">sync</text>
-  <text x="405" y="192" class="modsub">catalog scan + feed follower</text>
-  <rect x="510" y="150" width="150" height="64" rx="8" class="mod"/>
-  <text x="585" y="176" class="modtext">scheduler</text>
-  <text x="585" y="192" class="modsub">claim_next · backoff · lock</text>
-
-  <!-- agent -->
-  <rect x="330" y="240" width="240" height="70" rx="8" class="mod"/>
-  <text x="450" y="266" class="modtext">agent — pipeline driver</text>
-  <text x="450" y="282" class="modsub">fetch → verify (sha256) → analyze → report</text>
-  <text x="450" y="297" class="modsub">per-run workspace, wiped</text>
-
-  <!-- verdict -->
-  <rect x="330" y="335" width="240" height="58" rx="8" class="mod"/>
-  <text x="450" y="360" class="modtext">verdict — write-back</text>
-  <text x="450" y="376" class="modsub">idempotent POST · local-verdict mode · reconcile</text>
-
-  <!-- client -->
-  <rect x="600" y="240" width="230" height="64" rx="8" class="mod"/>
-  <text x="715" y="264" class="modtext">client — LedgerClient</text>
-  <text x="715" y="280" class="modsub">bearer token · ETag · 30 s API timeout</text>
-
-  <!-- state -->
-  <rect x="600" y="335" width="230" height="58" rx="8" class="store"/>
-  <text x="715" y="360" class="modtext">state — SQLite (WAL)</text>
-  <text x="715" y="376" class="modsub">jobs · cursors · byte cache · local reports</text>
-
-  <!-- runner seam -->
-  <rect x="330" y="425" width="500" height="60" rx="8" fill="none" stroke="#7c3aed" stroke-dasharray="6 3"/>
-  <text x="580" y="443" class="modsub" style="fill:#7c3aed">ToolRunner seam (types.rs) — RunBounds: wall timeout · output cap · workspace cap</text>
-  <rect x="345" y="452" width="235" height="24" rx="6" class="prov"/>
-  <text x="462" y="468" class="modtext" style="font-size:11px">cdb-ssh — deterministic CDB script</text>
-  <rect x="595" y="452" width="220" height="24" rx="6" class="prov"/>
-  <text x="705" y="468" class="modtext" style="font-size:11px">claude-cdb — claude CLI (--restricted)</text>
-
-  <!-- external: DumpLedger -->
-  <rect x="900" y="120" width="210" height="120" rx="10" class="ext"/>
-  <text x="1005" y="150" class="exttext">DumpLedger</text>
-  <text x="1005" y="170" class="modsub">HTTPS API :4080</text>
-  <text x="1005" y="186" class="modsub">catalog · events · content · analyses</text>
-  <text x="1005" y="206" class="modsub">symsrv symbol store</text>
-
-  <!-- external: analysis box -->
-  <rect x="40" y="380" width="230" height="120" rx="10" class="ext"/>
-  <text x="155" y="410" class="exttext">Windows analysis box</text>
-  <text x="155" y="430" class="modsub">CDB + symcache (SSH target)</text>
-  <text x="155" y="450" class="modsub">never on the DumpLedger host</text>
-  <text x="155" y="466" class="modsub">dumps are hostile input</text>
-
-  <!-- external: operator browser -->
-  <rect x="40" y="60" width="200" height="58" rx="10" class="ext"/>
-  <text x="140" y="84" class="exttext">operator browser</text>
-  <text x="140" y="100" class="modsub">this status page</text>
-
-  <!-- flows -->
-  <!-- UI -> browser -->
-  <path class="flow" d="M 240 99 L 330 99"/>
-  <text x="285" y="92" class="flowlabel">GET /</text>
-  <!-- sync -> client -->
-  <path class="flow" d="M 480 205 C 540 205 545 250 600 255"/>
-  <text x="545" y="222" class="flowlabel">catalog · events</text>
-  <!-- client -> ledger -->
-  <path class="flow" d="M 830 272 L 900 205"/>
-  <text x="878" y="252" class="flowlabel">HTTPS + token</text>
-  <!-- scheduler -> state -->
-  <path class="flow" d="M 620 214 L 680 335"/>
-  <text x="668" y="270" class="flowlabel">claim</text>
-  <!-- sync -> state -->
-  <path class="flow" d="M 405 214 L 405 335 L 600 360"/>
-  <text x="470" y="352" class="flowlabel">upsert · drop · cursor</text>
-  <!-- scheduler -> agent -->
-  <path class="flow" d="M 585 214 L 520 240"/>
-  <!-- agent -> state -->
-  <path class="flow" d="M 570 290 L 640 335"/>
-  <text x="622" y="302" class="flowlabel">phases · attempts</text>
-  <!-- agent -> verdict -->
-  <path class="flow" d="M 450 310 L 450 335"/>
-  <!-- verdict -> client -->
-  <path class="flow" d="M 570 364 L 640 304"/>
-  <text x="620" y="345" class="flowlabel">report</text>
-  <!-- client -> ledger (analyses) dashed second lane -->
-  <path class="flow dashed" d="M 830 292 C 870 292 880 240 900 235"/>
-  <text x="885" y="282" class="flowlabel">POST analyses (AI3)</text>
-  <!-- agent -> runner seam -->
-  <path class="flow" d="M 450 310 L 450 425"/>
-  <!-- runner -> analysis box -->
-  <path class="flow" d="M 330 460 L 270 445"/>
-  <text x="300" y="435" class="flowlabel">SSH / scp</text>
-  <!-- UI -> state (read-only) -->
-  <path class="flow" d="M 530 99 C 660 99 700 200 715 335"/>
-  <text x="700" y="130" class="flowlabel">read-only</text>
-  <!-- CDB -> symsrv -->
-  <path class="flow dashed" d="M 270 380 C 500 330 800 230 900 215"/>
-  <text x="560" y="330" class="flowlabel">sympath: SRV*cache*https://ledger/symbols</text>
+<nav aria-label="Architecture views"><strong>DumpAnalyzer</strong><small>Implemented architecture · 0bb92ae<br>Blocks / control / data</small><a href="#1-runtime-block-diagram">1. Runtime block diagram</a><a href="#2-daemon-control-flow">2. Daemon control flow</a><a href="#3-job-and-manual-request-control-flow">3. Job and manual-request control flow</a><a href="#4-analysis-and-report-data-flow">4. Analysis and report data flow</a><a href="#5-dashboard-data-flow-and-information-load">5. Dashboard data flow and information load</a><a href="#diagram-sources">Diagram sources</a></nav>
+<main><h1>DumpAnalyzer architecture</h1>
+<p>Source revision: <code>0bb92ae716a32e77a3f92fc9c4830080cf0abfdb</code> · inspected 2026-10-15.</p>
+<p>This snapshot predates rich-report implementation. The current canonical capture, storage, detail and publication path is documented in <a href="rich-reports.md">rich reports</a>.</p>
+<p>These diagrams describe the implemented checkout. They show logical process and storage boundaries, rather than asserting a live deployment configuration. Open <a href="architecture.html">the rendered diagrams</a> for zoom controls. Arrow labels distinguish calls, control transitions and transferred data.</p>
+<p>DumpAnalyzer discovers dumps from DumpLedger, executes CDB on a configured Windows analysis host, saves compact reports locally, and optionally delivers them back to DumpLedger. Its web dashboard exposes a work queue, a customer/case dump explorer, reports and manual actions.</p>
+<h2 id="1-runtime-block-diagram">1. Runtime block diagram</h2>
+<figure class="diagram"><div class="diagram-tools" role="group" aria-label="Diagram controls"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-fit>Fit</button><output aria-live="polite">100%</output><a href="architecture/blocks.svg" target="_blank" rel="noopener">Open SVG ↗</a></div><div class="diagram-scroll" tabindex="0" aria-label="Runtime blocks and process boundaries; scroll after zooming"><svg role="img" aria-label="Runtime blocks and process boundaries"
+ viewBox="0.00 0.00 1214.00 1164.25" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="blocks-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 1146.25)">
+<title>Blocks</title>
+<g id="blocks-clust1" class="cluster">
+<title>cluster_local</title>
+<path fill="transparent" stroke="#a7b5c4" d="M20,-252C20,-252 1115,-252 1115,-252 1121,-252 1127,-258 1127,-264 1127,-264 1127,-1028.25 1127,-1028.25 1127,-1034.25 1121,-1040.25 1115,-1040.25 1115,-1040.25 20,-1040.25 20,-1040.25 14,-1040.25 8,-1034.25 8,-1028.25 8,-1028.25 8,-264 8,-264 8,-258 14,-252 20,-252"/>
+<text text-anchor="middle" x="567.5" y="-1024.25" font-family="DejaVu Sans" font-size="15.00">Linux / WSL host</text>
+</g>
+<g id="blocks-clust2" class="cluster">
+<title>cluster_process</title>
+<path fill="transparent" stroke="#6088b6" d="M28,-260C28,-260 649,-260 649,-260 655,-260 661,-266 661,-272 661,-272 661,-995.25 661,-995.25 661,-1001.25 655,-1007.25 649,-1007.25 649,-1007.25 28,-1007.25 28,-1007.25 22,-1007.25 16,-1001.25 16,-995.25 16,-995.25 16,-272 16,-272 16,-266 22,-260 28,-260"/>
+<text text-anchor="middle" x="338.5" y="-991.25" font-family="DejaVu Sans" font-size="15.00">dump&#45;analyzer process · Rust / Tokio</text>
+</g>
+<g id="blocks-clust3" class="cluster">
+<title>cluster_external</title>
+<path fill="transparent" stroke="#a7b5c4" stroke-dasharray="5,2" d="M571,-8C571,-8 905,-8 905,-8 911,-8 917,-14 917,-20 917,-20 917,-212 917,-212 917,-218 911,-224 905,-224 905,-224 571,-224 571,-224 565,-224 559,-218 559,-212 559,-212 559,-20 559,-20 559,-14 565,-8 571,-8"/>
+<text text-anchor="middle" x="738" y="-208" font-family="DejaVu Sans" font-size="15.00">External services · may share a Windows host</text>
+</g>
+<!-- browser -->
+<g id="blocks-node1" class="node">
+<title>browser</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M384,-1128.25C384,-1128.25 174,-1128.25 174,-1128.25 168,-1128.25 162,-1122.25 162,-1116.25 162,-1116.25 162,-1096.25 162,-1096.25 162,-1090.25 168,-1084.25 174,-1084.25 174,-1084.25 384,-1084.25 384,-1084.25 390,-1084.25 396,-1090.25 396,-1096.25 396,-1096.25 396,-1116.25 396,-1116.25 396,-1122.25 390,-1128.25 384,-1128.25"/>
+<text text-anchor="middle" x="279" y="-1109.65" font-family="DejaVu Sans" font-size="12.00">Operator browser</text>
+<text text-anchor="middle" x="279" y="-1096.65" font-family="DejaVu Sans" font-size="12.00">Queue · Dumps · Reports · Settings</text>
+</g>
+<!-- http -->
+<g id="blocks-node2" class="node">
+<title>http</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M357,-974.25C357,-974.25 201,-974.25 201,-974.25 195,-974.25 189,-968.25 189,-962.25 189,-962.25 189,-929.25 189,-929.25 189,-923.25 195,-917.25 201,-917.25 201,-917.25 357,-917.25 357,-917.25 363,-917.25 369,-923.25 369,-929.25 369,-929.25 369,-962.25 369,-962.25 369,-968.25 363,-974.25 357,-974.25"/>
+<text text-anchor="middle" x="279" y="-955.65" font-family="DejaVu Sans" font-size="12.00">HTTP + dashboard</text>
+<text text-anchor="middle" x="279" y="-942.65" font-family="DejaVu Sans" font-size="12.00">http.rs / dashboard.html</text>
+<text text-anchor="middle" x="279" y="-929.65" font-family="DejaVu Sans" font-size="12.00">loopback :4180 by default</text>
+</g>
+<!-- browser&#45;&gt;http -->
+<g id="blocks-edge1" class="edge">
+<title>browser&#45;&gt;http</title>
+<path fill="none" stroke="#63758a" d="M279,-1084.2C279,-1058.01 279,-1012.91 279,-981.54"/>
+<polygon fill="#63758a" stroke="#63758a" points="281.45,-981.28 279,-974.28 276.55,-981.28 281.45,-981.28"/>
+<text text-anchor="middle" x="341" y="-1051.25" font-family="DejaVu Sans" font-size="10.00">GET views / POST actions</text>
+</g>
+<!-- explorer -->
+<g id="blocks-node3" class="node">
+<title>explorer</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M234,-774.25C234,-774.25 36,-774.25 36,-774.25 30,-774.25 24,-768.25 24,-762.25 24,-762.25 24,-729.25 24,-729.25 24,-723.25 30,-717.25 36,-717.25 36,-717.25 234,-717.25 234,-717.25 240,-717.25 246,-723.25 246,-729.25 246,-729.25 246,-762.25 246,-762.25 246,-768.25 240,-774.25 234,-774.25"/>
+<text text-anchor="middle" x="135" y="-755.65" font-family="DejaVu Sans" font-size="12.00">DumpsExplorer</text>
+<text text-anchor="middle" x="135" y="-742.65" font-family="DejaVu Sans" font-size="12.00">explorer.rs</text>
+<text text-anchor="middle" x="135" y="-729.65" font-family="DejaVu Sans" font-size="12.00">catalog cache + hierarchy pages</text>
+</g>
+<!-- http&#45;&gt;explorer -->
+<g id="blocks-edge2" class="edge">
+<title>http&#45;&gt;explorer</title>
+<path fill="none" stroke="#63758a" d="M193.5,-917.2C182.3,-910.52 171.97,-902.32 164,-892.25 139.13,-860.84 133.78,-813.89 133.4,-781.88"/>
+<polygon fill="#63758a" stroke="#63758a" points="135.85,-781.48 133.4,-774.48 130.95,-781.48 135.85,-781.48"/>
+<text text-anchor="middle" x="182" y="-884.25" font-family="DejaVu Sans" font-size="10.00">browse</text>
+</g>
+<!-- manual -->
+<g id="blocks-node4" class="node">
+<title>manual</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M424.5,-856.25C424.5,-856.25 277.5,-856.25 277.5,-856.25 271.5,-856.25 265.5,-850.25 265.5,-844.25 265.5,-844.25 265.5,-811.25 265.5,-811.25 265.5,-805.25 271.5,-799.25 277.5,-799.25 277.5,-799.25 424.5,-799.25 424.5,-799.25 430.5,-799.25 436.5,-805.25 436.5,-811.25 436.5,-811.25 436.5,-844.25 436.5,-844.25 436.5,-850.25 430.5,-856.25 424.5,-856.25"/>
+<text text-anchor="middle" x="351" y="-837.65" font-family="DejaVu Sans" font-size="12.00">PipelineAnalyzer</text>
+<text text-anchor="middle" x="351" y="-824.65" font-family="DejaVu Sans" font-size="12.00">analyzer.rs</text>
+<text text-anchor="middle" x="351" y="-811.65" font-family="DejaVu Sans" font-size="12.00">manual / scope requests</text>
+</g>
+<!-- http&#45;&gt;manual -->
+<g id="blocks-edge3" class="edge">
+<title>http&#45;&gt;manual</title>
+<path fill="none" stroke="#63758a" d="M277.51,-917.11C277.99,-905.42 280.09,-892.05 286,-881.25 290.02,-873.89 295.55,-867.18 301.68,-861.2"/>
+<polygon fill="#63758a" stroke="#63758a" points="303.47,-862.89 306.97,-856.35 300.15,-859.28 303.47,-862.89"/>
+<text text-anchor="middle" x="305.5" y="-884.25" font-family="DejaVu Sans" font-size="10.00">analyze</text>
+</g>
+<!-- sync -->
+<g id="blocks-node5" class="node">
+<title>sync</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M287.5,-610.25C287.5,-610.25 146.5,-610.25 146.5,-610.25 140.5,-610.25 134.5,-604.25 134.5,-598.25 134.5,-598.25 134.5,-565.25 134.5,-565.25 134.5,-559.25 140.5,-553.25 146.5,-553.25 146.5,-553.25 287.5,-553.25 287.5,-553.25 293.5,-553.25 299.5,-559.25 299.5,-565.25 299.5,-565.25 299.5,-598.25 299.5,-598.25 299.5,-604.25 293.5,-610.25 287.5,-610.25"/>
+<text text-anchor="middle" x="217" y="-591.65" font-family="DejaVu Sans" font-size="12.00">Intake</text>
+<text text-anchor="middle" x="217" y="-578.65" font-family="DejaVu Sans" font-size="12.00">sync.rs</text>
+<text text-anchor="middle" x="217" y="-565.65" font-family="DejaVu Sans" font-size="12.00">boot scan + event feed</text>
+</g>
+<!-- http&#45;&gt;sync -->
+<g id="blocks-edge5" class="edge">
+<title>http&#45;&gt;sync</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M254.33,-917.08C241.37,-900.65 226.8,-878.7 220,-856.25 212.66,-832 209.86,-822.46 220,-799.25 226.55,-784.26 240.45,-789.24 247,-774.25 257.14,-751.04 249.77,-742.43 247,-717.25 243.2,-682.76 234.08,-644.18 226.88,-617.21"/>
+<polygon fill="#63758a" stroke="#63758a" points="229.2,-616.39 225,-610.27 224.47,-617.67 229.2,-616.39"/>
+<text text-anchor="middle" x="236.5" y="-825.25" font-family="DejaVu Sans" font-size="10.00">rescan</text>
+</g>
+<!-- db -->
+<g id="blocks-node11" class="node">
+<title>db</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M904.5,-437.6C904.5,-442.44 851.83,-446.38 787,-446.38 722.17,-446.38 669.5,-442.44 669.5,-437.6 669.5,-437.6 669.5,-358.65 669.5,-358.65 669.5,-353.81 722.17,-349.87 787,-349.87 851.83,-349.87 904.5,-353.81 904.5,-358.65 904.5,-358.65 904.5,-437.6 904.5,-437.6"/>
+<path fill="none" stroke="#6eac81" d="M904.5,-437.6C904.5,-432.76 851.83,-428.83 787,-428.83 722.17,-428.83 669.5,-432.76 669.5,-437.6"/>
+<text text-anchor="middle" x="787" y="-414.52" font-family="DejaVu Sans" font-size="12.00">SQLite · WAL</text>
+<text text-anchor="middle" x="787" y="-401.52" font-family="DejaVu Sans" font-size="12.00">state.rs</text>
+<text text-anchor="middle" x="787" y="-388.52" font-family="DejaVu Sans" font-size="12.00">jobs · settled_jobs · cursors</text>
+<text text-anchor="middle" x="787" y="-375.52" font-family="DejaVu Sans" font-size="12.00">local_reports · byte_cache · secrets</text>
+</g>
+<!-- http&#45;&gt;db -->
+<g id="blocks-edge4" class="edge">
+<title>http&#45;&gt;db</title>
+<path fill="none" stroke="#63758a" d="M369.08,-930.24C561.59,-897.21 1002.69,-810.06 1090,-692.25 1148.53,-613.27 1148.41,-542.8 1081,-471.25 1057.4,-446.19 980.96,-427.89 911.95,-416"/>
+<polygon fill="#63758a" stroke="#63758a" points="912.18,-413.55 904.87,-414.8 911.36,-418.38 912.18,-413.55"/>
+<text text-anchor="middle" x="1120.5" y="-743.25" font-family="DejaVu Sans" font-size="10.00">queue / reports / counts</text>
+</g>
+<!-- client -->
+<g id="blocks-node9" class="node">
+<title>client</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M293,-325C293,-325 77,-325 77,-325 71,-325 65,-319 65,-313 65,-313 65,-280 65,-280 65,-274 71,-268 77,-268 77,-268 293,-268 293,-268 299,-268 305,-274 305,-280 305,-280 305,-313 305,-313 305,-319 299,-325 293,-325"/>
+<text text-anchor="middle" x="185" y="-306.4" font-family="DejaVu Sans" font-size="12.00">LedgerClient</text>
+<text text-anchor="middle" x="185" y="-293.4" font-family="DejaVu Sans" font-size="12.00">client.rs</text>
+<text text-anchor="middle" x="185" y="-280.4" font-family="DejaVu Sans" font-size="12.00">catalog / events / content / analyses</text>
+</g>
+<!-- explorer&#45;&gt;client -->
+<g id="blocks-edge16" class="edge">
+<title>explorer&#45;&gt;client</title>
+<path fill="none" stroke="#63758a" d="M108.23,-717.09C85.63,-691.66 54.94,-651.71 42,-610.25 34.45,-586.07 39.66,-578.48 42,-553.25 50.48,-461.74 24.68,-423.38 80,-350 86.13,-341.87 93.87,-334.91 102.35,-328.98"/>
+<polygon fill="#63758a" stroke="#63758a" points="103.84,-330.93 108.33,-325.03 101.14,-326.84 103.84,-330.93"/>
+<text text-anchor="middle" x="82" y="-579.25" font-family="DejaVu Sans" font-size="10.00">catalog + labels</text>
+</g>
+<!-- agent -->
+<g id="blocks-node7" class="node">
+<title>agent</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M632.5,-692.25C632.5,-692.25 481.5,-692.25 481.5,-692.25 475.5,-692.25 469.5,-686.25 469.5,-680.25 469.5,-680.25 469.5,-647.25 469.5,-647.25 469.5,-641.25 475.5,-635.25 481.5,-635.25 481.5,-635.25 632.5,-635.25 632.5,-635.25 638.5,-635.25 644.5,-641.25 644.5,-647.25 644.5,-647.25 644.5,-680.25 644.5,-680.25 644.5,-686.25 638.5,-692.25 632.5,-692.25"/>
+<text text-anchor="middle" x="557" y="-673.65" font-family="DejaVu Sans" font-size="12.00">Agent</text>
+<text text-anchor="middle" x="557" y="-660.65" font-family="DejaVu Sans" font-size="12.00">agent.rs</text>
+<text text-anchor="middle" x="557" y="-647.65" font-family="DejaVu Sans" font-size="12.00">fetch · verify · stage · run</text>
+</g>
+<!-- manual&#45;&gt;agent -->
+<g id="blocks-edge6" class="edge">
+<title>manual&#45;&gt;agent</title>
+<path fill="none" stroke="#63758a" d="M381.21,-799.17C406.64,-776.39 444.31,-743.62 479,-717.25 488.15,-710.3 498.16,-703.2 507.87,-696.56"/>
+<polygon fill="#63758a" stroke="#63758a" points="509.45,-698.45 513.87,-692.49 506.7,-694.39 509.45,-698.45"/>
+<text text-anchor="middle" x="499" y="-743.25" font-family="DejaVu Sans" font-size="10.00">attempt</text>
+</g>
+<!-- verdict -->
+<g id="blocks-node8" class="node">
+<title>verdict</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M454,-528.25C454,-528.25 292,-528.25 292,-528.25 286,-528.25 280,-522.25 280,-516.25 280,-516.25 280,-483.25 280,-483.25 280,-477.25 286,-471.25 292,-471.25 292,-471.25 454,-471.25 454,-471.25 460,-471.25 466,-477.25 466,-483.25 466,-483.25 466,-516.25 466,-516.25 466,-522.25 460,-528.25 454,-528.25"/>
+<text text-anchor="middle" x="373" y="-509.65" font-family="DejaVu Sans" font-size="12.00">Verdict + delivery</text>
+<text text-anchor="middle" x="373" y="-496.65" font-family="DejaVu Sans" font-size="12.00">verdict.rs / scheduler.rs</text>
+<text text-anchor="middle" x="373" y="-483.65" font-family="DejaVu Sans" font-size="12.00">local record · POST · replay</text>
+</g>
+<!-- manual&#45;&gt;verdict -->
+<g id="blocks-edge14" class="edge">
+<title>manual&#45;&gt;verdict</title>
+<path fill="none" stroke="#63758a" d="M352.86,-799.24C356.85,-740.11 366.23,-601.03 370.64,-535.75"/>
+<polygon fill="#63758a" stroke="#63758a" points="373.1,-535.68 371.12,-528.54 368.21,-535.35 373.1,-535.68"/>
+<text text-anchor="middle" x="405.5" y="-661.25" font-family="DejaVu Sans" font-size="10.00">assemble + save</text>
+</g>
+<!-- sync&#45;&gt;client -->
+<g id="blocks-edge17" class="edge">
+<title>sync&#45;&gt;client</title>
+<path fill="none" stroke="#63758a" d="M134.59,-553.14C116.19,-545.27 100.48,-536.58 95,-528.25 52.85,-464.23 113.04,-377.49 153.48,-330.71"/>
+<polygon fill="#63758a" stroke="#63758a" points="155.53,-332.08 158.3,-325.2 151.85,-328.85 155.53,-332.08"/>
+<text text-anchor="middle" x="124.5" y="-497.25" font-family="DejaVu Sans" font-size="10.00">scan + feed</text>
+</g>
+<!-- sync&#45;&gt;db -->
+<g id="blocks-edge8" class="edge">
+<title>sync&#45;&gt;db</title>
+<path fill="none" stroke="#63758a" d="M299.75,-567.06C330.26,-562.29 365.15,-557.16 397,-553.25 456.59,-545.94 612.52,-555.53 666,-528.25 696.02,-512.94 693.06,-495.93 716,-471.25 721.89,-464.92 728.14,-458.35 734.39,-451.88"/>
+<polygon fill="#63758a" stroke="#63758a" points="736.52,-453.2 739.63,-446.47 733,-449.79 736.52,-453.2"/>
+<text text-anchor="middle" x="772" y="-497.25" font-family="DejaVu Sans" font-size="10.00">discover / drop / cursor</text>
+</g>
+<!-- schedule -->
+<g id="blocks-node6" class="node">
+<title>schedule</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M640.5,-856.25C640.5,-856.25 473.5,-856.25 473.5,-856.25 467.5,-856.25 461.5,-850.25 461.5,-844.25 461.5,-844.25 461.5,-811.25 461.5,-811.25 461.5,-805.25 467.5,-799.25 473.5,-799.25 473.5,-799.25 640.5,-799.25 640.5,-799.25 646.5,-799.25 652.5,-805.25 652.5,-811.25 652.5,-811.25 652.5,-844.25 652.5,-844.25 652.5,-850.25 646.5,-856.25 640.5,-856.25"/>
+<text text-anchor="middle" x="557" y="-837.65" font-family="DejaVu Sans" font-size="12.00">Scheduler</text>
+<text text-anchor="middle" x="557" y="-824.65" font-family="DejaVu Sans" font-size="12.00">scheduler.rs</text>
+<text text-anchor="middle" x="557" y="-811.65" font-family="DejaVu Sans" font-size="12.00">one automatic job at a time</text>
+</g>
+<!-- schedule&#45;&gt;agent -->
+<g id="blocks-edge7" class="edge">
+<title>schedule&#45;&gt;agent</title>
+<path fill="none" stroke="#63758a" d="M539.7,-799.1C535.71,-791.35 532.05,-782.72 530,-774.25 524.04,-749.63 524.04,-741.87 530,-717.25 531.51,-711.03 533.88,-704.72 536.62,-698.74"/>
+<polygon fill="#63758a" stroke="#63758a" points="538.84,-699.76 539.7,-692.4 534.43,-697.62 538.84,-699.76"/>
+<text text-anchor="middle" x="548.5" y="-743.25" font-family="DejaVu Sans" font-size="10.00">run_job</text>
+</g>
+<!-- agent&#45;&gt;verdict -->
+<g id="blocks-edge13" class="edge">
+<title>agent&#45;&gt;verdict</title>
+<path fill="none" stroke="#63758a" d="M488.88,-635.24C475.56,-628.19 462.25,-619.84 451,-610.25 426.05,-588.99 405,-558.09 391.08,-534.54"/>
+<polygon fill="#63758a" stroke="#63758a" points="393.16,-533.24 387.52,-528.41 388.92,-535.7 393.16,-533.24"/>
+<text text-anchor="middle" x="477" y="-579.25" font-family="DejaVu Sans" font-size="10.00">RunOutput</text>
+</g>
+<!-- agent&#45;&gt;client -->
+<g id="blocks-edge18" class="edge">
+<title>agent&#45;&gt;client</title>
+<path fill="none" stroke="#63758a" d="M469.32,-637.8C445.46,-629.99 419.89,-620.65 397,-610.25 351.82,-589.73 346.95,-571.98 301,-553.25 257.38,-535.47 228.88,-563.82 198,-528.25 150.74,-473.81 163.41,-382.13 175.17,-332.3"/>
+<polygon fill="#63758a" stroke="#63758a" points="177.61,-332.64 176.89,-325.26 172.85,-331.47 177.61,-332.64"/>
+<text text-anchor="middle" x="233" y="-497.25" font-family="DejaVu Sans" font-size="10.00">detail + bytes</text>
+</g>
+<!-- runner -->
+<g id="blocks-node10" class="node">
+<title>runner</title>
+<path fill="#f1ebfc" stroke="#9c7bc5" d="M641,-528.25C641,-528.25 503,-528.25 503,-528.25 497,-528.25 491,-522.25 491,-516.25 491,-516.25 491,-483.25 491,-483.25 491,-477.25 497,-471.25 503,-471.25 503,-471.25 641,-471.25 641,-471.25 647,-471.25 653,-477.25 653,-483.25 653,-483.25 653,-516.25 653,-516.25 653,-522.25 647,-528.25 641,-528.25"/>
+<text text-anchor="middle" x="572" y="-509.65" font-family="DejaVu Sans" font-size="12.00">ToolRunner interface</text>
+<text text-anchor="middle" x="572" y="-496.65" font-family="DejaVu Sans" font-size="12.00">types.rs</text>
+<text text-anchor="middle" x="572" y="-483.65" font-family="DejaVu Sans" font-size="12.00">cdb&#45;ssh OR claude&#45;cdb</text>
+</g>
+<!-- agent&#45;&gt;runner -->
+<g id="blocks-edge12" class="edge">
+<title>agent&#45;&gt;runner</title>
+<path fill="none" stroke="#63758a" d="M529.99,-635.11C524.27,-627.62 519.05,-619.11 516,-610.25 507.75,-586.3 505.93,-576.5 516,-553.25 519.08,-546.13 523.66,-539.54 528.89,-533.6"/>
+<polygon fill="#63758a" stroke="#63758a" points="530.83,-535.11 533.85,-528.33 527.26,-531.75 530.83,-535.11"/>
+<text text-anchor="middle" x="545.5" y="-579.25" font-family="DejaVu Sans" font-size="10.00">RunRequest</text>
+</g>
+<!-- agent&#45;&gt;db -->
+<g id="blocks-edge10" class="edge">
+<title>agent&#45;&gt;db</title>
+<path fill="none" stroke="#63758a" d="M644.56,-636.16C646.05,-635.84 647.53,-635.54 649,-635.25 759.42,-613.48 794.15,-645.62 901,-610.25 947.74,-594.78 952.49,-576.29 996,-553.25 1019.37,-540.87 1035.76,-550.54 1050,-528.25 1063.64,-506.9 1065.36,-491.39 1050,-471.25 1032.34,-448.1 970.94,-430.54 911.9,-418.55"/>
+<polygon fill="#63758a" stroke="#63758a" points="912.06,-416.09 904.72,-417.12 911.1,-420.89 912.06,-416.09"/>
+<text text-anchor="middle" x="1040" y="-579.25" font-family="DejaVu Sans" font-size="10.00">phases / attempts</text>
+</g>
+<!-- disk -->
+<g id="blocks-node12" class="node">
+<title>disk</title>
+<polygon fill="#eaf6ee" stroke="#6eac81" points="1037.5,-528.25 1034.5,-532.25 1013.5,-532.25 1010.5,-528.25 840.5,-528.25 840.5,-471.25 1037.5,-471.25 1037.5,-528.25"/>
+<text text-anchor="middle" x="939" y="-509.65" font-family="DejaVu Sans" font-size="12.00">Local filesystem</text>
+<text text-anchor="middle" x="939" y="-496.65" font-family="DejaVu Sans" font-size="12.00">SHA&#45;addressed bytes cache</text>
+<text text-anchor="middle" x="939" y="-483.65" font-family="DejaVu Sans" font-size="12.00">run&#45;* temporary workspaces</text>
+</g>
+<!-- agent&#45;&gt;disk -->
+<g id="blocks-edge11" class="edge">
+<title>agent&#45;&gt;disk</title>
+<path fill="none" stroke="#63758a" d="M622.23,-635.09C690.36,-606.2 796.9,-561.01 867.33,-531.14"/>
+<polygon fill="#63758a" stroke="#63758a" points="868.55,-533.29 874.03,-528.3 866.63,-528.78 868.55,-533.29"/>
+<text text-anchor="middle" x="849.5" y="-579.25" font-family="DejaVu Sans" font-size="10.00">cache / workspace</text>
+</g>
+<!-- verdict&#45;&gt;client -->
+<g id="blocks-edge19" class="edge">
+<title>verdict&#45;&gt;client</title>
+<path fill="none" stroke="#63758a" d="M279.78,-472.85C246.71,-462.85 216.31,-452.36 211,-446.25 207.26,-441.95 196.6,-374.82 190.15,-332.23"/>
+<polygon fill="#63758a" stroke="#63758a" points="192.54,-331.66 189.07,-325.1 187.7,-332.39 192.54,-331.66"/>
+<text text-anchor="middle" x="258" y="-395.62" font-family="DejaVu Sans" font-size="10.00">write&#45;back enabled</text>
+</g>
+<!-- verdict&#45;&gt;db -->
+<g id="blocks-edge15" class="edge">
+<title>verdict&#45;&gt;db</title>
+<path fill="none" stroke="#63758a" d="M466.21,-473.9C470.52,-472.96 474.8,-472.07 479,-471.25 561.29,-455.14 584.8,-467.17 666,-446.25 667.55,-445.85 669.11,-445.44 670.68,-445.01"/>
+<polygon fill="#63758a" stroke="#63758a" points="671.5,-447.32 677.57,-443.06 670.16,-442.61 671.5,-447.32"/>
+</g>
+<!-- ledger -->
+<g id="blocks-node14" class="node">
+<title>ledger</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M826.5,-73C826.5,-73 631.5,-73 631.5,-73 625.5,-73 619.5,-67 619.5,-61 619.5,-61 619.5,-28 619.5,-28 619.5,-22 625.5,-16 631.5,-16 631.5,-16 826.5,-16 826.5,-16 832.5,-16 838.5,-22 838.5,-28 838.5,-28 838.5,-61 838.5,-61 838.5,-67 832.5,-73 826.5,-73"/>
+<text text-anchor="middle" x="729" y="-54.4" font-family="DejaVu Sans" font-size="12.00">DumpLedger service</text>
+<text text-anchor="middle" x="729" y="-41.4" font-family="DejaVu Sans" font-size="12.00">HTTPS catalog / events / content</text>
+<text text-anchor="middle" x="729" y="-28.4" font-family="DejaVu Sans" font-size="12.00">analyses + /symbols</text>
+</g>
+<!-- client&#45;&gt;ledger -->
+<g id="blocks-edge20" class="edge">
+<title>client&#45;&gt;ledger</title>
+<path fill="none" stroke="#63758a" d="M229.32,-267.91C285.52,-233.66 386.08,-174.76 477,-134 527.01,-111.58 584.55,-91 632.02,-75.34"/>
+<polygon fill="#63758a" stroke="#63758a" points="633.06,-77.57 638.94,-73.06 631.53,-72.92 633.06,-77.57"/>
+<text text-anchor="middle" x="547" y="-160" font-family="DejaVu Sans" font-size="10.00">HTTPS + analyzer credential</text>
+</g>
+<!-- cli -->
+<g id="blocks-node13" class="node">
+<title>cli</title>
+<path fill="#f1ebfc" stroke="#9c7bc5" d="M831,-318.5C831,-318.5 681,-318.5 681,-318.5 675,-318.5 669,-312.5 669,-306.5 669,-306.5 669,-286.5 669,-286.5 669,-280.5 675,-274.5 681,-274.5 681,-274.5 831,-274.5 831,-274.5 837,-274.5 843,-280.5 843,-286.5 843,-286.5 843,-306.5 843,-306.5 843,-312.5 837,-318.5 831,-318.5"/>
+<text text-anchor="middle" x="756" y="-299.9" font-family="DejaVu Sans" font-size="12.00">Optional local Claude CLI</text>
+<text text-anchor="middle" x="756" y="-286.9" font-family="DejaVu Sans" font-size="12.00">claude&#45;cdb provider only</text>
+</g>
+<!-- runner&#45;&gt;cli -->
+<g id="blocks-edge22" class="edge">
+<title>runner&#45;&gt;cli</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M570.1,-471.05C569.4,-438.19 573.33,-383.63 603,-350 606.01,-346.59 645.09,-333.21 683,-320.81"/>
+<polygon fill="#63758a" stroke="#63758a" points="684.16,-323.01 690.05,-318.51 682.64,-318.35 684.16,-323.01"/>
+<text text-anchor="middle" x="630" y="-395.62" font-family="DejaVu Sans" font-size="10.00">claude&#45;cdb</text>
+</g>
+<!-- cdb -->
+<g id="blocks-node15" class="node">
+<title>cdb</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M870.5,-191C870.5,-191 641.5,-191 641.5,-191 635.5,-191 629.5,-185 629.5,-179 629.5,-179 629.5,-146 629.5,-146 629.5,-140 635.5,-134 641.5,-134 641.5,-134 870.5,-134 870.5,-134 876.5,-134 882.5,-140 882.5,-146 882.5,-146 882.5,-179 882.5,-179 882.5,-185 876.5,-191 870.5,-191"/>
+<text text-anchor="middle" x="756" y="-172.4" font-family="DejaVu Sans" font-size="12.00">Windows analysis process</text>
+<text text-anchor="middle" x="756" y="-159.4" font-family="DejaVu Sans" font-size="12.00">CDB + remote scratch / symbol cache</text>
+<text text-anchor="middle" x="756" y="-146.4" font-family="DejaVu Sans" font-size="12.00">configured SSH target</text>
+</g>
+<!-- runner&#45;&gt;cdb -->
+<g id="blocks-edge21" class="edge">
+<title>runner&#45;&gt;cdb</title>
+<path fill="none" stroke="#63758a" d="M653.34,-472.05C654.56,-471.77 655.79,-471.5 657,-471.25 711.43,-459.85 868.69,-487.49 906,-446.25 964.03,-382.1 940.03,-325.23 894,-252 878.64,-227.56 853.79,-208.6 829.39,-194.61"/>
+<polygon fill="#63758a" stroke="#63758a" points="830.51,-192.43 823.2,-191.16 828.12,-196.71 830.51,-192.43"/>
+<text text-anchor="middle" x="987.5" y="-294" font-family="DejaVu Sans" font-size="10.00">SCP staging / SSH CDB</text>
+</g>
+<!-- db&#45;&gt;schedule -->
+<g id="blocks-edge9" class="edge">
+<title>db&#45;&gt;schedule</title>
+<path fill="none" stroke="#63758a" d="M904.56,-418.09C968.44,-430.64 1039,-448.89 1062,-471.25 1084.48,-493.1 1104.11,-584.67 1086,-610.25 1066.67,-637.55 1046.22,-623.24 1015,-635.25 875.91,-688.77 715.75,-757.36 626.45,-796.24"/>
+<polygon fill="#63758a" stroke="#63758a" points="625.32,-794.07 619.88,-799.11 627.28,-798.56 625.32,-794.07"/>
+<text text-anchor="middle" x="1051.5" y="-661.25" font-family="DejaVu Sans" font-size="10.00">claim / resume</text>
+</g>
+<!-- cli&#45;&gt;cdb -->
+<g id="blocks-edge23" class="edge">
+<title>cli&#45;&gt;cdb</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M756,-274.29C756,-253.82 756,-222.46 756,-198.32"/>
+<polygon fill="#63758a" stroke="#63758a" points="758.45,-198.08 756,-191.08 753.55,-198.08 758.45,-198.08"/>
+<text text-anchor="middle" x="794.5" y="-235" font-family="DejaVu Sans" font-size="10.00">SSH commands</text>
+</g>
+<!-- cdb&#45;&gt;ledger -->
+<g id="blocks-edge24" class="edge">
+<title>cdb&#45;&gt;ledger</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M749.53,-133.72C745.79,-117.65 741.05,-97.28 737.07,-80.17"/>
+<polygon fill="#63758a" stroke="#63758a" points="739.39,-79.32 735.41,-73.06 734.62,-80.43 739.39,-79.32"/>
+<text text-anchor="middle" x="793" y="-101" font-family="DejaVu Sans" font-size="10.00">HTTP symbol lookup</text>
+</g>
+</g>
 </svg>
-
-<h2>Verification / MBT pipeline</h2>
-<svg viewBox="0 0 1140 180" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
-    </marker>
-  </defs>
-  <rect x="20" y="40" width="180" height="70" rx="8" class="mod"/>
-  <text x="110" y="68" class="modtext">specs/DumpAnalyzer.tla</text>
-  <text x="110" y="86" class="modsub">+ DumpAnalyzerReplay.tla</text>
-  <rect x="250" y="40" width="180" height="70" rx="8" class="mod"/>
-  <text x="340" y="64" class="modtext">TLC + Apalache</text>
-  <text x="340" y="82" class="modsub">1.6M states clean · 11 invariants</text>
-  <rect x="480" y="40" width="180" height="70" rx="8" class="mod"/>
-  <text x="570" y="64" class="modtext">tools/mbt/gen_traces.py</text>
-  <text x="570" y="82" class="modsub">per-action witnesses + sim</text>
-  <rect x="710" y="40" width="180" height="70" rx="8" class="mod"/>
-  <text x="800" y="64" class="modtext">mirror (MirrorRust)</text>
-  <text x="800" y="82" class="modsub">33 traces · step diffing</text>
-  <rect x="940" y="40" width="180" height="70" rx="8" class="store"/>
-  <text x="1030" y="64" class="modtext">tests/mbt harness</text>
-  <text x="1030" y="82" class="modsub">drives real state layer</text>
-  <path class="flow" d="M 200 75 L 250 75" style="marker-end:url(#arrow2)"/>
-  <path class="flow" d="M 430 75 L 480 75" style="marker-end:url(#arrow2)"/>
-  <path class="flow" d="M 660 75 L 710 75" style="marker-end:url(#arrow2)"/>
-  <path class="flow" d="M 890 75 L 940 75" style="marker-end:url(#arrow2)"/>
+</div><figcaption>Runtime blocks and process boundaries</figcaption></figure>
+<p>Blue blocks are Rust components; purple blocks are runner providers or their subprocesses; green blocks are durable local storage; amber blocks are operator interfaces; gray blocks are external services. The Rust components share one process and a SQLite store. A <code>LedgerClient</code> box represents the common client implementation; several components own separate instances with the same boot configuration.</p>
+<p>The Windows CDB process and DumpLedger service have distinct responsibilities and can share a physical host. DumpLedger supplies catalog metadata, audit events, bytes and symbols, and receives reports. DumpAnalyzer owns analysis execution. The optional Claude CLI runs on the daemon host and drives remote CDB over SSH.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Responsibility and implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Entry point / configuration</td>
+<td>Validate environment, select runner, start daemon: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/main.rs#L26">main.rs</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/config.rs#L128">config.rs</a>.</td>
+</tr>
+<tr>
+<td>Scheduler / intake</td>
+<td>Boot, recovery and supervised loops: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/scheduler.rs#L104">scheduler.rs</a>. Catalog scan and durable event feed: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/sync.rs#L192">sync.rs</a>.</td>
+</tr>
+<tr>
+<td>Agent / manual facade</td>
+<td>Scheduled execution and shared attempt pipeline: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/agent.rs#L213">agent.rs</a>. On-demand analysis, scope batches and active registry: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/analyzer.rs#L274">analyzer.rs</a>.</td>
+</tr>
+<tr>
+<td>ToolRunner providers</td>
+<td>Typed request/result interface: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/types.rs#L113">types.rs</a>. Deterministic SSH/CDB adapter: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/runner.rs#L1333">runner.rs</a>. Optional Claude adapter: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/claude_runner.rs#L78">claude_runner.rs</a>.</td>
+</tr>
+<tr>
+<td>Persistence / delivery</td>
+<td>SQLite tables and migrations: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/state.rs#L122">state.rs</a>. Bounded report assembly, local recording and delivery: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/verdict.rs#L134">verdict.rs</a>.</td>
+</tr>
+<tr>
+<td>Dashboard / explorer</td>
+<td>HTTP dispatch and JSON projections: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/http.rs#L145">http.rs</a>. Catalog hierarchy/cache: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/explorer.rs#L163">explorer.rs</a>. Browser panels: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/dashboard.html#L528">dashboard.html</a>.</td>
+</tr>
+</tbody>
+</table>
+<p>The default HTTP listener is <code>127.0.0.1:4180</code>; an empty address disables it. Reads are anonymous. Actions can use the daemon's stored token when no Authorization header is supplied, so the token mechanism is not caller authentication for an exposed listener. The configured analyzer credential authenticates outbound DumpLedger API calls. Updating the stored token changes UI action checks immediately; running pipeline clients take the token from boot configuration.</p>
+<h2 id="2-daemon-control-flow">2. Daemon control flow</h2>
+<figure class="diagram"><div class="diagram-tools" role="group" aria-label="Diagram controls"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-fit>Fit</button><output aria-live="polite">100%</output><a href="architecture/daemon-control.svg" target="_blank" rel="noopener">Open SVG ↗</a></div><div class="diagram-scroll" tabindex="0" aria-label="Startup and concurrent daemon control flow; scroll after zooming"><svg role="img" aria-label="Startup and concurrent daemon control flow"
+ viewBox="0.00 0.00 1579.00 778.23" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="daemon-control-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 760.23)">
+<title>DaemonControl</title>
+<g id="daemon-control-clust1" class="cluster">
+<title>cluster_feed</title>
+<path fill="transparent" stroke="#b5c9e2" d="M20,-99C20,-99 270,-99 270,-99 276,-99 282,-105 282,-111 282,-111 282,-285 282,-285 282,-291 276,-297 270,-297 270,-297 20,-297 20,-297 14,-297 8,-291 8,-285 8,-285 8,-111 8,-111 8,-105 14,-99 20,-99"/>
+<text text-anchor="middle" x="145" y="-281" font-family="DejaVu Sans" font-size="15.00">Feed follower</text>
+</g>
+<g id="daemon-control-clust2" class="cluster">
+<title>cluster_scheduler</title>
+<path fill="transparent" stroke="#b5c9e2" d="M303,-8C303,-8 699,-8 699,-8 705,-8 711,-14 711,-20 711,-20 711,-294 711,-294 711,-300 705,-306 699,-306 699,-306 303,-306 303,-306 297,-306 291,-300 291,-294 291,-294 291,-20 291,-20 291,-14 297,-8 303,-8"/>
+<text text-anchor="middle" x="501" y="-290" font-family="DejaVu Sans" font-size="15.00">Automatic scheduler</text>
+</g>
+<g id="daemon-control-clust3" class="cluster">
+<title>cluster_delivery</title>
+<path fill="transparent" stroke="#b5c9e2" d="M732,-105.5C732,-105.5 1248,-105.5 1248,-105.5 1254,-105.5 1260,-111.5 1260,-117.5 1260,-117.5 1260,-294 1260,-294 1260,-300 1254,-306 1248,-306 1248,-306 732,-306 732,-306 726,-306 720,-300 720,-294 720,-294 720,-117.5 720,-117.5 720,-111.5 726,-105.5 732,-105.5"/>
+<text text-anchor="middle" x="990" y="-290" font-family="DejaVu Sans" font-size="15.00">Independent report delivery</text>
+</g>
+<g id="daemon-control-clust4" class="cluster">
+<title>cluster_http</title>
+<path fill="transparent" stroke="#e3c77b" d="M1281,-99C1281,-99 1523,-99 1523,-99 1529,-99 1535,-105 1535,-111 1535,-111 1535,-285 1535,-285 1535,-291 1529,-297 1523,-297 1523,-297 1281,-297 1281,-297 1275,-297 1269,-291 1269,-285 1269,-285 1269,-111 1269,-111 1269,-105 1275,-99 1281,-99"/>
+<text text-anchor="middle" x="1402" y="-281" font-family="DejaVu Sans" font-size="15.00">Optional HTTP task</text>
+</g>
+<!-- start -->
+<g id="daemon-control-node1" class="node">
+<title>start</title>
+<ellipse fill="#edf3fc" stroke="#7397c5" cx="717" cy="-711.11" rx="249.72" ry="31.23"/>
+<text text-anchor="middle" x="717" y="-714.51" font-family="DejaVu Sans" font-size="12.00">main</text>
+<text text-anchor="middle" x="717" y="-701.51" font-family="DejaVu Sans" font-size="12.00">parse Config · select ToolRunner · install signal watcher</text>
+</g>
+<!-- open -->
+<g id="daemon-control-node2" class="node">
+<title>open</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M845,-643C845,-643 589,-643 589,-643 583,-643 577,-637 577,-631 577,-631 577,-611 577,-611 577,-605 583,-599 589,-599 589,-599 845,-599 845,-599 851,-599 857,-605 857,-611 857,-611 857,-631 857,-631 857,-637 851,-643 845,-643"/>
+<text text-anchor="middle" x="717" y="-624.4" font-family="DejaVu Sans" font-size="12.00">Acquire state lock → open / migrate SQLite</text>
+<text text-anchor="middle" x="717" y="-611.4" font-family="DejaVu Sans" font-size="12.00">Resolve env token or persisted token</text>
+</g>
+<!-- start&#45;&gt;open -->
+<g id="daemon-control-edge1" class="edge">
+<title>start&#45;&gt;open</title>
+<path fill="none" stroke="#63758a" d="M717,-679.79C717,-670.28 717,-659.83 717,-650.46"/>
+<polygon fill="#63758a" stroke="#63758a" points="719.45,-650.21 717,-643.21 714.55,-650.21 719.45,-650.21"/>
+</g>
+<!-- recover -->
+<g id="daemon-control-node3" class="node">
+<title>recover</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M829.5,-562C829.5,-562 604.5,-562 604.5,-562 598.5,-562 592.5,-556 592.5,-550 592.5,-550 592.5,-517 592.5,-517 592.5,-511 598.5,-505 604.5,-505 604.5,-505 829.5,-505 829.5,-505 835.5,-505 841.5,-511 841.5,-517 841.5,-517 841.5,-550 841.5,-550 841.5,-556 835.5,-562 829.5,-562"/>
+<text text-anchor="middle" x="717" y="-543.4" font-family="DejaVu Sans" font-size="12.00">Recover volatile jobs to Claimed</text>
+<text text-anchor="middle" x="717" y="-530.4" font-family="DejaVu Sans" font-size="12.00">Reconcile Reporting / pending reports</text>
+<text text-anchor="middle" x="717" y="-517.4" font-family="DejaVu Sans" font-size="12.00">Sweep orphaned run&#45;* workspaces</text>
+</g>
+<!-- open&#45;&gt;recover -->
+<g id="daemon-control-edge2" class="edge">
+<title>open&#45;&gt;recover</title>
+<path fill="none" stroke="#63758a" d="M717,-598.87C717,-589.95 717,-579.34 717,-569.32"/>
+<polygon fill="#63758a" stroke="#63758a" points="719.45,-569.17 717,-562.17 714.55,-569.17 719.45,-569.17"/>
+</g>
+<!-- scan -->
+<g id="daemon-control-node4" class="node">
+<title>scan</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M822,-468C822,-468 612,-468 612,-468 606,-468 600,-462 600,-456 600,-456 600,-436 600,-436 600,-430 606,-424 612,-424 612,-424 822,-424 822,-424 828,-424 834,-430 834,-436 834,-436 834,-456 834,-456 834,-462 828,-468 822,-468"/>
+<text text-anchor="middle" x="717" y="-449.4" font-family="DejaVu Sans" font-size="12.00">Initial catalog scan with retry</text>
+<text text-anchor="middle" x="717" y="-436.4" font-family="DejaVu Sans" font-size="12.00">Happens even when scheduler=off</text>
+</g>
+<!-- recover&#45;&gt;scan -->
+<g id="daemon-control-edge3" class="edge">
+<title>recover&#45;&gt;scan</title>
+<path fill="none" stroke="#63758a" d="M717,-504.98C717,-495.48 717,-484.84 717,-475.29"/>
+<polygon fill="#63758a" stroke="#63758a" points="719.45,-475.23 717,-468.23 714.55,-475.23 719.45,-475.23"/>
+</g>
+<!-- fork -->
+<g id="daemon-control-node5" class="node">
+<title>fork</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M846.5,-387C846.5,-387 587.5,-387 587.5,-387 581.5,-387 575.5,-381 575.5,-375 575.5,-375 575.5,-355 575.5,-355 575.5,-349 581.5,-343 587.5,-343 587.5,-343 846.5,-343 846.5,-343 852.5,-343 858.5,-349 858.5,-355 858.5,-355 858.5,-375 858.5,-375 858.5,-381 852.5,-387 846.5,-387"/>
+<text text-anchor="middle" x="717" y="-368.4" font-family="DejaVu Sans" font-size="12.00">Start HTTP task + three supervised futures</text>
+<text text-anchor="middle" x="717" y="-355.4" font-family="DejaVu Sans" font-size="12.00">Shared store, configuration and ToolRunner</text>
+</g>
+<!-- scan&#45;&gt;fork -->
+<g id="daemon-control-edge4" class="edge">
+<title>scan&#45;&gt;fork</title>
+<path fill="none" stroke="#63758a" d="M717,-423.83C717,-414.8 717,-404.12 717,-394.42"/>
+<polygon fill="#63758a" stroke="#63758a" points="719.45,-394.23 717,-387.23 714.55,-394.23 719.45,-394.23"/>
+</g>
+<!-- feed -->
+<g id="daemon-control-node6" class="node">
+<title>feed</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M229,-264C229,-264 101,-264 101,-264 95,-264 89,-258 89,-252 89,-252 89,-232 89,-232 89,-226 95,-220 101,-220 101,-220 229,-220 229,-220 235,-220 241,-226 241,-232 241,-232 241,-252 241,-252 241,-258 235,-264 229,-264"/>
+<text text-anchor="middle" x="165" y="-245.4" font-family="DejaVu Sans" font-size="12.00">Read next audit page</text>
+<text text-anchor="middle" x="165" y="-232.4" font-family="DejaVu Sans" font-size="12.00">from durable cursor</text>
+</g>
+<!-- fork&#45;&gt;feed -->
+<g id="daemon-control-edge15" class="edge">
+<title>fork&#45;&gt;feed</title>
+<path fill="none" stroke="#63758a" d="M575.17,-357.46C489.51,-350.47 379.09,-335.98 285,-306 256.41,-296.89 226.53,-281.23 203.74,-267.8"/>
+<polygon fill="#63758a" stroke="#63758a" points="204.77,-265.56 197.5,-264.08 202.26,-269.77 204.77,-265.56"/>
+</g>
+<!-- enabled -->
+<g id="daemon-control-node8" class="node">
+<title>enabled</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M550.28,-270.42C550.28,-270.42 432.72,-244.58 432.72,-244.58 426.86,-243.29 426.86,-240.71 432.72,-239.42 432.72,-239.42 550.28,-213.58 550.28,-213.58 556.14,-212.29 567.86,-212.29 573.72,-213.58 573.72,-213.58 691.28,-239.42 691.28,-239.42 697.14,-240.71 697.14,-243.29 691.28,-244.58 691.28,-244.58 573.72,-270.42 573.72,-270.42 567.86,-271.71 556.14,-271.71 550.28,-270.42"/>
+<text text-anchor="middle" x="562" y="-238.9" font-family="DejaVu Sans" font-size="12.00">scheduler enabled?</text>
+</g>
+<!-- fork&#45;&gt;enabled -->
+<g id="daemon-control-edge16" class="edge">
+<title>fork&#45;&gt;enabled</title>
+<path fill="none" stroke="#63758a" d="M690,-342.92C664.49,-323.01 626.06,-293.01 597.96,-271.07"/>
+<polygon fill="#63758a" stroke="#63758a" points="599.16,-268.9 592.13,-266.52 596.14,-272.76 599.16,-268.9"/>
+</g>
+<!-- wb -->
+<g id="daemon-control-node12" class="node">
+<title>wb</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M861.27,-270.49C861.27,-270.49 739.73,-244.51 739.73,-244.51 733.87,-243.25 733.87,-240.75 739.73,-239.49 739.73,-239.49 861.27,-213.51 861.27,-213.51 867.13,-212.25 878.87,-212.25 884.73,-213.51 884.73,-213.51 1006.27,-239.49 1006.27,-239.49 1012.13,-240.75 1012.13,-243.25 1006.27,-244.51 1006.27,-244.51 884.73,-270.49 884.73,-270.49 878.87,-271.75 867.13,-271.75 861.27,-270.49"/>
+<text text-anchor="middle" x="873" y="-238.9" font-family="DejaVu Sans" font-size="12.00">write&#45;back enabled?</text>
+</g>
+<!-- fork&#45;&gt;wb -->
+<g id="daemon-control-edge17" class="edge">
+<title>fork&#45;&gt;wb</title>
+<path fill="none" stroke="#63758a" d="M744.17,-342.92C769.85,-323.01 808.53,-293.01 836.81,-271.07"/>
+<polygon fill="#63758a" stroke="#63758a" points="838.64,-272.75 842.67,-266.52 835.64,-268.88 838.64,-272.75"/>
+</g>
+<!-- listen -->
+<g id="daemon-control-node15" class="node">
+<title>listen</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M1453.5,-264C1453.5,-264 1308.5,-264 1308.5,-264 1302.5,-264 1296.5,-258 1296.5,-252 1296.5,-252 1296.5,-232 1296.5,-232 1296.5,-226 1302.5,-220 1308.5,-220 1308.5,-220 1453.5,-220 1453.5,-220 1459.5,-220 1465.5,-226 1465.5,-232 1465.5,-232 1465.5,-252 1465.5,-252 1465.5,-258 1459.5,-264 1453.5,-264"/>
+<text text-anchor="middle" x="1381" y="-245.4" font-family="DejaVu Sans" font-size="12.00">Bind configured address</text>
+<text text-anchor="middle" x="1381" y="-232.4" font-family="DejaVu Sans" font-size="12.00">Default 127.0.0.1:4180</text>
+</g>
+<!-- fork&#45;&gt;listen -->
+<g id="daemon-control-edge18" class="edge">
+<title>fork&#45;&gt;listen</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M858.55,-355.4C995.44,-345.93 1192.59,-328.97 1266,-306 1293.8,-297.3 1322.55,-281.56 1344.34,-267.98"/>
+<polygon fill="#63758a" stroke="#63758a" points="1345.69,-270.03 1350.3,-264.22 1343.07,-265.89 1345.69,-270.03"/>
+<text text-anchor="middle" x="1271" y="-317" font-family="DejaVu Sans" font-size="10.00">if HTTP enabled</text>
+</g>
+<!-- signal -->
+<g id="daemon-control-node17" class="node">
+<title>signal</title>
+<polygon fill="#f0f2f5" stroke="#8a99aa" points="1254,-739.61 992,-739.61 992,-682.61 1260,-682.61 1260,-733.61 1254,-739.61"/>
+<polyline fill="none" stroke="#8a99aa" points="1254,-739.61 1254,-733.61 "/>
+<polyline fill="none" stroke="#8a99aa" points="1260,-733.61 1254,-733.61 "/>
+<text text-anchor="middle" x="1126" y="-721.01" font-family="DejaVu Sans" font-size="12.00">SIGINT / SIGTERM → cancellation</text>
+<text text-anchor="middle" x="1126" y="-708.01" font-family="DejaVu Sans" font-size="12.00">Feed stops; scheduled in&#45;flight job drains</text>
+<text text-anchor="middle" x="1126" y="-695.01" font-family="DejaVu Sans" font-size="12.00">HTTP connection tasks are not joined</text>
+</g>
+<!-- fork&#45;&gt;signal -->
+<g id="daemon-control-edge19" class="edge">
+<title>fork&#45;&gt;signal</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="1,5" d="M776.79,-387.11C799.77,-396.62 825.61,-409.09 847,-424 957.98,-501.37 1061.77,-626.88 1104.93,-682.3"/>
+</g>
+<!-- apply -->
+<g id="daemon-control-node7" class="node">
+<title>apply</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M261.5,-164C261.5,-164 28.5,-164 28.5,-164 22.5,-164 16.5,-158 16.5,-152 16.5,-152 16.5,-119 16.5,-119 16.5,-113 22.5,-107 28.5,-107 28.5,-107 261.5,-107 261.5,-107 267.5,-107 273.5,-113 273.5,-119 273.5,-119 273.5,-152 273.5,-152 273.5,-158 267.5,-164 261.5,-164"/>
+<text text-anchor="middle" x="145" y="-145.4" font-family="DejaVu Sans" font-size="12.00">Recheck eligible dump details</text>
+<text text-anchor="middle" x="145" y="-132.4" font-family="DejaVu Sans" font-size="12.00">Insert Discovered / archive purged jobs</text>
+<text text-anchor="middle" x="145" y="-119.4" font-family="DejaVu Sans" font-size="12.00">Then advance cursor</text>
+</g>
+<!-- feed&#45;&gt;apply -->
+<g id="daemon-control-edge5" class="edge">
+<title>feed&#45;&gt;apply</title>
+<path fill="none" stroke="#63758a" d="M150.67,-219.96C145.98,-211.89 141.37,-202.37 139,-193 137.24,-186.04 136.96,-178.48 137.47,-171.21"/>
+<polygon fill="#63758a" stroke="#63758a" points="139.92,-171.29 138.21,-164.08 135.05,-170.79 139.92,-171.29"/>
+</g>
+<!-- apply&#45;&gt;feed -->
+<g id="daemon-control-edge6" class="edge">
+<title>apply&#45;&gt;feed</title>
+<path fill="none" stroke="#63758a" d="M150.33,-164.36C153.2,-179.33 156.72,-197.75 159.6,-212.78"/>
+<polygon fill="#63758a" stroke="#63758a" points="157.23,-213.44 160.95,-219.85 162.04,-212.52 157.23,-213.44"/>
+<text text-anchor="middle" x="209.5" y="-185" font-family="DejaVu Sans" font-size="10.00">poll / transient backoff</text>
+</g>
+<!-- claim -->
+<g id="daemon-control-node9" class="node">
+<title>claim</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M517.5,-157.5C517.5,-157.5 310.5,-157.5 310.5,-157.5 304.5,-157.5 298.5,-151.5 298.5,-145.5 298.5,-145.5 298.5,-125.5 298.5,-125.5 298.5,-119.5 304.5,-113.5 310.5,-113.5 310.5,-113.5 517.5,-113.5 517.5,-113.5 523.5,-113.5 529.5,-119.5 529.5,-125.5 529.5,-125.5 529.5,-145.5 529.5,-145.5 529.5,-151.5 523.5,-157.5 517.5,-157.5"/>
+<text text-anchor="middle" x="414" y="-138.9" font-family="DejaVu Sans" font-size="12.00">Resume Claimed jobs first</text>
+<text text-anchor="middle" x="414" y="-125.9" font-family="DejaVu Sans" font-size="12.00">Otherwise claim oldest Discovered</text>
+</g>
+<!-- enabled&#45;&gt;claim -->
+<g id="daemon-control-edge7" class="edge">
+<title>enabled&#45;&gt;claim</title>
+<path fill="none" stroke="#63758a" d="M529.52,-218.07C505.99,-201.45 474.17,-178.99 449.89,-161.84"/>
+<polygon fill="#63758a" stroke="#63758a" points="451.02,-159.64 443.89,-157.6 448.19,-163.64 451.02,-159.64"/>
+<text text-anchor="middle" x="501" y="-185" font-family="DejaVu Sans" font-size="10.00">yes</text>
+</g>
+<!-- auto_idle -->
+<g id="daemon-control-node11" class="node">
+<title>auto_idle</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M691,-157.5C691,-157.5 567,-157.5 567,-157.5 561,-157.5 555,-151.5 555,-145.5 555,-145.5 555,-125.5 555,-125.5 555,-119.5 561,-113.5 567,-113.5 567,-113.5 691,-113.5 691,-113.5 697,-113.5 703,-119.5 703,-125.5 703,-125.5 703,-145.5 703,-145.5 703,-151.5 697,-157.5 691,-157.5"/>
+<text text-anchor="middle" x="629" y="-138.9" font-family="DejaVu Sans" font-size="12.00">Wait for shutdown</text>
+<text text-anchor="middle" x="629" y="-125.9" font-family="DejaVu Sans" font-size="12.00">No automatic claims</text>
+</g>
+<!-- enabled&#45;&gt;auto_idle -->
+<g id="daemon-control-edge8" class="edge">
+<title>enabled&#45;&gt;auto_idle</title>
+<path fill="none" stroke="#63758a" d="M578.91,-214.63C588.9,-199.04 601.53,-179.35 611.61,-163.63"/>
+<polygon fill="#63758a" stroke="#63758a" points="613.76,-164.82 615.47,-157.6 609.63,-162.17 613.76,-164.82"/>
+<text text-anchor="middle" x="605.5" y="-185" font-family="DejaVu Sans" font-size="10.00">off</text>
+</g>
+<!-- run -->
+<g id="daemon-control-node10" class="node">
+<title>run</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M538.5,-60C538.5,-60 335.5,-60 335.5,-60 329.5,-60 323.5,-54 323.5,-48 323.5,-48 323.5,-28 323.5,-28 323.5,-22 329.5,-16 335.5,-16 335.5,-16 538.5,-16 538.5,-16 544.5,-16 550.5,-22 550.5,-28 550.5,-28 550.5,-48 550.5,-48 550.5,-54 544.5,-60 538.5,-60"/>
+<text text-anchor="middle" x="437" y="-41.4" font-family="DejaVu Sans" font-size="12.00">Agent::run_job</text>
+<text text-anchor="middle" x="437" y="-28.4" font-family="DejaVu Sans" font-size="12.00">Wait for this job before next claim</text>
+</g>
+<!-- claim&#45;&gt;run -->
+<g id="daemon-control-edge9" class="edge">
+<title>claim&#45;&gt;run</title>
+<path fill="none" stroke="#63758a" d="M380.17,-113.47C368.3,-103.34 359.57,-90.65 367,-78 369.92,-73.02 373.74,-68.64 378.08,-64.78"/>
+<polygon fill="#63758a" stroke="#63758a" points="379.9,-66.46 383.83,-60.17 376.83,-62.64 379.9,-66.46"/>
+<text text-anchor="middle" x="399" y="-81" font-family="DejaVu Sans" font-size="10.00">job available</text>
+</g>
+<!-- run&#45;&gt;claim -->
+<g id="daemon-control-edge10" class="edge">
+<title>run&#45;&gt;claim</title>
+<path fill="none" stroke="#63758a" d="M436.78,-60.15C436.31,-69.15 435.26,-79.69 433,-89 431.58,-94.86 429.5,-100.94 427.24,-106.68"/>
+<polygon fill="#63758a" stroke="#63758a" points="424.94,-105.81 424.52,-113.22 429.47,-107.69 424.94,-105.81"/>
+<text text-anchor="middle" x="477.5" y="-81" font-family="DejaVu Sans" font-size="10.00">next job / backoff</text>
+</g>
+<!-- replay -->
+<g id="daemon-control-node13" class="node">
+<title>replay</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M945.5,-157.5C945.5,-157.5 740.5,-157.5 740.5,-157.5 734.5,-157.5 728.5,-151.5 728.5,-145.5 728.5,-145.5 728.5,-125.5 728.5,-125.5 728.5,-119.5 734.5,-113.5 740.5,-113.5 740.5,-113.5 945.5,-113.5 945.5,-113.5 951.5,-113.5 957.5,-119.5 957.5,-125.5 957.5,-125.5 957.5,-145.5 957.5,-145.5 957.5,-151.5 951.5,-157.5 945.5,-157.5"/>
+<text text-anchor="middle" x="843" y="-138.9" font-family="DejaVu Sans" font-size="12.00">Every 60 s: replay pending reports</text>
+<text text-anchor="middle" x="843" y="-125.9" font-family="DejaVu Sans" font-size="12.00">Settle late Reporting rows</text>
+</g>
+<!-- wb&#45;&gt;replay -->
+<g id="daemon-control-edge11" class="edge">
+<title>wb&#45;&gt;replay</title>
+<path fill="none" stroke="#63758a" d="M864.88,-212.72C860.59,-197.76 855.33,-179.45 851.05,-164.53"/>
+<polygon fill="#63758a" stroke="#63758a" points="853.32,-163.56 849.03,-157.51 848.61,-164.91 853.32,-163.56"/>
+<text text-anchor="middle" x="867" y="-185" font-family="DejaVu Sans" font-size="10.00">yes</text>
+</g>
+<!-- local -->
+<g id="daemon-control-node14" class="node">
+<title>local</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M1239.5,-157.5C1239.5,-157.5 1130.5,-157.5 1130.5,-157.5 1124.5,-157.5 1118.5,-151.5 1118.5,-145.5 1118.5,-145.5 1118.5,-125.5 1118.5,-125.5 1118.5,-119.5 1124.5,-113.5 1130.5,-113.5 1130.5,-113.5 1239.5,-113.5 1239.5,-113.5 1245.5,-113.5 1251.5,-119.5 1251.5,-125.5 1251.5,-125.5 1251.5,-145.5 1251.5,-145.5 1251.5,-151.5 1245.5,-157.5 1239.5,-157.5"/>
+<text text-anchor="middle" x="1185" y="-138.9" font-family="DejaVu Sans" font-size="12.00">Wait for shutdown</text>
+<text text-anchor="middle" x="1185" y="-125.9" font-family="DejaVu Sans" font-size="12.00">Local reports only</text>
+</g>
+<!-- wb&#45;&gt;local -->
+<g id="daemon-control-edge12" class="edge">
+<title>wb&#45;&gt;local</title>
+<path fill="none" stroke="#63758a" d="M928.63,-222.89C975.89,-207.44 1045.48,-184.53 1106,-164 1109.88,-162.68 1113.86,-161.33 1117.87,-159.95"/>
+<polygon fill="#63758a" stroke="#63758a" points="1118.83,-162.21 1124.65,-157.62 1117.23,-157.58 1118.83,-162.21"/>
+<text text-anchor="middle" x="1054.5" y="-185" font-family="DejaVu Sans" font-size="10.00">off</text>
+</g>
+<!-- replay&#45;&gt;replay -->
+<g id="daemon-control-edge13" class="edge">
+<title>replay&#45;&gt;replay</title>
+<path fill="none" stroke="#63758a" d="M957.66,-144.07C972.61,-142.6 982.5,-139.74 982.5,-135.5 982.5,-131.99 975.71,-129.43 964.89,-127.81"/>
+<polygon fill="#63758a" stroke="#63758a" points="964.9,-125.34 957.66,-126.93 964.31,-130.21 964.9,-125.34"/>
+<text text-anchor="middle" x="1041.5" y="-133" font-family="DejaVu Sans" font-size="10.00">independent of analysis</text>
+</g>
+<!-- request -->
+<g id="daemon-control-node16" class="node">
+<title>request</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M1515,-164C1515,-164 1289,-164 1289,-164 1283,-164 1277,-158 1277,-152 1277,-152 1277,-119 1277,-119 1277,-113 1283,-107 1289,-107 1289,-107 1515,-107 1515,-107 1521,-107 1527,-113 1527,-119 1527,-119 1527,-152 1527,-152 1527,-158 1521,-164 1515,-164"/>
+<text text-anchor="middle" x="1402" y="-145.4" font-family="DejaVu Sans" font-size="12.00">GET: read views</text>
+<text text-anchor="middle" x="1402" y="-132.4" font-family="DejaVu Sans" font-size="12.00">POST: manual / scope / rescan / token</text>
+<text text-anchor="middle" x="1402" y="-119.4" font-family="DejaVu Sans" font-size="12.00">Spawn task per connection</text>
+</g>
+<!-- listen&#45;&gt;request -->
+<g id="daemon-control-edge14" class="edge">
+<title>listen&#45;&gt;request</title>
+<path fill="none" stroke="#63758a" d="M1385.25,-219.85C1388.04,-205.99 1391.74,-187.54 1394.96,-171.52"/>
+<polygon fill="#63758a" stroke="#63758a" points="1397.42,-171.7 1396.4,-164.36 1392.62,-170.74 1397.42,-171.7"/>
+</g>
+</g>
 </svg>
-
-<p class="muted">Legend — solid blue: modules in <code>src/</code>; green: local persistence; amber: status UI; purple: tool-runner providers; dashed gray: external systems (not this process).</p>
+</div><figcaption>Startup and concurrent daemon control flow</figcaption></figure>
+<p>Startup completes recovery and the initial catalog scan before starting HTTP. An unavailable catalog can therefore delay the dashboard. Discovery runs even when automatic scheduling is disabled.</p>
+<p>After boot, the feed follower, automatic scheduler and delivery loop advance independently under the supervisor. HTTP runs in a separate spawned task. Each feed page is applied before its cursor is committed. The automatic scheduler resumes persisted <code>Claimed</code> work before claiming new discoveries and runs one scheduled job at a time. Delivery retries pending reports every 60 seconds, including while analysis is busy or scheduling is disabled.</p>
+<table>
+<thead>
+<tr>
+<th>Configuration</th>
+<th>What it changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DUMP_ANALYZER_SCHEDULER=off</code></td>
+<td>Disables automatic claims. Catalog intake, browsing, manual analysis and report delivery remain available.</td>
+</tr>
+<tr>
+<td><code>DUMP_ANALYZER_WRITE_BACK=off</code></td>
+<td>Saves reports locally and settles eligible work without posting analyses. Catalog/content/symbol reads remain in use; delivery replay is disabled.</td>
+</tr>
+<tr>
+<td><code>DUMP_ANALYZER_HTTP_ADDR=''</code></td>
+<td>Disables the dashboard and HTTP action surface. The daemon loops still operate.</td>
+</tr>
+<tr>
+<td><code>DUMP_ANALYZER_RUNNER</code></td>
+<td>Selects <code>cdb-ssh</code> or <code>claude-cdb</code> at boot. Both use the designated Windows CDB host.</td>
+</tr>
+</tbody>
+</table>
+<p>On restart, <code>Fetching</code>, <code>Staged</code> and <code>Analyzing</code> reset to <code>Claimed</code>, preserving attempt counts. <code>Reporting</code> is reconciled separately against local reports and, when enabled, the remote analyses API. SIGINT/SIGTERM cancels the loops; the automatic scheduler finishes its in-flight job. HTTP connection tasks are not joined by that drain guarantee. An HTTP serving failure is logged without terminating the pipeline.</p>
+<p>Sources: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/scheduler.rs#L109">boot ordering</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/scheduler.rs#L225">concurrent loops</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/scheduler.rs#L408">automatic scheduling</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/scheduler.rs#L513">delivery loop</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/agent.rs#L167">recovery</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/sync.rs#L246">feed cursor</a>.</p>
+<h2 id="3-job-and-manual-request-control-flow">3. Job and manual-request control flow</h2>
+<figure class="diagram"><div class="diagram-tools" role="group" aria-label="Diagram controls"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-fit>Fit</button><output aria-live="polite">100%</output><a href="architecture/job-control.svg" target="_blank" rel="noopener">Open SVG ↗</a></div><div class="diagram-scroll" tabindex="0" aria-label="Scheduled and manual analysis control flow; scroll after zooming"><svg role="img" aria-label="Scheduled and manual analysis control flow"
+ viewBox="0.00 0.00 862.00 1328.88" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="job-control-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 1310.88)">
+<title>JobControl</title>
+<g id="job-control-clust1" class="cluster">
+<title>cluster_auto</title>
+<path fill="transparent" stroke="#b5c9e2" d="M158,-846.38C158,-846.38 420,-846.38 420,-846.38 426,-846.38 432,-852.38 432,-858.38 432,-858.38 432,-1272.88 432,-1272.88 432,-1278.88 426,-1284.88 420,-1284.88 420,-1284.88 158,-1284.88 158,-1284.88 152,-1284.88 146,-1278.88 146,-1272.88 146,-1272.88 146,-858.38 146,-858.38 146,-852.38 152,-846.38 158,-846.38"/>
+<text text-anchor="middle" x="289" y="-1268.88" font-family="DejaVu Sans" font-size="15.00">Scheduled entry · persistent phases</text>
+</g>
+<g id="job-control-clust2" class="cluster">
+<title>cluster_manual</title>
+<path fill="transparent" stroke="#e3c77b" d="M508,-839.88C508,-839.88 806,-839.88 806,-839.88 812,-839.88 818,-845.88 818,-851.88 818,-851.88 818,-1087.88 818,-1087.88 818,-1093.88 812,-1099.88 806,-1099.88 806,-1099.88 508,-1099.88 508,-1099.88 502,-1099.88 496,-1093.88 496,-1087.88 496,-1087.88 496,-851.88 496,-851.88 496,-845.88 502,-839.88 508,-839.88"/>
+<text text-anchor="middle" x="657" y="-1083.88" font-family="DejaVu Sans" font-size="15.00">Manual entry · ephemeral active registry</text>
+</g>
+<!-- discovered -->
+<g id="job-control-node1" class="node">
+<title>discovered</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M403.5,-1251.88C403.5,-1251.88 174.5,-1251.88 174.5,-1251.88 168.5,-1251.88 162.5,-1245.88 162.5,-1239.88 162.5,-1239.88 162.5,-1219.88 162.5,-1219.88 162.5,-1213.88 168.5,-1207.88 174.5,-1207.88 174.5,-1207.88 403.5,-1207.88 403.5,-1207.88 409.5,-1207.88 415.5,-1213.88 415.5,-1219.88 415.5,-1219.88 415.5,-1239.88 415.5,-1239.88 415.5,-1245.88 409.5,-1251.88 403.5,-1251.88"/>
+<text text-anchor="middle" x="289" y="-1233.28" font-family="DejaVu Sans" font-size="12.00">Discovered</text>
+<text text-anchor="middle" x="289" y="-1220.28" font-family="DejaVu Sans" font-size="12.00">Inventory candidate; hidden from Jobs</text>
+</g>
+<!-- claimed -->
+<g id="job-control-node2" class="node">
+<title>claimed</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M359.5,-1170.88C359.5,-1170.88 218.5,-1170.88 218.5,-1170.88 212.5,-1170.88 206.5,-1164.88 206.5,-1158.88 206.5,-1158.88 206.5,-1138.88 206.5,-1138.88 206.5,-1132.88 212.5,-1126.88 218.5,-1126.88 218.5,-1126.88 359.5,-1126.88 359.5,-1126.88 365.5,-1126.88 371.5,-1132.88 371.5,-1138.88 371.5,-1138.88 371.5,-1158.88 371.5,-1158.88 371.5,-1164.88 365.5,-1170.88 359.5,-1170.88"/>
+<text text-anchor="middle" x="289" y="-1152.28" font-family="DejaVu Sans" font-size="12.00">Claimed</text>
+<text text-anchor="middle" x="289" y="-1139.28" font-family="DejaVu Sans" font-size="12.00">Atomic scheduler claim</text>
+</g>
+<!-- discovered&#45;&gt;claimed -->
+<g id="job-control-edge1" class="edge">
+<title>discovered&#45;&gt;claimed</title>
+<path fill="none" stroke="#63758a" d="M289,-1207.7C289,-1198.67 289,-1188 289,-1178.29"/>
+<polygon fill="#63758a" stroke="#63758a" points="291.45,-1178.1 289,-1171.1 286.55,-1178.1 291.45,-1178.1"/>
+</g>
+<!-- fetch -->
+<g id="job-control-node3" class="node">
+<title>fetch</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M408,-1066.88C408,-1066.88 170,-1066.88 170,-1066.88 164,-1066.88 158,-1060.88 158,-1054.88 158,-1054.88 158,-1034.88 158,-1034.88 158,-1028.88 164,-1022.88 170,-1022.88 170,-1022.88 408,-1022.88 408,-1022.88 414,-1022.88 420,-1028.88 420,-1034.88 420,-1034.88 420,-1054.88 420,-1054.88 420,-1060.88 414,-1066.88 408,-1066.88"/>
+<text text-anchor="middle" x="289" y="-1048.28" font-family="DejaVu Sans" font-size="12.00">Fetching → Staged</text>
+<text text-anchor="middle" x="289" y="-1035.28" font-family="DejaVu Sans" font-size="12.00">Get/cache bytes; verify pinned SHA&#45;256</text>
+</g>
+<!-- claimed&#45;&gt;fetch -->
+<g id="job-control-edge2" class="edge">
+<title>claimed&#45;&gt;fetch</title>
+<path fill="none" stroke="#63758a" d="M289,-1126.74C289,-1111.56 289,-1090.93 289,-1074.3"/>
+<polygon fill="#63758a" stroke="#63758a" points="291.45,-1073.98 289,-1066.98 286.55,-1073.98 291.45,-1073.98"/>
+</g>
+<!-- analyze -->
+<g id="job-control-node4" class="node">
+<title>analyze</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M411,-985.88C411,-985.88 167,-985.88 167,-985.88 161,-985.88 155,-979.88 155,-973.88 155,-973.88 155,-953.88 155,-953.88 155,-947.88 161,-941.88 167,-941.88 167,-941.88 411,-941.88 411,-941.88 417,-941.88 423,-947.88 423,-953.88 423,-953.88 423,-973.88 423,-973.88 423,-979.88 417,-985.88 411,-985.88"/>
+<text text-anchor="middle" x="289" y="-967.27" font-family="DejaVu Sans" font-size="12.00">Analyzing</text>
+<text text-anchor="middle" x="289" y="-954.27" font-family="DejaVu Sans" font-size="12.00">ToolRunner::run in temporary workspace</text>
+</g>
+<!-- fetch&#45;&gt;analyze -->
+<g id="job-control-edge3" class="edge">
+<title>fetch&#45;&gt;analyze</title>
+<path fill="none" stroke="#63758a" d="M289,-1022.7C289,-1013.67 289,-1003 289,-993.29"/>
+<polygon fill="#63758a" stroke="#63758a" points="291.45,-993.1 289,-986.1 286.55,-993.1 291.45,-993.1"/>
+</g>
+<!-- archive -->
+<g id="job-control-node16" class="node">
+<title>archive</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M530,-178.4C530,-182.35 472.63,-185.56 402,-185.56 331.37,-185.56 274,-182.35 274,-178.4 274,-178.4 274,-113.97 274,-113.97 274,-110.02 331.37,-106.81 402,-106.81 472.63,-106.81 530,-110.02 530,-113.97 530,-113.97 530,-178.4 530,-178.4"/>
+<path fill="none" stroke="#6eac81" d="M530,-178.4C530,-174.45 472.63,-171.24 402,-171.24 331.37,-171.24 274,-174.45 274,-178.4"/>
+<text text-anchor="middle" x="402" y="-156.09" font-family="DejaVu Sans" font-size="12.00">Terminal transition</text>
+<text text-anchor="middle" x="402" y="-143.09" font-family="DejaVu Sans" font-size="12.00">Done / Failed / Dropped → settled_jobs</text>
+<text text-anchor="middle" x="402" y="-130.09" font-family="DejaVu Sans" font-size="12.00">Atomically removed from physical jobs</text>
+</g>
+<!-- fetch&#45;&gt;archive -->
+<g id="job-control-edge19" class="edge">
+<title>fetch&#45;&gt;archive</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M377.08,-1022.82C398.51,-1014.25 419.88,-1002.35 436,-985.88 484.39,-936.43 445.22,-892.61 490,-839.88 506.88,-820 522.39,-829.14 541,-810.88 610.56,-742.63 627.19,-716.34 653,-622.38 670.54,-558.51 676.48,-427.47 638,-347.38 604.67,-277.99 534.72,-223.56 479.58,-189.09"/>
+<polygon fill="#63758a" stroke="#63758a" points="480.86,-186.99 473.62,-185.4 478.28,-191.16 480.86,-186.99"/>
+<text text-anchor="middle" x="725.5" y="-643.38" font-family="DejaVu Sans" font-size="10.00">purged / retry budget exhausted</text>
+</g>
+<!-- reporting -->
+<g id="job-control-node5" class="node">
+<title>reporting</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M368.5,-898.38C368.5,-898.38 209.5,-898.38 209.5,-898.38 203.5,-898.38 197.5,-892.38 197.5,-886.38 197.5,-886.38 197.5,-866.38 197.5,-866.38 197.5,-860.38 203.5,-854.38 209.5,-854.38 209.5,-854.38 368.5,-854.38 368.5,-854.38 374.5,-854.38 380.5,-860.38 380.5,-866.38 380.5,-866.38 380.5,-886.38 380.5,-886.38 380.5,-892.38 374.5,-898.38 368.5,-898.38"/>
+<text text-anchor="middle" x="289" y="-879.77" font-family="DejaVu Sans" font-size="12.00">Reporting</text>
+<text text-anchor="middle" x="289" y="-866.77" font-family="DejaVu Sans" font-size="12.00">Runner produced a verdict</text>
+</g>
+<!-- analyze&#45;&gt;reporting -->
+<g id="job-control-edge4" class="edge">
+<title>analyze&#45;&gt;reporting</title>
+<path fill="none" stroke="#63758a" d="M289,-941.74C289,-930.85 289,-917.41 289,-905.64"/>
+<polygon fill="#63758a" stroke="#63758a" points="291.45,-905.56 289,-898.56 286.55,-905.56 291.45,-905.56"/>
+</g>
+<!-- analyze&#45;&gt;archive -->
+<g id="job-control-edge20" class="edge">
+<title>analyze&#45;&gt;archive</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="5,2" d="M341.34,-941.82C359.45,-932.58 378.75,-920.27 393,-904.88 418.26,-877.58 398.86,-851.98 428,-828.88 459.28,-804.07 489.27,-840.52 516,-810.88 540.22,-784.01 520.61,-765.89 524,-729.88 527.74,-690.11 520.27,-678.55 532,-640.38 534.69,-631.63 539.7,-631.23 542,-622.38 548.91,-595.7 554.07,-585.15 542,-560.38 536.31,-548.71 524.69,-554.04 519,-542.38 495.64,-494.43 485.02,-463.48 519,-422.38 546.1,-389.59 585.9,-437.16 613,-404.38 629.14,-384.85 629.14,-366.9 613,-347.38 585.9,-314.59 552.83,-355.16 519,-329.38 469.37,-291.54 493.06,-254.32 457,-203.38 454.02,-199.16 450.72,-194.97 447.26,-190.88"/>
+<polygon fill="#63758a" stroke="#63758a" points="448.9,-189.04 442.45,-185.38 445.21,-192.26 448.9,-189.04"/>
+<text text-anchor="middle" x="598" y="-588.88" font-family="DejaVu Sans" font-size="10.00">terminal tool failure</text>
+</g>
+<!-- assemble -->
+<g id="job-control-node9" class="node">
+<title>assemble</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M491,-810.88C491,-810.88 277,-810.88 277,-810.88 271,-810.88 265,-804.88 265,-798.88 265,-798.88 265,-778.88 265,-778.88 265,-772.88 271,-766.88 277,-766.88 277,-766.88 491,-766.88 491,-766.88 497,-766.88 503,-772.88 503,-778.88 503,-778.88 503,-798.88 503,-798.88 503,-804.88 497,-810.88 491,-810.88"/>
+<text text-anchor="middle" x="384" y="-792.27" font-family="DejaVu Sans" font-size="12.00">verdict::assemble</text>
+<text text-anchor="middle" x="384" y="-779.27" font-family="DejaVu Sans" font-size="12.00">Bound summary / facts / JSON body</text>
+</g>
+<!-- reporting&#45;&gt;assemble -->
+<g id="job-control-edge7" class="edge">
+<title>reporting&#45;&gt;assemble</title>
+<path fill="none" stroke="#63758a" d="M312.48,-854.24C325.39,-842.63 341.5,-828.13 355.16,-815.83"/>
+<polygon fill="#63758a" stroke="#63758a" points="356.89,-817.57 360.46,-811.06 353.62,-813.92 356.89,-817.57"/>
+</g>
+<!-- action -->
+<g id="job-control-node6" class="node">
+<title>action</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M755.5,-1066.88C755.5,-1066.88 532.5,-1066.88 532.5,-1066.88 526.5,-1066.88 520.5,-1060.88 520.5,-1054.88 520.5,-1054.88 520.5,-1034.88 520.5,-1034.88 520.5,-1028.88 526.5,-1022.88 532.5,-1022.88 532.5,-1022.88 755.5,-1022.88 755.5,-1022.88 761.5,-1022.88 767.5,-1028.88 767.5,-1034.88 767.5,-1034.88 767.5,-1054.88 767.5,-1054.88 767.5,-1060.88 761.5,-1066.88 755.5,-1066.88"/>
+<text text-anchor="middle" x="644" y="-1048.28" font-family="DejaVu Sans" font-size="12.00">POST analyze / case / customer</text>
+<text text-anchor="middle" x="644" y="-1035.28" font-family="DejaVu Sans" font-size="12.00">Scope: sequential, at most 64 dumps</text>
+</g>
+<!-- gate -->
+<g id="job-control-node7" class="node">
+<title>gate</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M759.5,-985.88C759.5,-985.88 528.5,-985.88 528.5,-985.88 522.5,-985.88 516.5,-979.88 516.5,-973.88 516.5,-973.88 516.5,-953.88 516.5,-953.88 516.5,-947.88 522.5,-941.88 528.5,-941.88 528.5,-941.88 759.5,-941.88 759.5,-941.88 765.5,-941.88 771.5,-947.88 771.5,-953.88 771.5,-953.88 771.5,-973.88 771.5,-973.88 771.5,-979.88 765.5,-985.88 759.5,-985.88"/>
+<text text-anchor="middle" x="644" y="-967.27" font-family="DejaVu Sans" font-size="12.00">Get detail → require available + sealed</text>
+<text text-anchor="middle" x="644" y="-954.27" font-family="DejaVu Sans" font-size="12.00">Pin identity; register active manual job</text>
+</g>
+<!-- action&#45;&gt;gate -->
+<g id="job-control-edge5" class="edge">
+<title>action&#45;&gt;gate</title>
+<path fill="none" stroke="#63758a" d="M644,-1022.7C644,-1013.67 644,-1003 644,-993.29"/>
+<polygon fill="#63758a" stroke="#63758a" points="646.45,-993.1 644,-986.1 641.55,-993.1 646.45,-993.1"/>
+</g>
+<!-- attempt -->
+<g id="job-control-node8" class="node">
+<title>attempt</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M767.5,-904.88C767.5,-904.88 520.5,-904.88 520.5,-904.88 514.5,-904.88 508.5,-898.88 508.5,-892.88 508.5,-892.88 508.5,-859.88 508.5,-859.88 508.5,-853.88 514.5,-847.88 520.5,-847.88 520.5,-847.88 767.5,-847.88 767.5,-847.88 773.5,-847.88 779.5,-853.88 779.5,-859.88 779.5,-859.88 779.5,-892.88 779.5,-892.88 779.5,-898.88 773.5,-904.88 767.5,-904.88"/>
+<text text-anchor="middle" x="644" y="-886.27" font-family="DejaVu Sans" font-size="12.00">Agent::attempt</text>
+<text text-anchor="middle" x="644" y="-873.27" font-family="DejaVu Sans" font-size="12.00">Fetch / cache → SHA verify → ToolRunner</text>
+<text text-anchor="middle" x="644" y="-860.27" font-family="DejaVu Sans" font-size="12.00">At most two attempts for transient errors</text>
+</g>
+<!-- gate&#45;&gt;attempt -->
+<g id="job-control-edge6" class="edge">
+<title>gate&#45;&gt;attempt</title>
+<path fill="none" stroke="#63758a" d="M644,-941.74C644,-932.83 644,-922.21 644,-912.2"/>
+<polygon fill="#63758a" stroke="#63758a" points="646.45,-912.05 644,-905.05 641.55,-912.05 646.45,-912.05"/>
+</g>
+<!-- attempt&#45;&gt;assemble -->
+<g id="job-control-edge8" class="edge">
+<title>attempt&#45;&gt;assemble</title>
+<path fill="none" stroke="#63758a" d="M560.3,-847.85C526.35,-836.69 487.55,-823.93 455,-813.22"/>
+<polygon fill="#63758a" stroke="#63758a" points="455.57,-810.83 448.16,-810.97 454.04,-815.49 455.57,-810.83"/>
+</g>
+<!-- save -->
+<g id="job-control-node10" class="node">
+<title>save</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M511.5,-724.58C511.5,-727.64 454.35,-730.13 384,-730.13 313.65,-730.13 256.5,-727.64 256.5,-724.58 256.5,-724.58 256.5,-674.67 256.5,-674.67 256.5,-671.61 313.65,-669.12 384,-669.12 454.35,-669.12 511.5,-671.61 511.5,-674.67 511.5,-674.67 511.5,-724.58 511.5,-724.58"/>
+<path fill="none" stroke="#6eac81" d="M511.5,-724.58C511.5,-721.52 454.35,-719.04 384,-719.04 313.65,-719.04 256.5,-721.52 256.5,-724.58"/>
+<text text-anchor="middle" x="384" y="-703.02" font-family="DejaVu Sans" font-size="12.00">Persist compact report in local_reports</text>
+<text text-anchor="middle" x="384" y="-690.02" font-family="DejaVu Sans" font-size="12.00">Before any write&#45;back call</text>
+</g>
+<!-- assemble&#45;&gt;save -->
+<g id="job-control-edge9" class="edge">
+<title>assemble&#45;&gt;save</title>
+<path fill="none" stroke="#63758a" d="M384,-766.75C384,-757.91 384,-747.36 384,-737.32"/>
+<polygon fill="#63758a" stroke="#63758a" points="386.45,-737.12 384,-730.12 381.55,-737.12 386.45,-737.12"/>
+</g>
+<!-- mode -->
+<g id="job-control-node11" class="node">
+<title>mode</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M372.27,-619.87C372.27,-619.87 250.73,-593.88 250.73,-593.88 244.87,-592.63 244.87,-590.12 250.73,-588.87 250.73,-588.87 372.27,-562.88 372.27,-562.88 378.13,-561.63 389.87,-561.63 395.73,-562.88 395.73,-562.88 517.27,-588.87 517.27,-588.87 523.13,-590.12 523.13,-592.63 517.27,-593.88 517.27,-593.88 395.73,-619.87 395.73,-619.87 389.87,-621.12 378.13,-621.12 372.27,-619.87"/>
+<text text-anchor="middle" x="384" y="-588.27" font-family="DejaVu Sans" font-size="12.00">write&#45;back enabled?</text>
+</g>
+<!-- save&#45;&gt;mode -->
+<g id="job-control-edge10" class="edge">
+<title>save&#45;&gt;mode</title>
+<path fill="none" stroke="#63758a" d="M384,-669.31C384,-657.08 384,-642.73 384,-629.75"/>
+<polygon fill="#63758a" stroke="#63758a" points="386.45,-629.7 384,-622.7 381.55,-629.7 386.45,-629.7"/>
+</g>
+<!-- entry -->
+<g id="job-control-node12" class="node">
+<title>entry</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M305.58,-509.69C305.58,-509.69 232.42,-486.06 232.42,-486.06 226.71,-484.22 226.71,-480.53 232.42,-478.69 232.42,-478.69 305.58,-455.06 305.58,-455.06 311.29,-453.22 322.71,-453.22 328.42,-455.06 328.42,-455.06 401.58,-478.69 401.58,-478.69 407.29,-480.53 407.29,-484.22 401.58,-486.06 401.58,-486.06 328.42,-509.69 328.42,-509.69 322.71,-511.53 311.29,-511.53 305.58,-509.69"/>
+<text text-anchor="middle" x="317" y="-479.27" font-family="DejaVu Sans" font-size="12.00">entry point?</text>
+</g>
+<!-- mode&#45;&gt;entry -->
+<g id="job-control-edge12" class="edge">
+<title>mode&#45;&gt;entry</title>
+<path fill="none" stroke="#63758a" d="M367.27,-563.65C357.96,-548.79 346.33,-530.21 336.59,-514.67"/>
+<polygon fill="#63758a" stroke="#63758a" points="338.62,-513.29 332.83,-508.66 334.47,-515.89 338.62,-513.29"/>
+<text text-anchor="middle" x="358.5" y="-534.38" font-family="DejaVu Sans" font-size="10.00">on</text>
+</g>
+<!-- mode&#45;&gt;archive -->
+<g id="job-control-edge11" class="edge">
+<title>mode&#45;&gt;archive</title>
+<path fill="none" stroke="#63758a" d="M410.48,-565.81C429.21,-545.68 451,-515.37 451,-483.38 451,-483.38 451,-483.38 451,-270.88 451,-243.32 440.36,-214.59 429,-191.76"/>
+<polygon fill="#63758a" stroke="#63758a" points="431.15,-190.6 425.78,-185.49 426.79,-192.83 431.15,-190.6"/>
+<text text-anchor="middle" x="529" y="-378.88" font-family="DejaVu Sans" font-size="10.00">off: scheduled / eligible idle row</text>
+<text text-anchor="middle" x="529" y="-367.88" font-family="DejaVu Sans" font-size="10.00">settles Done locally</text>
+</g>
+<!-- pending -->
+<g id="job-control-node13" class="node">
+<title>pending</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M259,-404.38C259,-404.38 69,-404.38 69,-404.38 63,-404.38 57,-398.38 57,-392.38 57,-392.38 57,-359.38 57,-359.38 57,-353.38 63,-347.38 69,-347.38 69,-347.38 259,-347.38 259,-347.38 265,-347.38 271,-353.38 271,-359.38 271,-359.38 271,-392.38 271,-392.38 271,-398.38 265,-404.38 259,-404.38"/>
+<text text-anchor="middle" x="164" y="-385.77" font-family="DejaVu Sans" font-size="12.00">Manual: return report now</text>
+<text text-anchor="middle" x="164" y="-372.77" font-family="DejaVu Sans" font-size="12.00">Leave eligible idle job Reporting</text>
+<text text-anchor="middle" x="164" y="-359.77" font-family="DejaVu Sans" font-size="12.00">Active guard clears on return</text>
+</g>
+<!-- entry&#45;&gt;pending -->
+<g id="job-control-edge14" class="edge">
+<title>entry&#45;&gt;pending</title>
+<path fill="none" stroke="#63758a" d="M287.14,-460.98C265.32,-446.08 235.32,-425.58 210.39,-408.56"/>
+<polygon fill="#63758a" stroke="#63758a" points="211.66,-406.46 204.5,-404.54 208.9,-410.51 211.66,-406.46"/>
+<text text-anchor="middle" x="264.5" y="-425.38" font-family="DejaVu Sans" font-size="10.00">manual</text>
+</g>
+<!-- post -->
+<g id="job-control-node14" class="node">
+<title>post</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M269.5,-300.38C269.5,-300.38 76.5,-300.38 76.5,-300.38 70.5,-300.38 64.5,-294.38 64.5,-288.38 64.5,-288.38 64.5,-255.38 64.5,-255.38 64.5,-249.38 70.5,-243.38 76.5,-243.38 76.5,-243.38 269.5,-243.38 269.5,-243.38 275.5,-243.38 281.5,-249.38 281.5,-255.38 281.5,-255.38 281.5,-288.38 281.5,-288.38 281.5,-294.38 275.5,-300.38 269.5,-300.38"/>
+<text text-anchor="middle" x="173" y="-281.77" font-family="DejaVu Sans" font-size="12.00">POST analyses</text>
+<text text-anchor="middle" x="173" y="-268.77" font-family="DejaVu Sans" font-size="12.00">Scheduled: immediate</text>
+<text text-anchor="middle" x="173" y="-255.78" font-family="DejaVu Sans" font-size="12.00">Pending manual: delivery sweep</text>
+</g>
+<!-- entry&#45;&gt;post -->
+<g id="job-control-edge13" class="edge">
+<title>entry&#45;&gt;post</title>
+<path fill="none" stroke="#63758a" d="M315.88,-451.46C312.79,-414.44 301.74,-352.19 263,-318.38 257.14,-313.26 250.61,-308.55 243.81,-304.27"/>
+<polygon fill="#63758a" stroke="#63758a" points="244.76,-301.98 237.5,-300.44 242.22,-306.17 244.76,-301.98"/>
+<text text-anchor="middle" x="333" y="-373.38" font-family="DejaVu Sans" font-size="10.00">scheduled</text>
+</g>
+<!-- pending&#45;&gt;post -->
+<g id="job-control-edge15" class="edge">
+<title>pending&#45;&gt;post</title>
+<path fill="none" stroke="#63758a" d="M166.44,-347.27C167.52,-335.03 168.8,-320.48 169.94,-307.52"/>
+<polygon fill="#63758a" stroke="#63758a" points="172.39,-307.69 170.56,-300.5 167.51,-307.26 172.39,-307.69"/>
+<text text-anchor="middle" x="213" y="-321.38" font-family="DejaVu Sans" font-size="10.00">60 s delivery loop</text>
+</g>
+<!-- retry -->
+<g id="job-control-node15" class="node">
+<title>retry</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M188,-168.19C188,-168.19 12,-168.19 12,-168.19 6,-168.19 0,-162.19 0,-156.19 0,-156.19 0,-136.19 0,-136.19 0,-130.19 6,-124.19 12,-124.19 12,-124.19 188,-124.19 188,-124.19 194,-124.19 200,-130.19 200,-136.19 200,-136.19 200,-156.19 200,-156.19 200,-162.19 194,-168.19 188,-168.19"/>
+<text text-anchor="middle" x="100" y="-149.59" font-family="DejaVu Sans" font-size="12.00">Retain pending report</text>
+<text text-anchor="middle" x="100" y="-136.59" font-family="DejaVu Sans" font-size="12.00">Replay every 60 s / on restart</text>
+</g>
+<!-- post&#45;&gt;retry -->
+<g id="job-control-edge17" class="edge">
+<title>post&#45;&gt;retry</title>
+<path fill="none" stroke="#63758a" d="M64.26,-254.43C49.69,-247.68 36.52,-238.31 27,-225.38 12.96,-206.29 31.05,-186.8 52.73,-172.06"/>
+<polygon fill="#63758a" stroke="#63758a" points="54.08,-174.1 58.61,-168.23 51.41,-170 54.08,-174.1"/>
+<text text-anchor="middle" x="84.5" y="-211.88" font-family="DejaVu Sans" font-size="10.00">transient / route absent</text>
+</g>
+<!-- post&#45;&gt;archive -->
+<g id="job-control-edge16" class="edge">
+<title>post&#45;&gt;archive</title>
+<path fill="none" stroke="#63758a" d="M192.24,-243.07C202.89,-229.46 217.16,-213.81 233,-203.38 243.57,-196.41 255.07,-190.24 266.95,-184.79"/>
+<polygon fill="#63758a" stroke="#63758a" points="268.19,-186.92 273.58,-181.83 266.19,-182.44 268.19,-186.92"/>
+<text text-anchor="middle" x="332.5" y="-217.38" font-family="DejaVu Sans" font-size="10.00">accepted / terminal rejection</text>
+<text text-anchor="middle" x="332.5" y="-206.38" font-family="DejaVu Sans" font-size="10.00">route absent: local Done + pending copy</text>
+</g>
+<!-- retry&#45;&gt;post -->
+<g id="job-control-edge18" class="edge">
+<title>retry&#45;&gt;post</title>
+<path fill="none" stroke="#63758a" d="M118.73,-168.39C127.12,-178.53 136.73,-191.12 144,-203.38 150.14,-213.73 155.69,-225.63 160.26,-236.52"/>
+<polygon fill="#63758a" stroke="#63758a" points="158.06,-237.6 162.97,-243.16 162.59,-235.75 158.06,-237.6"/>
+<text text-anchor="middle" x="171.5" y="-211.88" font-family="DejaVu Sans" font-size="10.00">replay</text>
+</g>
+<!-- note -->
+<g id="job-control-node17" class="node">
+<title>note</title>
+<polygon fill="#f0f2f5" stroke="#8a99aa" points="626,-70 172,-70 172,0 632,0 632,-64 626,-70"/>
+<polyline fill="none" stroke="#8a99aa" points="626,-70 626,-64 "/>
+<polyline fill="none" stroke="#8a99aa" points="632,-64 626,-64 "/>
+<text text-anchor="middle" x="402" y="-51.4" font-family="DejaVu Sans" font-size="12.00">Queue view = persistent active phases + active manual rows</text>
+<text text-anchor="middle" x="402" y="-38.4" font-family="DejaVu Sans" font-size="12.00">Manual rows show Claimed; scheduled concurrency 1 is not a global limit</text>
+<text text-anchor="middle" x="402" y="-25.4" font-family="DejaVu Sans" font-size="12.00">Manual completion preserves running or archived identities</text>
+<text text-anchor="middle" x="402" y="-12.4" font-family="DejaVu Sans" font-size="12.00">Done is settlement, independent of completed / failed report outcome</text>
+</g>
+<!-- archive&#45;&gt;note -->
+<g id="job-control-edge21" class="edge">
+<title>archive&#45;&gt;note</title>
+<path fill="none" stroke="#63758a" stroke-dasharray="1,5" d="M402,-107C402,-95.07 402,-81.99 402,-70.34"/>
+</g>
+</g>
+</svg>
+</div><figcaption>Scheduled and manual analysis control flow</figcaption></figure>
+<p>The upper lane records scheduled phases in SQLite. The lower lane handles synchronous HTTP analysis. Both use the Agent's fetch/verification/runner machinery, but manual attempts do not persist each intermediate phase. Their temporary registry entry displays <code>Claimed</code> and clears when the request returns, fails or is cancelled. A scope request enumerates available dumps, rejects scopes larger than 64 dumps, and analyzes the accepted scope sequentially; individual failures are returned as skipped items.</p>
+<p>Three queue rules matter:</p>
+<ol>
+<li><strong>Discovered is inventory.</strong> It is stored as an automatic scheduling candidate, but the Jobs widget excludes it. The Dumps explorer reads the available catalog independently and includes already analyzed dumps.</li>
+<li><strong>Jobs means active work.</strong> The API merges persistent <code>Claimed</code>, <code>Fetching</code>, <code>Staged</code>, <code>Analyzing</code> and <code>Reporting</code> rows with active manual requests, deduplicating identities for display.</li>
+<li><strong>Terminal transitions remove queue rows atomically.</strong> <code>Done</code>, <code>Failed</code> and <code>Dropped</code> move to <code>settled_jobs</code>. Their identities remain available for deduplication, so an ordinary rescan cannot silently enqueue settled work again.</li>
+</ol>
+<p><code>Done</code> describes settlement. A report with analysis outcome <code>failed</code> can still settle <code>Done</code> after successful storage/delivery. A missing legacy analyses route also settles a scheduled job locally while retaining its report for later replay. Transient delivery errors retain pending work; permanent rejection or purge can settle <code>Failed</code> or <code>Dropped</code>.</p>
+<p>With write-back enabled, scheduled analysis posts after recording locally; manual analysis returns its report after local storage and relies on the delivery loop for posting. Manual completion changes an eligible idle job using compare-and-set; it preserves an already running scheduled job or archived terminal identity. Reanalyzing an archived identity therefore need not create a new persistent <code>Reporting</code> row, although the manual run remains visible while active.</p>
+<p>Automatic concurrency of one is not a global execution limit. Independent manual requests can overlap the scheduler and each other. Manual duplicate protection is scoped to the manual registry, not a shared scheduler lock.</p>
+<p>Sources: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/agent.rs#L213">scheduled pipeline</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/analyzer.rs#L274">manual pipeline</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/analyzer.rs#L328">manual completion</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/state.rs#L358">terminal archive</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/http.rs#L1069">queue projection</a>.</p>
+<h2 id="4-analysis-and-report-data-flow">4. Analysis and report data flow</h2>
+<figure class="diagram"><div class="diagram-tools" role="group" aria-label="Diagram controls"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-fit>Fit</button><output aria-live="polite">100%</output><a href="architecture/analysis-data.svg" target="_blank" rel="noopener">Open SVG ↗</a></div><div class="diagram-scroll" tabindex="0" aria-label="Dump bytes, symbols, reports and delivery data flow; scroll after zooming"><svg role="img" aria-label="Dump bytes, symbols, reports and delivery data flow"
+ viewBox="0.00 0.00 721.00 1367.88" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="analysis-data-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 1349.88)">
+<title>AnalysisData</title>
+<!-- catalog -->
+<g id="analysis-data-node1" class="node">
+<title>catalog</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M306,-1331.88C306,-1331.88 170,-1331.88 170,-1331.88 164,-1331.88 158,-1325.88 158,-1319.88 158,-1319.88 158,-1299.88 158,-1299.88 158,-1293.88 164,-1287.88 170,-1287.88 170,-1287.88 306,-1287.88 306,-1287.88 312,-1287.88 318,-1293.88 318,-1299.88 318,-1299.88 318,-1319.88 318,-1319.88 318,-1325.88 312,-1331.88 306,-1331.88"/>
+<text text-anchor="middle" x="238" y="-1313.28" font-family="DejaVu Sans" font-size="12.00">DumpLedger</text>
+<text text-anchor="middle" x="238" y="-1300.28" font-family="DejaVu Sans" font-size="12.00">catalog + audit events</text>
+</g>
+<!-- identity -->
+<g id="analysis-data-node2" class="node">
+<title>identity</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M347,-1228.88C347,-1228.88 129,-1228.88 129,-1228.88 123,-1228.88 117,-1222.88 117,-1216.88 117,-1216.88 117,-1183.88 117,-1183.88 117,-1177.88 123,-1171.88 129,-1171.88 129,-1171.88 347,-1171.88 347,-1171.88 353,-1171.88 359,-1177.88 359,-1183.88 359,-1183.88 359,-1216.88 359,-1216.88 359,-1222.88 353,-1228.88 347,-1228.88"/>
+<text text-anchor="middle" x="238" y="-1210.28" font-family="DejaVu Sans" font-size="12.00">Pinned JobIdentity</text>
+<text text-anchor="middle" x="238" y="-1197.28" font-family="DejaVu Sans" font-size="12.00">dumpId + SHA&#45;256 + kind + version</text>
+<text text-anchor="middle" x="238" y="-1184.28" font-family="DejaVu Sans" font-size="12.00">Analyzer name comes from Config</text>
+</g>
+<!-- catalog&#45;&gt;identity -->
+<g id="analysis-data-edge1" class="edge">
+<title>catalog&#45;&gt;identity</title>
+<path fill="none" stroke="#63758a" d="M238,-1287.64C238,-1272.97 238,-1253.12 238,-1236.16"/>
+<polygon fill="#63758a" stroke="#63758a" points="240.45,-1236.1 238,-1229.1 235.55,-1236.1 240.45,-1236.1"/>
+<text text-anchor="middle" x="284" y="-1255.88" font-family="DejaVu Sans" font-size="10.00">available + sealed</text>
+</g>
+<!-- jobs -->
+<g id="analysis-data-node3" class="node">
+<title>jobs</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M186,-1107.58C186,-1110.64 144.32,-1113.13 93,-1113.13 41.68,-1113.13 0,-1110.64 0,-1107.58 0,-1107.58 0,-1057.67 0,-1057.67 0,-1054.61 41.68,-1052.12 93,-1052.12 144.32,-1052.12 186,-1054.61 186,-1057.67 186,-1057.67 186,-1107.58 186,-1107.58"/>
+<path fill="none" stroke="#6eac81" d="M186,-1107.58C186,-1104.52 144.32,-1102.04 93,-1102.04 41.68,-1102.04 0,-1104.52 0,-1107.58"/>
+<text text-anchor="middle" x="93" y="-1086.03" font-family="DejaVu Sans" font-size="12.00">SQLite</text>
+<text text-anchor="middle" x="93" y="-1073.03" font-family="DejaVu Sans" font-size="12.00">jobs / settled_jobs / cursors</text>
+</g>
+<!-- identity&#45;&gt;jobs -->
+<g id="analysis-data-edge2" class="edge">
+<title>identity&#45;&gt;jobs</title>
+<path fill="none" stroke="#63758a" d="M163.41,-1171.8C151.05,-1165.16 139.02,-1157.23 129,-1147.88 120.48,-1139.93 113.47,-1129.5 107.97,-1119.37"/>
+<polygon fill="#63758a" stroke="#63758a" points="110.13,-1118.21 104.74,-1113.12 105.78,-1120.46 110.13,-1118.21"/>
+<text text-anchor="middle" x="175.5" y="-1139.88" font-family="DejaVu Sans" font-size="10.00">intake / settlement</text>
+</g>
+<!-- bytes -->
+<g id="analysis-data-node5" class="node">
+<title>bytes</title>
+<polygon fill="#eaf6ee" stroke="#6eac81" points="566,-1111.12 563,-1115.12 542,-1115.12 539,-1111.12 352,-1111.12 352,-1054.12 566,-1054.12 566,-1111.12"/>
+<text text-anchor="middle" x="459" y="-1092.53" font-family="DejaVu Sans" font-size="12.00">Local bytes cache</text>
+<text text-anchor="middle" x="459" y="-1079.53" font-family="DejaVu Sans" font-size="12.00">Keyed by expected SHA&#45;256</text>
+<text text-anchor="middle" x="459" y="-1066.53" font-family="DejaVu Sans" font-size="12.00">SQLite index + filesystem bytes</text>
+</g>
+<!-- identity&#45;&gt;bytes -->
+<g id="analysis-data-edge4" class="edge">
+<title>identity&#45;&gt;bytes</title>
+<path fill="none" stroke="#63758a" d="M290.65,-1171.8C323.59,-1154.55 366.06,-1132.3 400.11,-1114.47"/>
+<polygon fill="#63758a" stroke="#63758a" points="401.3,-1116.61 406.37,-1111.19 399.03,-1112.27 401.3,-1116.61"/>
+<text text-anchor="middle" x="380.5" y="-1139.88" font-family="DejaVu Sans" font-size="10.00">cache key</text>
+</g>
+<!-- verify -->
+<g id="analysis-data-node6" class="node">
+<title>verify</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M380.5,-993.38C380.5,-993.38 155.5,-993.38 155.5,-993.38 149.5,-993.38 143.5,-987.38 143.5,-981.38 143.5,-981.38 143.5,-961.38 143.5,-961.38 143.5,-955.38 149.5,-949.38 155.5,-949.38 155.5,-949.38 380.5,-949.38 380.5,-949.38 386.5,-949.38 392.5,-955.38 392.5,-961.38 392.5,-961.38 392.5,-981.38 392.5,-981.38 392.5,-987.38 386.5,-993.38 380.5,-993.38"/>
+<text text-anchor="middle" x="268" y="-974.77" font-family="DejaVu Sans" font-size="12.00">SHA&#45;256 verification</text>
+<text text-anchor="middle" x="268" y="-961.77" font-family="DejaVu Sans" font-size="12.00">Downloaded AND reused cache bytes</text>
+</g>
+<!-- identity&#45;&gt;verify -->
+<g id="analysis-data-edge6" class="edge">
+<title>identity&#45;&gt;verify</title>
+<path fill="none" stroke="#63758a" d="M241.68,-1171.54C247.42,-1128.12 258.44,-1044.7 264.23,-1000.87"/>
+<polygon fill="#63758a" stroke="#63758a" points="266.7,-1000.94 265.18,-993.68 261.84,-1000.3 266.7,-1000.94"/>
+<text text-anchor="middle" x="296.5" y="-1080.12" font-family="DejaVu Sans" font-size="10.00">expected digest</text>
+</g>
+<!-- content -->
+<g id="analysis-data-node4" class="node">
+<title>content</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M528,-1222.38C528,-1222.38 400,-1222.38 400,-1222.38 394,-1222.38 388,-1216.38 388,-1210.38 388,-1210.38 388,-1190.38 388,-1190.38 388,-1184.38 394,-1178.38 400,-1178.38 400,-1178.38 528,-1178.38 528,-1178.38 534,-1178.38 540,-1184.38 540,-1190.38 540,-1190.38 540,-1210.38 540,-1210.38 540,-1216.38 534,-1222.38 528,-1222.38"/>
+<text text-anchor="middle" x="464" y="-1203.78" font-family="DejaVu Sans" font-size="12.00">DumpLedger content</text>
+<text text-anchor="middle" x="464" y="-1190.78" font-family="DejaVu Sans" font-size="12.00">GET with ETag / 304</text>
+</g>
+<!-- content&#45;&gt;bytes -->
+<g id="analysis-data-edge3" class="edge">
+<title>content&#45;&gt;bytes</title>
+<path fill="none" stroke="#63758a" d="M463.08,-1178.14C462.36,-1161.48 461.35,-1137.92 460.51,-1118.5"/>
+<polygon fill="#63758a" stroke="#63758a" points="462.94,-1118.16 460.19,-1111.28 458.05,-1118.38 462.94,-1118.16"/>
+<text text-anchor="middle" x="519.5" y="-1139.88" font-family="DejaVu Sans" font-size="10.00">buffer body, then cache</text>
+</g>
+<!-- bytes&#45;&gt;verify -->
+<g id="analysis-data-edge5" class="edge">
+<title>bytes&#45;&gt;verify</title>
+<path fill="none" stroke="#63758a" d="M410.8,-1054.06C380.06,-1036.47 340.56,-1013.88 310.9,-996.91"/>
+<polygon fill="#63758a" stroke="#63758a" points="312.02,-994.73 304.73,-993.38 309.59,-998.99 312.02,-994.73"/>
+<text text-anchor="middle" x="393" y="-1020.38" font-family="DejaVu Sans" font-size="10.00">dump bytes</text>
+</g>
+<!-- request -->
+<g id="analysis-data-node7" class="node">
+<title>request</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M345.5,-890.38C345.5,-890.38 190.5,-890.38 190.5,-890.38 184.5,-890.38 178.5,-884.38 178.5,-878.38 178.5,-878.38 178.5,-845.38 178.5,-845.38 178.5,-839.38 184.5,-833.38 190.5,-833.38 190.5,-833.38 345.5,-833.38 345.5,-833.38 351.5,-833.38 357.5,-839.38 357.5,-845.38 357.5,-845.38 357.5,-878.38 357.5,-878.38 357.5,-884.38 351.5,-890.38 345.5,-890.38"/>
+<text text-anchor="middle" x="268" y="-871.77" font-family="DejaVu Sans" font-size="12.00">RunRequest</text>
+<text text-anchor="middle" x="268" y="-858.77" font-family="DejaVu Sans" font-size="12.00">dump_path · symbol_path</text>
+<text text-anchor="middle" x="268" y="-845.77" font-family="DejaVu Sans" font-size="12.00">work_dir · RunBounds</text>
+</g>
+<!-- verify&#45;&gt;request -->
+<g id="analysis-data-edge7" class="edge">
+<title>verify&#45;&gt;request</title>
+<path fill="none" stroke="#63758a" d="M268,-949.14C268,-934.47 268,-914.62 268,-897.66"/>
+<polygon fill="#63758a" stroke="#63758a" points="270.45,-897.6 268,-890.6 265.55,-897.6 270.45,-897.6"/>
+<text text-anchor="middle" x="314.5" y="-917.38" font-family="DejaVu Sans" font-size="10.00">verified dump path</text>
+</g>
+<!-- remote -->
+<g id="analysis-data-node8" class="node">
+<title>remote</title>
+<path fill="#f1ebfc" stroke="#9c7bc5" d="M512.5,-774.38C512.5,-774.38 277.5,-774.38 277.5,-774.38 271.5,-774.38 265.5,-768.38 265.5,-762.38 265.5,-762.38 265.5,-729.38 265.5,-729.38 265.5,-723.38 271.5,-717.38 277.5,-717.38 277.5,-717.38 512.5,-717.38 512.5,-717.38 518.5,-717.38 524.5,-723.38 524.5,-729.38 524.5,-729.38 524.5,-762.38 524.5,-762.38 524.5,-768.38 518.5,-774.38 512.5,-774.38"/>
+<text text-anchor="middle" x="395" y="-755.77" font-family="DejaVu Sans" font-size="12.00">Remote CDB</text>
+<text text-anchor="middle" x="395" y="-742.77" font-family="DejaVu Sans" font-size="12.00">SCP&#45;staged dump + script / commands</text>
+<text text-anchor="middle" x="395" y="-729.77" font-family="DejaVu Sans" font-size="12.00">Scratch directory + symbol cache</text>
+</g>
+<!-- request&#45;&gt;remote -->
+<g id="analysis-data-edge8" class="edge">
+<title>request&#45;&gt;remote</title>
+<path fill="none" stroke="#63758a" d="M295.21,-833.26C306.4,-822.19 319.61,-809.45 332,-798.38 339.13,-792 346.9,-785.39 354.47,-779.12"/>
+<polygon fill="#63758a" stroke="#63758a" points="356.36,-780.74 360.21,-774.4 353.25,-776.96 356.36,-780.74"/>
+<text text-anchor="middle" x="390" y="-801.38" font-family="DejaVu Sans" font-size="10.00">ToolRunner + SCP / SSH</text>
+</g>
+<!-- provider -->
+<g id="analysis-data-node10" class="node">
+<title>provider</title>
+<path fill="#f1ebfc" stroke="#9c7bc5" d="M497,-658.38C497,-658.38 293,-658.38 293,-658.38 287,-658.38 281,-652.38 281,-646.38 281,-646.38 281,-613.38 281,-613.38 281,-607.38 287,-601.38 293,-601.38 293,-601.38 497,-601.38 497,-601.38 503,-601.38 509,-607.38 509,-613.38 509,-613.38 509,-646.38 509,-646.38 509,-652.38 503,-658.38 497,-658.38"/>
+<text text-anchor="middle" x="395" y="-639.77" font-family="DejaVu Sans" font-size="12.00">Selected runner provider</text>
+<text text-anchor="middle" x="395" y="-626.77" font-family="DejaVu Sans" font-size="12.00">cdb&#45;ssh: parse CDB transcript</text>
+<text text-anchor="middle" x="395" y="-613.77" font-family="DejaVu Sans" font-size="12.00">claude&#45;cdb: local CLI returns JSON</text>
+</g>
+<!-- remote&#45;&gt;provider -->
+<g id="analysis-data-edge10" class="edge">
+<title>remote&#45;&gt;provider</title>
+<path fill="none" stroke="#63758a" d="M395,-717.28C395,-701.85 395,-682.46 395,-665.96"/>
+<polygon fill="#63758a" stroke="#63758a" points="397.45,-665.61 395,-658.61 392.55,-665.61 397.45,-665.61"/>
+<text text-anchor="middle" x="435.5" y="-685.38" font-family="DejaVu Sans" font-size="10.00">debugger output</text>
+</g>
+<!-- symbols -->
+<g id="analysis-data-node9" class="node">
+<title>symbols</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M643,-883.88C643,-883.88 399,-883.88 399,-883.88 393,-883.88 387,-877.88 387,-871.88 387,-871.88 387,-851.88 387,-851.88 387,-845.88 393,-839.88 399,-839.88 399,-839.88 643,-839.88 643,-839.88 649,-839.88 655,-845.88 655,-851.88 655,-851.88 655,-871.88 655,-871.88 655,-877.88 649,-883.88 643,-883.88"/>
+<text text-anchor="middle" x="521" y="-865.27" font-family="DejaVu Sans" font-size="12.00">DumpLedger /symbols</text>
+<text text-anchor="middle" x="521" y="-852.27" font-family="DejaVu Sans" font-size="12.00">SRV*remote&#45;cache*HTTPS&#45;base/symbols</text>
+</g>
+<!-- symbols&#45;&gt;remote -->
+<g id="analysis-data-edge9" class="edge">
+<title>symbols&#45;&gt;remote</title>
+<path fill="none" stroke="#63758a" d="M497.6,-839.7C478.83,-822.72 452.19,-798.62 430.75,-779.22"/>
+<polygon fill="#63758a" stroke="#63758a" points="432.26,-777.28 425.42,-774.4 428.97,-780.92 432.26,-777.28"/>
+<text text-anchor="middle" x="502.5" y="-801.38" font-family="DejaVu Sans" font-size="10.00">symbol material</text>
+</g>
+<!-- output -->
+<g id="analysis-data-node11" class="node">
+<title>output</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M516,-542.38C516,-542.38 274,-542.38 274,-542.38 268,-542.38 262,-536.38 262,-530.38 262,-530.38 262,-497.38 262,-497.38 262,-491.38 268,-485.38 274,-485.38 274,-485.38 516,-485.38 516,-485.38 522,-485.38 528,-491.38 528,-497.38 528,-497.38 528,-530.38 528,-530.38 528,-536.38 522,-542.38 516,-542.38"/>
+<text text-anchor="middle" x="395" y="-523.77" font-family="DejaVu Sans" font-size="12.00">RunOutput</text>
+<text text-anchor="middle" x="395" y="-510.77" font-family="DejaVu Sans" font-size="12.00">outcome · summary · facts</text>
+<text text-anchor="middle" x="395" y="-497.77" font-family="DejaVu Sans" font-size="12.00">Basic exception / frames / symbol status</text>
+</g>
+<!-- provider&#45;&gt;output -->
+<g id="analysis-data-edge11" class="edge">
+<title>provider&#45;&gt;output</title>
+<path fill="none" stroke="#63758a" d="M395,-601.28C395,-585.85 395,-566.46 395,-549.96"/>
+<polygon fill="#63758a" stroke="#63758a" points="397.45,-549.61 395,-542.61 392.55,-549.61 397.45,-549.61"/>
+<text text-anchor="middle" x="435.5" y="-569.38" font-family="DejaVu Sans" font-size="10.00">structured result</text>
+</g>
+<!-- shrink -->
+<g id="analysis-data-node12" class="node">
+<title>shrink</title>
+<path fill="#fff0cf" stroke="#c68a20" stroke-width="2" d="M497,-426.38C497,-426.38 293,-426.38 293,-426.38 287,-426.38 281,-420.38 281,-414.38 281,-414.38 281,-368.38 281,-368.38 281,-362.38 287,-356.38 293,-356.38 293,-356.38 497,-356.38 497,-356.38 503,-356.38 509,-362.38 509,-368.38 509,-368.38 509,-414.38 509,-414.38 509,-420.38 503,-426.38 497,-426.38"/>
+<text text-anchor="middle" x="395" y="-407.77" font-family="DejaVu Sans" font-size="12.00">Lossy verdict assembly</text>
+<text text-anchor="middle" x="395" y="-394.77" font-family="DejaVu Sans" font-size="12.00">summary &lt;= 2,000 characters</text>
+<text text-anchor="middle" x="395" y="-381.77" font-family="DejaVu Sans" font-size="12.00">facts &lt;= 4 KiB; body &lt;= 16 KiB</text>
+<text text-anchor="middle" x="395" y="-368.77" font-family="DejaVu Sans" font-size="12.00">Whole facts keys may be dropped</text>
+</g>
+<!-- output&#45;&gt;shrink -->
+<g id="analysis-data-edge12" class="edge">
+<title>output&#45;&gt;shrink</title>
+<path fill="none" stroke="#63758a" d="M395,-485.23C395,-470.03 395,-450.87 395,-433.91"/>
+<polygon fill="#63758a" stroke="#63758a" points="397.45,-433.79 395,-426.79 392.55,-433.79 397.45,-433.79"/>
+<text text-anchor="middle" x="419" y="-453.38" font-family="DejaVu Sans" font-size="10.00">assemble</text>
+</g>
+<!-- reports -->
+<g id="analysis-data-node13" class="node">
+<title>reports</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M510.5,-290.4C510.5,-294.35 458.73,-297.56 395,-297.56 331.27,-297.56 279.5,-294.35 279.5,-290.4 279.5,-290.4 279.5,-225.97 279.5,-225.97 279.5,-222.02 331.27,-218.81 395,-218.81 458.73,-218.81 510.5,-222.02 510.5,-225.97 510.5,-225.97 510.5,-290.4 510.5,-290.4"/>
+<path fill="none" stroke="#6eac81" d="M510.5,-290.4C510.5,-286.45 458.73,-283.24 395,-283.24 331.27,-283.24 279.5,-286.45 279.5,-290.4"/>
+<text text-anchor="middle" x="395" y="-268.09" font-family="DejaVu Sans" font-size="12.00">SQLite local_reports</text>
+<text text-anchor="middle" x="395" y="-255.09" font-family="DejaVu Sans" font-size="12.00">Compacted summary + facts_json</text>
+<text text-anchor="middle" x="395" y="-242.09" font-family="DejaVu Sans" font-size="12.00">Delivery flag + pinned identity</text>
+</g>
+<!-- shrink&#45;&gt;reports -->
+<g id="analysis-data-edge13" class="edge">
+<title>shrink&#45;&gt;reports</title>
+<path fill="none" stroke="#63758a" d="M395,-356.25C395,-340.57 395,-321.75 395,-304.87"/>
+<polygon fill="#63758a" stroke="#63758a" points="397.45,-304.77 395,-297.77 392.55,-304.77 397.45,-304.77"/>
+<text text-anchor="middle" x="449" y="-324.38" font-family="DejaVu Sans" font-size="10.00">store AFTER reduction</text>
+</g>
+<!-- view -->
+<g id="analysis-data-node14" class="node">
+<title>view</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M404.5,-160C404.5,-160 253.5,-160 253.5,-160 247.5,-160 241.5,-154 241.5,-148 241.5,-148 241.5,-115 241.5,-115 241.5,-109 247.5,-103 253.5,-103 253.5,-103 404.5,-103 404.5,-103 410.5,-103 416.5,-109 416.5,-115 416.5,-115 416.5,-148 416.5,-148 416.5,-154 410.5,-160 404.5,-160"/>
+<text text-anchor="middle" x="329" y="-141.4" font-family="DejaVu Sans" font-size="12.00">Reports API / panel</text>
+<text text-anchor="middle" x="329" y="-128.4" font-family="DejaVu Sans" font-size="12.00">Paged summaries only</text>
+<text text-anchor="middle" x="329" y="-115.4" font-family="DejaVu Sans" font-size="12.00">Details repeats summary</text>
+</g>
+<!-- reports&#45;&gt;view -->
+<g id="analysis-data-edge14" class="edge">
+<title>reports&#45;&gt;view</title>
+<path fill="none" stroke="#63758a" d="M374.66,-218.76C365.83,-202.08 355.58,-182.72 347.03,-166.56"/>
+<polygon fill="#63758a" stroke="#63758a" points="349.16,-165.35 343.72,-160.31 344.83,-167.65 349.16,-165.35"/>
+<text text-anchor="middle" x="411.5" y="-187" font-family="DejaVu Sans" font-size="10.00">summary projection</text>
+</g>
+<!-- delivery -->
+<g id="analysis-data-node15" class="node">
+<title>delivery</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M658.5,-153.5C658.5,-153.5 457.5,-153.5 457.5,-153.5 451.5,-153.5 445.5,-147.5 445.5,-141.5 445.5,-141.5 445.5,-121.5 445.5,-121.5 445.5,-115.5 451.5,-109.5 457.5,-109.5 457.5,-109.5 658.5,-109.5 658.5,-109.5 664.5,-109.5 670.5,-115.5 670.5,-121.5 670.5,-121.5 670.5,-141.5 670.5,-141.5 670.5,-147.5 664.5,-153.5 658.5,-153.5"/>
+<text text-anchor="middle" x="558" y="-134.9" font-family="DejaVu Sans" font-size="12.00">Write&#45;back / replay</text>
+<text text-anchor="middle" x="558" y="-121.9" font-family="DejaVu Sans" font-size="12.00">Same persisted compact payload</text>
+</g>
+<!-- reports&#45;&gt;delivery -->
+<g id="analysis-data-edge15" class="edge">
+<title>reports&#45;&gt;delivery</title>
+<path fill="none" stroke="#63758a" d="M445.24,-218.76C471.11,-198.97 501.93,-175.39 524.81,-157.89"/>
+<polygon fill="#63758a" stroke="#63758a" points="526.37,-159.78 530.44,-153.58 523.4,-155.89 526.37,-159.78"/>
+<text text-anchor="middle" x="555.5" y="-187" font-family="DejaVu Sans" font-size="10.00">pending rows; write&#45;back on</text>
+</g>
+<!-- analyses -->
+<g id="analysis-data-node16" class="node">
+<title>analyses</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M637.5,-44C637.5,-44 478.5,-44 478.5,-44 472.5,-44 466.5,-38 466.5,-32 466.5,-32 466.5,-12 466.5,-12 466.5,-6 472.5,0 478.5,0 478.5,0 637.5,0 637.5,0 643.5,0 649.5,-6 649.5,-12 649.5,-12 649.5,-32 649.5,-32 649.5,-38 643.5,-44 637.5,-44"/>
+<text text-anchor="middle" x="558" y="-25.4" font-family="DejaVu Sans" font-size="12.00">DumpLedger analyses</text>
+<text text-anchor="middle" x="558" y="-12.4" font-family="DejaVu Sans" font-size="12.00">Idempotent report identity</text>
+</g>
+<!-- delivery&#45;&gt;analyses -->
+<g id="analysis-data-edge16" class="edge">
+<title>delivery&#45;&gt;analyses</title>
+<path fill="none" stroke="#63758a" d="M558,-109.26C558,-92.77 558,-69.74 558,-51.62"/>
+<polygon fill="#63758a" stroke="#63758a" points="560.45,-51.19 558,-44.19 555.55,-51.19 560.45,-51.19"/>
+<text text-anchor="middle" x="621.5" y="-71" font-family="DejaVu Sans" font-size="10.00">POST /dumps/:id/analyses</text>
+</g>
+</g>
+</svg>
+</div><figcaption>Dump bytes, symbols, reports and delivery data flow</figcaption></figure>
+<p>The local identity is <code>(dumpId, inputSha256, kind, analyzerVersion)</code>; configured analyzer name completes the remote report identity. Bytes are cached by SHA-256 and verified before runner execution, including cache reuse after a <code>304</code> response. Downloads currently buffer the content body before writing the cache. Dump bytes live on the filesystem; SQLite stores the cache index and job/report metadata.</p>
+<p><code>RunRequest</code> carries the verified dump path, symbol path, per-run workspace and configured bounds. The default runner stages the dump and a deterministic script over SCP, invokes CDB over SSH, and parses its output. Its script uses <code>.sympath</code>, <code>.reload</code>, <code>.ecxr</code>, <code>kc</code>, <code>lm</code>, <code>|</code> and <code>q</code>. CDB obtains symbols through <code>SRV*&lt;remote-cache&gt;*&lt;ledger-base&gt;/symbols</code>. The optional Claude provider stages the dump and invokes a local CLI that drives remote CDB and returns JSON. These providers share <code>RunOutput { outcome, summary, facts }</code>, but do not enforce a common typed forensic-evidence schema.</p>
+<p>The default runner extracts basic exception code/name/address, up to 32 frame call-site strings, module symbol status and process information. This is not a complete exception record, validated symbol provenance or an evidence-backed root-cause analysis. Run bounds are passed to the adapters; the diagram does not claim that every staging, cleanup or subprocess operation is covered by one global timeout. Local per-run workspaces are wiped after execution; remote scratch cleanup is best effort. There is no durable full-transcript report store.</p>
+<p><strong>The amber reduction block is a current information-loss boundary.</strong> <code>verdict::assemble</code> limits the summary to 2,000 characters, facts to 4 KiB and the JSON submission to 16 KiB, dropping whole facts keys when necessary. This happens before local persistence for both entry points. Frames can be removed, and the local copy cannot recover discarded evidence. Report delivery reuses the persisted compact payload.</p>
+<p><code>local_reports.posted</code> is a delivery bookkeeping flag; some permanently abandoned reports also set it. A displayed Posted label alone does not prove remote acceptance. A failed report outcome describes analysis, rather than delivery state.</p>
+<p>The requested rich report—resolved stack, complete exception information and supported root-cause analysis—is planned in <a href="../Plans/rich-report-implementation-plan.md">rich-report-implementation-plan.md</a>. Its canonical report store and detail API are not implemented in this revision.</p>
+<p>Sources: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/types.rs#L82">identity and runner types</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/agent.rs#L350">manual shared attempt</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/agent.rs#L403">cache/fetch</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/agent.rs#L579">symbol path</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/runner.rs#L1138">CDB parsing</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/verdict.rs#L51">report limits</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/verdict.rs#L134">assembly</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/verdict.rs#L180">local persistence</a>.</p>
+<h2 id="5-dashboard-data-flow-and-information-load">5. Dashboard data flow and information load</h2>
+<figure class="diagram"><div class="diagram-tools" role="group" aria-label="Diagram controls"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-fit>Fit</button><output aria-live="polite">100%</output><a href="architecture/ui-data.svg" target="_blank" rel="noopener">Open SVG ↗</a></div><div class="diagram-scroll" tabindex="0" aria-label="Bounded explorer, queue and reports data flow; scroll after zooming"><svg role="img" aria-label="Bounded explorer, queue and reports data flow"
+ viewBox="0.00 0.00 1299.50 593.50" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="ui-data-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 575.5)">
+<title>UiData</title>
+<g id="ui-data-clust1" class="cluster">
+<title>cluster_browser</title>
+<path fill="transparent" stroke="#e3c77b" d="M244.5,-8C244.5,-8 1243.5,-8 1243.5,-8 1249.5,-8 1255.5,-14 1255.5,-20 1255.5,-20 1255.5,-94 1255.5,-94 1255.5,-100 1249.5,-106 1243.5,-106 1243.5,-106 244.5,-106 244.5,-106 238.5,-106 232.5,-100 232.5,-94 232.5,-94 232.5,-20 232.5,-20 232.5,-14 238.5,-8 244.5,-8"/>
+<text text-anchor="middle" x="744" y="-90" font-family="DejaVu Sans" font-size="15.00">Browser · one visible panel</text>
+</g>
+<!-- ledger -->
+<g id="ui-data-node1" class="node">
+<title>ledger</title>
+<path fill="#f0f2f5" stroke="#8a99aa" d="M242,-557.5C242,-557.5 13,-557.5 13,-557.5 7,-557.5 1,-551.5 1,-545.5 1,-545.5 1,-512.5 1,-512.5 1,-506.5 7,-500.5 13,-500.5 13,-500.5 242,-500.5 242,-500.5 248,-500.5 254,-506.5 254,-512.5 254,-512.5 254,-545.5 254,-545.5 254,-551.5 248,-557.5 242,-557.5"/>
+<text text-anchor="middle" x="127.5" y="-538.9" font-family="DejaVu Sans" font-size="12.00">DumpLedger catalog + metadata</text>
+<text text-anchor="middle" x="127.5" y="-525.9" font-family="DejaVu Sans" font-size="12.00">All available dumps / customer names</text>
+<text text-anchor="middle" x="127.5" y="-512.9" font-family="DejaVu Sans" font-size="12.00">Representative detail per case</text>
+</g>
+<!-- cache -->
+<g id="ui-data-node2" class="node">
+<title>cache</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M243,-439.75C243,-439.75 12,-439.75 12,-439.75 6,-439.75 0,-433.75 0,-427.75 0,-427.75 0,-394.75 0,-394.75 0,-388.75 6,-382.75 12,-382.75 12,-382.75 243,-382.75 243,-382.75 249,-382.75 255,-388.75 255,-394.75 255,-394.75 255,-427.75 255,-427.75 255,-433.75 249,-439.75 243,-439.75"/>
+<text text-anchor="middle" x="127.5" y="-421.15" font-family="DejaVu Sans" font-size="12.00">DumpsExplorer snapshot</text>
+<text text-anchor="middle" x="127.5" y="-408.15" font-family="DejaVu Sans" font-size="12.00">Shared daemon cache: 30 s</text>
+<text text-anchor="middle" x="127.5" y="-395.15" font-family="DejaVu Sans" font-size="12.00">Full catalog remains in server memory</text>
+</g>
+<!-- ledger&#45;&gt;cache -->
+<g id="ui-data-edge1" class="edge">
+<title>ledger&#45;&gt;cache</title>
+<path fill="none" stroke="#63758a" d="M127.5,-500.27C127.5,-484.36 127.5,-464.22 127.5,-447.22"/>
+<polygon fill="#63758a" stroke="#63758a" points="129.95,-447.15 127.5,-440.15 125.05,-447.15 129.95,-447.15"/>
+<text text-anchor="middle" x="243.5" y="-468.5" font-family="DejaVu Sans" font-size="10.00">paged upstream fetch; metadata concurrency 8</text>
+</g>
+<!-- browse -->
+<g id="ui-data-node3" class="node">
+<title>browse</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M455.5,-322C455.5,-322 229.5,-322 229.5,-322 223.5,-322 217.5,-316 217.5,-310 217.5,-310 217.5,-277 217.5,-277 217.5,-271 223.5,-265 229.5,-265 229.5,-265 455.5,-265 455.5,-265 461.5,-265 467.5,-271 467.5,-277 467.5,-277 467.5,-310 467.5,-310 467.5,-316 461.5,-322 455.5,-322"/>
+<text text-anchor="middle" x="342.5" y="-303.4" font-family="DejaVu Sans" font-size="12.00">GET /api/dumps/browse</text>
+<text text-anchor="middle" x="342.5" y="-290.4" font-family="DejaVu Sans" font-size="12.00">Search + scope + one hierarchy level</text>
+<text text-anchor="middle" x="342.5" y="-277.4" font-family="DejaVu Sans" font-size="12.00">Default 25 rows; maximum 100</text>
+</g>
+<!-- cache&#45;&gt;browse -->
+<g id="ui-data-edge2" class="edge">
+<title>cache&#45;&gt;browse</title>
+<path fill="none" stroke="#63758a" d="M130.92,-382.64C133.86,-369.88 139.33,-355.49 149.5,-346 166.63,-330.01 188.17,-318.87 210.59,-311.14"/>
+<polygon fill="#63758a" stroke="#63758a" points="211.37,-313.47 217.26,-308.95 209.84,-308.81 211.37,-313.47"/>
+<text text-anchor="middle" x="235.5" y="-349" font-family="DejaVu Sans" font-size="10.00">bounded page of groups OR dumps</text>
+</g>
+<!-- dumps_panel -->
+<g id="ui-data-node9" class="node">
+<title>dumps_panel</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M478.5,-73C478.5,-73 252.5,-73 252.5,-73 246.5,-73 240.5,-67 240.5,-61 240.5,-61 240.5,-28 240.5,-28 240.5,-22 246.5,-16 252.5,-16 252.5,-16 478.5,-16 478.5,-16 484.5,-16 490.5,-22 490.5,-28 490.5,-28 490.5,-61 490.5,-61 490.5,-67 484.5,-73 478.5,-73"/>
+<text text-anchor="middle" x="365.5" y="-54.4" font-family="DejaVu Sans" font-size="12.00">Dumps panel</text>
+<text text-anchor="middle" x="365.5" y="-41.4" font-family="DejaVu Sans" font-size="12.00">Customer name → case title → dumps</text>
+<text text-anchor="middle" x="365.5" y="-28.4" font-family="DejaVu Sans" font-size="12.00">Active panel refresh: 15 s</text>
+</g>
+<!-- browse&#45;&gt;dumps_panel -->
+<g id="ui-data-edge10" class="edge">
+<title>browse&#45;&gt;dumps_panel</title>
+<path fill="none" stroke="#63758a" d="M345.09,-264.65C349.32,-219.31 357.66,-129.67 362.26,-80.24"/>
+<polygon fill="#63758a" stroke="#63758a" points="364.71,-80.45 362.92,-73.25 359.83,-79.99 364.71,-80.45"/>
+<text text-anchor="middle" x="382.5" y="-175" font-family="DejaVu Sans" font-size="10.00">JSON page</text>
+</g>
+<!-- db -->
+<g id="ui-data-node4" class="node">
+<title>db</title>
+<path fill="#eaf6ee" stroke="#6eac81" d="M961.5,-436.21C961.5,-439.27 912.64,-441.75 852.5,-441.75 792.36,-441.75 743.5,-439.27 743.5,-436.21 743.5,-436.21 743.5,-386.29 743.5,-386.29 743.5,-383.23 792.36,-380.75 852.5,-380.75 912.64,-380.75 961.5,-383.23 961.5,-386.29 961.5,-386.29 961.5,-436.21 961.5,-436.21"/>
+<path fill="none" stroke="#6eac81" d="M961.5,-436.21C961.5,-433.15 912.64,-430.66 852.5,-430.66 792.36,-430.66 743.5,-433.15 743.5,-436.21"/>
+<text text-anchor="middle" x="852.5" y="-414.65" font-family="DejaVu Sans" font-size="12.00">SQLite</text>
+<text text-anchor="middle" x="852.5" y="-401.65" font-family="DejaVu Sans" font-size="12.00">jobs / settled_jobs / local_reports</text>
+</g>
+<!-- db&#45;&gt;browse -->
+<g id="ui-data-edge3" class="edge">
+<title>db&#45;&gt;browse</title>
+<path fill="none" stroke="#63758a" d="M743.22,-390.62C693.16,-381.2 633.16,-369.29 579.5,-357 572.76,-355.46 511.78,-339.37 453.37,-323.91"/>
+<polygon fill="#63758a" stroke="#63758a" points="453.66,-321.45 446.26,-322.03 452.4,-326.19 453.66,-321.45"/>
+<text text-anchor="middle" x="676.5" y="-349" font-family="DejaVu Sans" font-size="10.00">fresh phase overlay for returned dumps</text>
+</g>
+<!-- queue -->
+<g id="ui-data-node6" class="node">
+<title>queue</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M837.5,-322C837.5,-322 599.5,-322 599.5,-322 593.5,-322 587.5,-316 587.5,-310 587.5,-310 587.5,-277 587.5,-277 587.5,-271 593.5,-265 599.5,-265 599.5,-265 837.5,-265 837.5,-265 843.5,-265 849.5,-271 849.5,-277 849.5,-277 849.5,-310 849.5,-310 849.5,-316 843.5,-322 837.5,-322"/>
+<text text-anchor="middle" x="718.5" y="-303.4" font-family="DejaVu Sans" font-size="12.00">GET /api/jobs</text>
+<text text-anchor="middle" x="718.5" y="-290.4" font-family="DejaVu Sans" font-size="12.00">Persistent active phases + manual rows</text>
+<text text-anchor="middle" x="718.5" y="-277.4" font-family="DejaVu Sans" font-size="12.00">Excludes discovered and terminal jobs</text>
+</g>
+<!-- db&#45;&gt;queue -->
+<g id="ui-data-edge5" class="edge">
+<title>db&#45;&gt;queue</title>
+<path fill="none" stroke="#63758a" d="M818.34,-380.74C799.34,-364.33 775.67,-343.88 756.14,-327.02"/>
+<polygon fill="#63758a" stroke="#63758a" points="757.65,-325.08 750.75,-322.36 754.45,-328.79 757.65,-325.08"/>
+<text text-anchor="middle" x="835" y="-349" font-family="DejaVu Sans" font-size="10.00">work_queue query</text>
+</g>
+<!-- reports -->
+<g id="ui-data-node7" class="node">
+<title>reports</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M1215.5,-322C1215.5,-322 1021.5,-322 1021.5,-322 1015.5,-322 1009.5,-316 1009.5,-310 1009.5,-310 1009.5,-277 1009.5,-277 1009.5,-271 1015.5,-265 1021.5,-265 1021.5,-265 1215.5,-265 1215.5,-265 1221.5,-265 1227.5,-271 1227.5,-277 1227.5,-277 1227.5,-310 1227.5,-310 1227.5,-316 1221.5,-322 1215.5,-322"/>
+<text text-anchor="middle" x="1118.5" y="-303.4" font-family="DejaVu Sans" font-size="12.00">GET /api/reports</text>
+<text text-anchor="middle" x="1118.5" y="-290.4" font-family="DejaVu Sans" font-size="12.00">SQL filter + count + stable page</text>
+<text text-anchor="middle" x="1118.5" y="-277.4" font-family="DejaVu Sans" font-size="12.00">Facts omitted from JSON</text>
+</g>
+<!-- db&#45;&gt;reports -->
+<g id="ui-data-edge7" class="edge">
+<title>db&#45;&gt;reports</title>
+<path fill="none" stroke="#63758a" d="M919.62,-381.04C958.91,-363.95 1008.45,-342.39 1048.25,-325.07"/>
+<polygon fill="#63758a" stroke="#63758a" points="1049.62,-327.15 1055.06,-322.11 1047.66,-322.65 1049.62,-327.15"/>
+<text text-anchor="middle" x="1088" y="-349" font-family="DejaVu Sans" font-size="10.00">selected rows; includes facts internally</text>
+</g>
+<!-- status -->
+<g id="ui-data-node8" class="node">
+<title>status</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M803.5,-206C803.5,-206 627.5,-206 627.5,-206 621.5,-206 615.5,-200 615.5,-194 615.5,-194 615.5,-161 615.5,-161 615.5,-155 621.5,-149 627.5,-149 627.5,-149 803.5,-149 803.5,-149 809.5,-149 815.5,-155 815.5,-161 815.5,-161 815.5,-194 815.5,-194 815.5,-200 809.5,-206 803.5,-206"/>
+<text text-anchor="middle" x="715.5" y="-187.4" font-family="DejaVu Sans" font-size="12.00">GET /api/status</text>
+<text text-anchor="middle" x="715.5" y="-174.4" font-family="DejaVu Sans" font-size="12.00">Active queue + report counts</text>
+<text text-anchor="middle" x="715.5" y="-161.4" font-family="DejaVu Sans" font-size="12.00">No full catalog or report list</text>
+</g>
+<!-- db&#45;&gt;status -->
+<g id="ui-data-edge8" class="edge">
+<title>db&#45;&gt;status</title>
+<path fill="none" stroke="#63758a" d="M876.14,-380.81C880.81,-373.44 885.03,-365.27 887.5,-357 896.74,-326.14 903.19,-314.77 864.5,-265 846.14,-241.38 819.38,-223.01 793.59,-209.4"/>
+<polygon fill="#63758a" stroke="#63758a" points="794.4,-207.06 787.06,-206.04 792.16,-211.42 794.4,-207.06"/>
+<text text-anchor="middle" x="929.5" y="-291" font-family="DejaVu Sans" font-size="10.00">counts / cursor</text>
+</g>
+<!-- manual -->
+<g id="ui-data-node5" class="node">
+<title>manual</title>
+<path fill="#edf3fc" stroke="#7397c5" d="M532.5,-433.25C532.5,-433.25 312.5,-433.25 312.5,-433.25 306.5,-433.25 300.5,-427.25 300.5,-421.25 300.5,-421.25 300.5,-401.25 300.5,-401.25 300.5,-395.25 306.5,-389.25 312.5,-389.25 312.5,-389.25 532.5,-389.25 532.5,-389.25 538.5,-389.25 544.5,-395.25 544.5,-401.25 544.5,-401.25 544.5,-421.25 544.5,-421.25 544.5,-427.25 538.5,-433.25 532.5,-433.25"/>
+<text text-anchor="middle" x="422.5" y="-414.65" font-family="DejaVu Sans" font-size="12.00">Ephemeral manual active registry</text>
+<text text-anchor="middle" x="422.5" y="-401.65" font-family="DejaVu Sans" font-size="12.00">Clears on return / error / cancellation</text>
+</g>
+<!-- manual&#45;&gt;browse -->
+<g id="ui-data-edge4" class="edge">
+<title>manual&#45;&gt;browse</title>
+<path fill="none" stroke="#63758a" d="M365.77,-389.06C352.17,-381.15 339.33,-370.66 331.5,-357 326.65,-348.54 326.47,-338.46 328.31,-328.89"/>
+<polygon fill="#63758a" stroke="#63758a" points="330.7,-329.42 329.96,-322.04 325.94,-328.27 330.7,-329.42"/>
+<text text-anchor="middle" x="366.5" y="-349" font-family="DejaVu Sans" font-size="10.00">active overlay</text>
+</g>
+<!-- manual&#45;&gt;queue -->
+<g id="ui-data-edge6" class="edge">
+<title>manual&#45;&gt;queue</title>
+<path fill="none" stroke="#63758a" d="M421.09,-389.2C421.34,-375.07 424.21,-357.08 435.5,-346 456.7,-325.21 519.27,-312.62 580.2,-305.1"/>
+<polygon fill="#63758a" stroke="#63758a" points="580.58,-307.53 587.24,-304.26 579.99,-302.66 580.58,-307.53"/>
+<text text-anchor="middle" x="484.5" y="-349" font-family="DejaVu Sans" font-size="10.00">merge / deduplicate</text>
+</g>
+<!-- queue&#45;&gt;status -->
+<g id="ui-data-edge9" class="edge">
+<title>queue&#45;&gt;status</title>
+<path fill="none" stroke="#63758a" d="M717.77,-264.9C717.37,-249.47 716.86,-230.09 716.42,-213.59"/>
+<polygon fill="#63758a" stroke="#63758a" points="718.86,-213.17 716.23,-206.24 713.97,-213.3 718.86,-213.17"/>
+<text text-anchor="middle" x="747" y="-233" font-family="DejaVu Sans" font-size="10.00">active totals</text>
+</g>
+<!-- queue_panel -->
+<g id="ui-data-node10" class="node">
+<title>queue_panel</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M947,-73C947,-73 802,-73 802,-73 796,-73 790,-67 790,-61 790,-61 790,-28 790,-28 790,-22 796,-16 802,-16 802,-16 947,-16 947,-16 953,-16 959,-22 959,-28 959,-28 959,-61 959,-61 959,-67 953,-73 947,-73"/>
+<text text-anchor="middle" x="874.5" y="-54.4" font-family="DejaVu Sans" font-size="12.00">Queue panel</text>
+<text text-anchor="middle" x="874.5" y="-41.4" font-family="DejaVu Sans" font-size="12.00">Active work only</text>
+<text text-anchor="middle" x="874.5" y="-28.4" font-family="DejaVu Sans" font-size="12.00">Active panel refresh: 5 s</text>
+</g>
+<!-- queue&#45;&gt;queue_panel -->
+<g id="ui-data-edge11" class="edge">
+<title>queue&#45;&gt;queue_panel</title>
+<path fill="none" stroke="#63758a" d="M767.26,-265C789.52,-250.17 814.43,-229.98 830.5,-206 856.18,-167.68 866.94,-114.74 871.4,-80.31"/>
+<polygon fill="#63758a" stroke="#63758a" points="873.85,-80.5 872.27,-73.26 868.99,-79.91 873.85,-80.5"/>
+<text text-anchor="middle" x="882" y="-175" font-family="DejaVu Sans" font-size="10.00">JSON rows</text>
+</g>
+<!-- reports_panel -->
+<g id="ui-data-node11" class="node">
+<title>reports_panel</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M1235,-73C1235,-73 1000,-73 1000,-73 994,-73 988,-67 988,-61 988,-61 988,-28 988,-28 988,-22 994,-16 1000,-16 1000,-16 1235,-16 1235,-16 1241,-16 1247,-22 1247,-28 1247,-28 1247,-61 1247,-61 1247,-67 1241,-73 1235,-73"/>
+<text text-anchor="middle" x="1117.5" y="-54.4" font-family="DejaVu Sans" font-size="12.00">Reports panel</text>
+<text text-anchor="middle" x="1117.5" y="-41.4" font-family="DejaVu Sans" font-size="12.00">25 rows + filters + summary disclosure</text>
+<text text-anchor="middle" x="1117.5" y="-28.4" font-family="DejaVu Sans" font-size="12.00">Active panel refresh: 15 s</text>
+</g>
+<!-- reports&#45;&gt;reports_panel -->
+<g id="ui-data-edge12" class="edge">
+<title>reports&#45;&gt;reports_panel</title>
+<path fill="none" stroke="#63758a" d="M1118.39,-264.65C1118.2,-219.4 1117.84,-130.04 1117.64,-80.55"/>
+<polygon fill="#63758a" stroke="#63758a" points="1120.09,-80.24 1117.61,-73.25 1115.19,-80.26 1120.09,-80.24"/>
+<text text-anchor="middle" x="1168" y="-175" font-family="DejaVu Sans" font-size="10.00">JSON summary page</text>
+</g>
+<!-- chrome -->
+<g id="ui-data-node12" class="node">
+<title>chrome</title>
+<path fill="#fff4d9" stroke="#c99c39" d="M749,-73C749,-73 532,-73 532,-73 526,-73 520,-67 520,-61 520,-61 520,-28 520,-28 520,-22 526,-16 532,-16 532,-16 749,-16 749,-16 755,-16 761,-22 761,-28 761,-28 761,-61 761,-61 761,-67 755,-73 749,-73"/>
+<text text-anchor="middle" x="640.5" y="-54.4" font-family="DejaVu Sans" font-size="12.00">Status / navigation / Settings</text>
+<text text-anchor="middle" x="640.5" y="-41.4" font-family="DejaVu Sans" font-size="12.00">Cheap status refresh: 5 s</text>
+<text text-anchor="middle" x="640.5" y="-28.4" font-family="DejaVu Sans" font-size="12.00">Hidden panels make no list requests</text>
+</g>
+<!-- status&#45;&gt;chrome -->
+<g id="ui-data-edge13" class="edge">
+<title>status&#45;&gt;chrome</title>
+<path fill="none" stroke="#63758a" d="M699.59,-148.72C688.01,-128.48 672.26,-100.97 659.93,-79.43"/>
+<polygon fill="#63758a" stroke="#63758a" points="661.99,-78.1 656.38,-73.24 657.73,-80.53 661.99,-78.1"/>
+<text text-anchor="middle" x="714.5" y="-117" font-family="DejaVu Sans" font-size="10.00">JSON counts</text>
+</g>
+</g>
+</svg>
+</div><figcaption>Bounded explorer, queue and reports data flow</figcaption></figure>
+<p>The browser loads one list panel at a time. Status counts refresh every 5 seconds; Queue refreshes every 5 seconds while visible; Dumps and Reports refresh every 15 seconds while visible. Search is debounced by 250 ms. Navigation preserves panel, scope, filters and page in the URL hash. Browsing never starts analysis.</p>
+<table>
+<thead>
+<tr>
+<th>View</th>
+<th>Data source and boundary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Queue</td>
+<td>SQL active work plus the ephemeral manual registry. No discovered or terminal rows.</td>
+</tr>
+<tr>
+<td>Dumps</td>
+<td>Available DumpLedger catalog, customer display names and case titles → shared 30-second daemon snapshot → one page of customers, cases or dumps. Local phases are overlaid for returned dump rows.</td>
+</tr>
+<tr>
+<td>Reports</td>
+<td>SQLite counts and a filtered, stably ordered page → summary JSON. Facts are omitted from the response, although SQL still reads them internally for selected rows. Details currently expands the same summary.</td>
+</tr>
+<tr>
+<td>Status / Settings</td>
+<td>Lightweight daemon state and report counts; configuration, token storage, manual actions, rescan and diagnostics.</td>
+</tr>
+</tbody>
+</table>
+<p>Both list APIs default to 25 rows and cap page size at 100 rows. Customer/case rows contain counts instead of nested descendant lists. This bounds the response and browser DOM, while the explorer's server cache still holds the complete catalog. The legacy <code>/api/dumps</code> endpoint still returns a full snapshot; the dashboard uses <code>/api/dumps/browse</code>. There is currently no lazy full-report detail endpoint.</p>
+<p>Sources: <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/explorer.rs#L163">explorer paging</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/explorer.rs#L284">snapshot construction</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/state.rs#L1087">report SQL paging</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/http.rs#L1147">report JSON projection</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/dashboard.html#L521">summary disclosure</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/dashboard.html#L528">panel fetch</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/0bb92ae716a32e77a3f92fc9c4830080cf0abfdb/src/dashboard.html#L668">polling</a>.</p>
+<h2 id="diagram-sources">Diagram sources</h2>
+<p>Graphviz sources and generated SVGs are in <a href="architecture/">docs/architecture/</a>. Regenerate the SVGs and this document's self-contained HTML view with:</p>
+<pre><code class="language-sh">python3 docs/architecture/render.py
+wslview docs/architecture.html
+</code></pre>
+<p>Rendering requires Graphviz <code>dot</code> and Python's <code>markdown-it-py</code>. It does not build or run DumpAnalyzer. The HTML contains the SVGs inline, zoom controls and source links pinned to the revision above.</p>
+</main>
+<script>
+document.querySelectorAll('.diagram').forEach(figure => {
+  let zoom = 100;
+  const svg = figure.querySelector('svg');
+  const output = figure.querySelector('output');
+  const setZoom = value => {
+    zoom = Math.max(50, Math.min(400, value));
+    svg.style.width = zoom + '%';
+    figure.classList.toggle('zoomed', zoom > 100);
+    output.value = zoom + '%';
+  };
+  figure.querySelectorAll('[data-zoom]').forEach(button => {
+    button.addEventListener('click', () => setZoom(zoom + Number(button.dataset.zoom) * 25));
+  });
+  figure.querySelector('[data-fit]').addEventListener('click', () => setZoom(100));
+});
+</script>
 </body>
 </html>

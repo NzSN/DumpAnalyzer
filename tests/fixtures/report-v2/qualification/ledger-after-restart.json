@@ -1,0 +1,27 @@
+{
+  "stage": "afterRestart",
+  "pid": 338622,
+  "url": "http://127.0.0.1:36515",
+  "counts": {
+    "analyses": 1,
+    "details": 1
+  },
+  "analysisId": "analysis_3185A765CD97401E925BBA922F",
+  "reportId": "r2_f8a53de0654ae075491ee6e6d9b64e6f317a55ef397188b84bbf82f7c8ba7a3f",
+  "reportDigest": "1efe8ffd0f1644ac544bb0cfec0f188f14eb5ef7dd407c52ebc048b0fa7276cd",
+  "reportBytes": 24259,
+  "httpStatus": 200,
+  "identicalPersistedBytes": true,
+  "integrity": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "foreignKeys": [],
+  "audit": [
+    {
+      "action": "RecordAnalysis",
+      "n": 1
+    }
+  ]
+}

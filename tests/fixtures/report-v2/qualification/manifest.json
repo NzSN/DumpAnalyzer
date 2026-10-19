@@ -1,0 +1,118 @@
+{
+  "preparedAt": "2026-10-15",
+  "repositoryHead": "0bb92ae716a32e77a3f92fc9c4830080cf0abfdb",
+  "remoteDirectory": "D:/da/rich-report-canary-20261015",
+  "localBinaryDirectory": "/tmp/rich-report-canary-20261015",
+  "sourceSha256": "2602176c0ab0ba07a7d9caa9e4e830cca2766b8eaa9cfdfec5a83a728ee0b805",
+  "cdbVersion": "10.0.29617.1000 AMD64",
+  "compilerVersion": "19.44.35227.0",
+  "linkerVersion": "14.44.35227.0",
+  "compilerLogEncoding": "Remote CP936 decoded to UTF-8; raw remote log retained",
+  "gates": {
+    "controlledFixture": true,
+    "matchingSymbolsAndSource": true,
+    "mismatchedPdbRejected": true,
+    "actualSshCdbRunner": true,
+    "productionDeployment": false,
+    "remoteDelivery": false,
+    "isolatedHttpFullDeliveryAndRestart": true,
+    "actualBrowserDetail": true,
+    "localMigrationDryRun": true,
+    "fixedLiveClaudeReasoner": false
+  },
+  "metadataFiles": {
+    "README.md": {
+      "bytes": 5911,
+      "sha256": "9207857dd246b3fbfb2e571b3a12785a8933794550daaadfaaca3b3b3c7e79e0"
+    },
+    "SHA256SUMS": {
+      "bytes": 520,
+      "sha256": "180d53af792578552dc385336f62fa81f0b3a4b61c7a0983fe49fe3ab6181282"
+    },
+    "actual-browser-receipt.json": {
+      "bytes": 1067,
+      "sha256": "4abfbcd1a46eb3a7c5e0bf770225aeb695cb9a7c4f1def8260eb033d35d19e44"
+    },
+    "actual-matching-report.json": {
+      "bytes": 24259,
+      "sha256": "1efe8ffd0f1644ac544bb0cfec0f188f14eb5ef7dd407c52ebc048b0fa7276cd"
+    },
+    "actual-mismatched-report.json": {
+      "bytes": 23453,
+      "sha256": "39b9e090d3a531a821a196082210fd9d77f9ae705c628c839bba33d1f3e433e8"
+    },
+    "artifact-identities.json": {
+      "bytes": 2162,
+      "sha256": "c411d62372a0a095ffa4ded5a5d78dd7ea783c92ca2e5043c9bb950916b1c1a8"
+    },
+    "capture.log": {
+      "bytes": 8298,
+      "sha256": "fcad59af8e41daf4fc9406612c606f3ceab50b9151d28dd43233944cac984cf5"
+    },
+    "cdb-version.txt": {
+      "bytes": 28,
+      "sha256": "276ff5c2e21a26a16d15c89810b3a93e23eb4c43b6ef2b6a87e4315aac2878f6"
+    },
+    "compiler.log": {
+      "bytes": 1129,
+      "sha256": "0a97ee6156f14a0f7746cfd3c166c4040a175f7a61a7f846b6e732b7b0a3275a"
+    },
+    "inspect-artifacts.py": {
+      "bytes": 5562,
+      "sha256": "eb8ca785d3ddcfbce4df970f5d6726a8b4557b409e2e5f2f3d5c47a2daf99ee9"
+    },
+    "integration-receipt.json": {
+      "bytes": 2799,
+      "sha256": "004b46f1f97b0974ff2b60026199f5a8aba8213fa72cc34a281d782f2771242e"
+    },
+    "ledger-after-restart.json": {
+      "bytes": 605,
+      "sha256": "92b6f54127c57a07067902d4384216ec267b87fef2b7b35fd926f1bb5a15b977"
+    },
+    "ledger-after-rust-replay.json": {
+      "bytes": 524,
+      "sha256": "ecf0888a907e7143d404e6a4278b7dcaf744a356e51215cedc844a8598494e46"
+    },
+    "ledger-before-restart.json": {
+      "bytes": 545,
+      "sha256": "231247605c3d80afa9b826c0ab22b4ae13b4e0dc7a552772353600627ba850f6"
+    },
+    "ledger-cleanup.json": {
+      "bytes": 641,
+      "sha256": "6f7e2fe94cc5a3ab1fdcd7e47deb9b5fe985006db39deb2a3af78078f52bc724"
+    },
+    "ledger-roundtrip-provenance.json": {
+      "bytes": 2755,
+      "sha256": "4e59c13fae6bc079f784048f0c91fc5d660bdaa5d2501d5656f91a764844eb7a"
+    },
+    "local-migration-receipt.json": {
+      "bytes": 4736,
+      "sha256": "42ca9315687380a528e7c75093651259b2eb35986f82e0d8b3b2b11b7447c733"
+    },
+    "null-read.cpp": {
+      "bytes": 579,
+      "sha256": "2602176c0ab0ba07a7d9caa9e4e830cca2766b8eaa9cfdfec5a83a728ee0b805"
+    },
+    "prepare-windows.sh": {
+      "bytes": 1833,
+      "sha256": "f6d3f9177422479c535ab9f4508892f44aa87323fda26a8b086cd398d8f9dd8e"
+    },
+    "serve-local-ledger-canary.mjs": {
+      "bytes": 5331,
+      "sha256": "4213dbe8523a1e5fc93903d536b7deee2d89f26fcb7cf0a82bbf3b95ec070be6"
+    },
+    "verify-matching.log": {
+      "bytes": 12299,
+      "sha256": "d49d5f73518b52a97875abcd16b860657a3a950db93a9898f5e6953cabb8799b"
+    },
+    "verify-mismatched.log": {
+      "bytes": 13085,
+      "sha256": "184c337f64e744c2c3a624b4dcffa5e11ffdf0e31759580942d6cfbe1b29fd6e"
+    },
+    "verify-windows.sh": {
+      "bytes": 1181,
+      "sha256": "503c15652d668d9eb1c0aa95443807231d1e72e105577ae4fb233d43cff6b9e2"
+    }
+  },
+  "qualificationScope": "Controlled Windows fixture plus isolated local HTTP/SQLite services; production rollout not performed"
+}

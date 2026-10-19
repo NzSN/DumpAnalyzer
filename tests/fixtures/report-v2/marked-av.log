@@ -1,0 +1,51 @@
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+Loading Dump File [C:\da\work\authored-fixture\dump.dmp]
+User Mini Dump File: Only registers, stack and portions of memory are available
+DA_BEGIN:target
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+Windows 10 Version 26200 MP (32 procs) Free x64
+.  0  Id: 2bc4.5f18 Suspend: 0 Teb: 00000000`00000000 Unfrozen
+.  0  id: 2bc4 create Thu Sep 11 08:02:11.000 2025
+DA_END:target
+DA_BEGIN:exception
+ExceptionAddress: 00007ff6e2d02a41 (electron!CrashHandler+0x0000000000000041)
+   ExceptionCode: c0000005 (Access violation)
+  ExceptionFlags: 00000000
+ExceptionRecord: 0000000000000000
+NumberParameters: 2
+   Parameter[0]: 0000000000000000
+   Parameter[1]: 0000000000000000
+Attempt to read from address 0000000000000000
+DA_END:exception
+DA_BEGIN:context
+rax=0000000000000000 rbx=000000d1f27fe9b0 rcx=0000000000000000
+rip=00007ff6e2d02a41 rsp=000000d1f27fe6b8 rbp=000000d1f27fe730
+electron!CrashHandler+0x41:
+00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx]
+DA_END:context
+DA_BEGIN:instruction
+electron!CrashHandler+0x41:
+00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx]
+00007ff6`e2d02a44 4885c0          test    rax,rax
+DA_END:instruction
+DA_BEGIN:stack-before-symbols
+ # Child-SP          RetAddr               Call Site
+00 000000d1`f27fe6b8 00007ff6`e2d02b99 electron+0x1f2a41
+01 000000d1`f27fe730 00007ffb`c1e12345 KERNEL32+0x12345
+DA_END:stack-before-symbols
+DA_BEGIN:symbols-load
+Reloading current modules
+DA_END:symbols-load
+DA_BEGIN:modules
+start             end                 module name
+00007ff6`e2b10000 00007ff6`ecc00000 electron (private pdb symbols) C:\symcache\electron.pdb
+    Timestamp: Thu Sep 11 08:02:11 2025 (68C24DDB)
+    ImageSize: 0A0F0000
+00007ffb`c1e00000 00007ffb`c1f40000 KERNEL32 (export symbols) C:\Windows\System32\kernel32.dll
+DA_END:modules
+DA_BEGIN:stack
+ # Child-SP          RetAddr               Call Site
+00 000000d1`f27fe6b8 00007ff6`e2d02b99 electron!CrashHandler+0x41 [C:\src\crash.cc @ 42]
+01 000000d1`f27fe730 00007ffb`c1e12345 KERNEL32!BaseThreadInitThunk+0x17
+DA_END:stack
+0:000> q

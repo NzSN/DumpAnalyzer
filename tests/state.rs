@@ -113,6 +113,7 @@ fn state_open_applies_migrations_once_and_reopen_preserves_data() {
             "cursors",
             "jobs",
             "local_reports",
+            "report_details",
             "schema_migrations",
             "secrets",
             "settled_jobs"
@@ -127,7 +128,7 @@ fn state_open_applies_migrations_once_and_reopen_preserves_data() {
             .collect::<rusqlite::Result<Vec<_>>>()
             .expect("collect")
     };
-    assert_eq!(versions, vec![1, 2, 3]);
+    assert_eq!(versions, vec![1, 2, 3, 4]);
 
     // Reopening neither re-ran the migrations nor reset the data.
     assert_eq!(
@@ -190,6 +191,7 @@ fn state_schema_matches_the_specified_migration() {
             col("facts_json", "TEXT", true, None, 0),
             col("created_at", "TEXT", true, None, 0),
             col("posted", "INTEGER", true, Some("0"), 0),
+            col("report_id", "TEXT", false, None, 0),
         ]
     );
 }
@@ -1013,7 +1015,21 @@ fn state_report_pages_traverse_every_report_in_stable_newest_order() {
         assert_eq!(result.reports.len(), if page == 11 { 7 } else { 25 });
         for report in result.reports {
             assert_eq!(report.summary, "retained summary");
-            assert_eq!(report.facts_json, "{\"retained\":true}");
+            assert!(!report.detail_available);
+            assert_eq!(report.schema_version, 1);
+            assert_eq!(
+                reports
+                    .get(&JobIdentity {
+                        dump_id: report.dump_id.clone(),
+                        input_sha256: report.input_sha256.clone(),
+                        kind: report.kind.clone(),
+                        analyzer_version: report.analyzer_version.clone(),
+                    })
+                    .expect("legacy facts lookup")
+                    .expect("legacy report")
+                    .facts_json,
+                "{\"retained\":true}"
+            );
             seen.push(report.dump_id);
         }
     }
@@ -1388,5 +1404,34 @@ fn state_phase_of_reports_presence() {
     assert_eq!(
         store.jobs().phase_of(&job).expect("phase"),
         Some(JobPhase::Reporting)
+    );
+}
+
+#[test]
+fn current_capture_profile_never_claims_old_discoveries() {
+    let (_directory, store, _path) = open_temp();
+    let old = job_versioned("old-profile", "0.1.0");
+    let current = job_versioned("new-profile", "0.2.0");
+    store.jobs().upsert_discovered(&old).unwrap();
+    store.jobs().upsert_discovered(&current).unwrap();
+    assert_eq!(
+        store
+            .jobs()
+            .claim_next_for_version("0.2.0")
+            .unwrap()
+            .unwrap()
+            .0,
+        current
+    );
+    assert!(
+        store
+            .jobs()
+            .claim_next_for_version("0.2.0")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store.jobs().phase_of(&old).unwrap(),
+        Some(JobPhase::Discovered)
     );
 }

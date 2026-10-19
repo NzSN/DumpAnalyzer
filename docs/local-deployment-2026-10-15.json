@@ -1,0 +1,59 @@
+{
+  "deployedAt": "2026-10-15T09:45:53.237320+00:00",
+  "url": "http://127.0.0.1:4180",
+  "version": "0.2.0",
+  "pid": 355896,
+  "baseGitRevision": "0bb92ae716a32e77a3f92fc9c4830080cf0abfdb",
+  "sourceState": "uncommitted rich-report implementation",
+  "sourceManifestDigest": "1f2b56505a3b06ead00a475a20357c2fbc7644bcc2241098a9319fa06b94c787",
+  "binarySha256": "b7e7a833ba340c1966a27ed86ea638f466f4f2458724f7391c615d49711ec4a8",
+  "schemaVersion": 4,
+  "previousSchemaVersion": 3,
+  "mode": {
+    "scheduler": "off",
+    "writeBack": "off",
+    "runner": "cdb-ssh"
+  },
+  "preserved": {
+    "reports": 34,
+    "settledIdentities": 34,
+    "byteCacheEntries": 5,
+    "storedCredentials": true,
+    "originalDiscoveredIdentities": 79
+  },
+  "activeJobs": 0,
+  "currentProfileDiscoveredDumps": 113,
+  "legacyReportIds": 34,
+  "validation": {
+    "migrationDryRun": "passed on fresh stopped-state copy",
+    "oldDataHashes": "unchanged for reports, archives, cache index and secrets",
+    "integrity": "ok",
+    "runningExecutableHash": "matches release",
+    "apiSmoke": {
+      "url": "http://127.0.0.1:4180",
+      "version": "0.2.0",
+      "activeJobs": 0,
+      "reportCount": 34,
+      "reportPageSizes": [
+        25,
+        9
+      ],
+      "legacyDetailsVerified": true,
+      "lightweightListVerified": true,
+      "availableDumps": 113,
+      "customers": 14,
+      "actionsInvoked": 0,
+      "requestMethods": [
+        "GET"
+      ]
+    },
+    "browserChecks": 12,
+    "browserPostRequests": 0,
+    "browserJavaScriptErrors": 0
+  },
+  "rollbackCheckpoint": "/tmp/dumpanalyzer-rich-migration-canary-deploy-xi4bdmg1",
+  "rollbackCommand": "python3 /tmp/dumpanalyzer-rich-migration-canary-deploy-xi4bdmg1/rollback-local.py",
+  "remoteDumpLedgerUpgraded": false,
+  "analysesStartedByDeployment": 0,
+  "claudeLiveQualification": "remains separately approval-gated"
+}

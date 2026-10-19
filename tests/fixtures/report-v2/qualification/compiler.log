@@ -1,0 +1,11 @@
+编译器扫描遍数:
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe:        版本 19.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\c1.dll:        版本 19.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\c1xx.dll:      版本 19.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\c2.dll:        版本 19.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\c1xx.dll:      版本 19.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\link.exe:      版本 14.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\mspdb140.dll:  版本 14.44.35227.0
+ C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\2052\clui.dll: 版本 19.44.35227.0
+
+null-read.cpp

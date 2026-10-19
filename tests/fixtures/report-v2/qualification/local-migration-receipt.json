@@ -1,0 +1,157 @@
+{
+  "preparedAt": "2026-10-15T09:12:12.869793+00:00",
+  "source": "/tmp/da-field/state/analyzer.sqlite",
+  "sourceOpenedReadOnly": true,
+  "sourceMatchesBackupAtEnd": true,
+  "backupDirectory": "/tmp/dumpanalyzer-rich-migration-canary-5tmdan8h",
+  "directoryMode": "0o700",
+  "backupFile": "/tmp/dumpanalyzer-rich-migration-canary-5tmdan8h/backup.sqlite",
+  "backupMode": "0o600",
+  "dryrunFile": "/tmp/dumpanalyzer-rich-migration-canary-5tmdan8h/dryrun.sqlite",
+  "dryrunMode": "0o600",
+  "backupSha256": "462aea85b1a66c192af70d11a455679b44ae224a5d16e3148b3c70a61d3eec8d",
+  "migratedCopySha256": "6b41a0f00cc13167b412a223e4d0d954f6da8233326daa3536e10c3b3592f8b0",
+  "migrationMethod": "current dump_analyzer::state::Store::open on dryrun.sqlite only",
+  "linkedRlib": "target/debug/deps/libdump_analyzer-55b9831f09c10840.rlib",
+  "linkedRlibSha256": "d0601baecd47f16ce4999cbe9aef87849539d3bb203369ec1edb52720e503bba",
+  "sourceStateRsSha256": "9e8a2dd3fb44deb53f58444fb1617c7e14ec18754b45e63fe77078d3630c182e",
+  "beforeSchemaVersions": [
+    1,
+    2,
+    3
+  ],
+  "afterSchemaVersions": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "backupIntegrityOk": true,
+  "migratedIntegrityOk": true,
+  "originalTableComparisons": {
+    "byte_cache": {
+      "preserved": true,
+      "rowsBefore": 5,
+      "rowsAfter": 5,
+      "sha256Before": "3e1e0d5b489adcca0fbe9ae09976150e3ff34be1e95da86194346ec5ddef30e7",
+      "sha256After": "3e1e0d5b489adcca0fbe9ae09976150e3ff34be1e95da86194346ec5ddef30e7",
+      "originalColumns": [
+        "sha256",
+        "path",
+        "byte_size",
+        "etag",
+        "last_used_at"
+      ]
+    },
+    "cursors": {
+      "preserved": true,
+      "rowsBefore": 1,
+      "rowsAfter": 1,
+      "sha256Before": "d80a3bb5cde78b33a3da1cd1da6d5c70067f7319a39a448dbbf315a6f8d2755d",
+      "sha256After": "d80a3bb5cde78b33a3da1cd1da6d5c70067f7319a39a448dbbf315a6f8d2755d",
+      "originalColumns": [
+        "name",
+        "value"
+      ]
+    },
+    "jobs": {
+      "preserved": true,
+      "rowsBefore": 79,
+      "rowsAfter": 79,
+      "sha256Before": "1e592cbadaa1c6f9522da8aea97d1d19ad7e78190975e06400be92728d0e33b0",
+      "sha256After": "1e592cbadaa1c6f9522da8aea97d1d19ad7e78190975e06400be92728d0e33b0",
+      "originalColumns": [
+        "dump_id",
+        "input_sha256",
+        "kind",
+        "analyzer_version",
+        "phase",
+        "attempts",
+        "workspace_path",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "local_reports": {
+      "preserved": true,
+      "rowsBefore": 34,
+      "rowsAfter": 34,
+      "sha256Before": "665e0bb6eeca8685abfca3a22f46da1b347c63d79d84557041cb1ec8c222d3d5",
+      "sha256After": "665e0bb6eeca8685abfca3a22f46da1b347c63d79d84557041cb1ec8c222d3d5",
+      "originalColumns": [
+        "dump_id",
+        "input_sha256",
+        "kind",
+        "analyzer_version",
+        "outcome",
+        "summary",
+        "facts_json",
+        "created_at",
+        "posted"
+      ]
+    },
+    "schema_migrations": {
+      "preserved": true,
+      "rowsBefore": 3,
+      "rowsAfter": 3,
+      "sha256Before": "c201dd9d45cf664bb78110e2573fb71f1ea2f6f35b022de3f68a74072183e120",
+      "sha256After": "c201dd9d45cf664bb78110e2573fb71f1ea2f6f35b022de3f68a74072183e120",
+      "originalColumns": [
+        "version",
+        "applied_at"
+      ]
+    },
+    "secrets": {
+      "preserved": true,
+      "rowsBefore": 1,
+      "rowsAfter": 1,
+      "sha256Before": "2397174003c35aff1f2fd63ae4fbf2e1a7dbf30559bb66a08873e098bc13678b",
+      "sha256After": "2397174003c35aff1f2fd63ae4fbf2e1a7dbf30559bb66a08873e098bc13678b",
+      "originalColumns": [
+        "name",
+        "value"
+      ]
+    },
+    "settled_jobs": {
+      "preserved": true,
+      "rowsBefore": 34,
+      "rowsAfter": 34,
+      "sha256Before": "f56a9d2b49e8e113de6ae6a7377bac0d4513df7a026017eb2c3f076c01ab0fa3",
+      "sha256After": "f56a9d2b49e8e113de6ae6a7377bac0d4513df7a026017eb2c3f076c01ab0fa3",
+      "originalColumns": [
+        "dump_id",
+        "input_sha256",
+        "kind",
+        "analyzer_version",
+        "phase",
+        "attempts",
+        "workspace_path",
+        "created_at",
+        "updated_at"
+      ]
+    }
+  },
+  "newTables": [
+    "report_details"
+  ],
+  "newTableRows": {
+    "report_details": 0
+  },
+  "addedColumns": {
+    "local_reports": [
+      "report_id"
+    ]
+  },
+  "reportIndexesAfter": [
+    "local_reports_report_id",
+    "report_details_delivery",
+    "sqlite_autoindex_local_reports_1",
+    "sqlite_autoindex_report_details_1",
+    "sqlite_autoindex_report_details_2"
+  ],
+  "legacyReportIdsAssigned": 34,
+  "legacyReportIdsUniqueAndVerified": true,
+  "productionRestarted": false,
+  "productionDatabaseWritten": false,
+  "migrationRerunIdempotent": true
+}

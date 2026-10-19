@@ -7,7 +7,7 @@
 //!
 //! * `Config::from_process_env` — fail fast, naming the offending variable;
 //! * tracing with `RUST_LOG` env-filter and an `info` default (health is the
-//!   process journal plus exit codes; there is no listening port in v1);
+//!   process journal plus exit codes; the dashboard is optional);
 //! * the production tool runner: CDB over SSH to the configured analysis box
 //!   (`DUMP_ANALYZER_SSH_TARGET` is required — the design's only v1
 //!   transport);

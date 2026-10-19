@@ -4,8 +4,8 @@
 //! [`SshCdbRunner`] stages a dump to the remote Windows analysis box, writes
 //! a fixed, bounded CDB triage script, executes CDB under [`RunBounds`] hard
 //! caps, and parses the bounded console log into a [`RunOutput`]. CDB never
-//! runs on the DumpLedger host (docs/analyzer-design.md, "Security
-//! considerations").
+//! runs on the configured Windows analysis host. DumpLedger and CDB are
+//! separate processes; they may share a physical host.
 //!
 //! Two invariants drive the split between verdicts and errors
 //! (docs/analyzer-design.md, "Agent pipeline"):
@@ -34,7 +34,7 @@
 //! [...], Win32 error 0n38`, `"Reached the end of the file."`, `(no symbols)`,
 //! `Call Site`) follow observed CDB 10.x output.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -46,6 +46,10 @@ use serde_json::{Map, Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
+use crate::report::{
+    self, AccessViolation, CaptureStatus, ContextSource, Evidence, ExceptionRecord,
+    FaultInstruction, ModuleSymbols, ReportCapture, StackFrame, SymbolQuality, UnwindStatus,
+};
 use crate::types::{
     AnalyzerError, ReportOutcome, Result, RunBounds, RunOutput, RunRequest, ToolRunner,
 };
@@ -64,10 +68,12 @@ pub const MAX_SYMBOL_PATH_CHARS: usize = 1024;
 pub const MAX_SCRIPT_BYTES: usize = 4096;
 /// Default stdout/stderr read cap for the SSH transport, in bytes.
 const DEFAULT_OUTPUT_CAP: usize = 8 * 1024 * 1024;
+/// Small independent cap for metadata-only PDB probe output.
+const PDB_METADATA_OUTPUT_CAP: usize = 32 * 1024;
 /// Default `scp` transfer timeout for the SSH transport.
 const DEFAULT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(900);
 /// Wall-time budget for the best-effort remote workspace cleanup.
-const CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
+const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Default remote workspace root on the analysis box.
 pub const DEFAULT_REMOTE_BASE: &str = "C:/da/work";
 /// Local file name of the generated triage script inside the run workspace.
@@ -114,8 +120,9 @@ pub(crate) fn bash_path(remote: &str) -> String {
 #[async_trait]
 pub trait ExecTransport: Send + Sync {
     /// Run `program` with `args` on the analysis box. `stdin` is closed
-    /// immediately when `None`; the child is killed after `timeout` (the
-    /// returned error is then `AnalyzerError::Transport`).
+    /// immediately when `None`; the local transport child is killed after
+    /// `timeout` (the returned error is `AnalyzerError::Transport`). Killing
+    /// SSH is not a guarantee that a remote debugger process has terminated.
     async fn exec(
         &self,
         program: &str,
@@ -123,6 +130,21 @@ pub trait ExecTransport: Send + Sync {
         stdin: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<TransportOutput>;
+
+    /// Execute with a per-request stdout/stderr acquisition cap. Production
+    /// transports enforce it while reading, before parsing or retaining logs.
+    /// In-memory adapters may delegate to `exec`; their fixture output is
+    /// subsequently bounded by the runner's combined transcript projection.
+    async fn exec_bounded(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+        _output_cap: usize,
+    ) -> Result<TransportOutput> {
+        self.exec(program, args, stdin, timeout).await
+    }
 
     /// Copy `local` to `remote` (an analysis-box path).
     async fn put_file(&self, local: &Path, remote: &str) -> Result<()>;
@@ -138,6 +160,19 @@ impl<T: ExecTransport + ?Sized> ExecTransport for Box<T> {
         timeout: Duration,
     ) -> Result<TransportOutput> {
         (**self).exec(program, args, stdin, timeout).await
+    }
+
+    async fn exec_bounded(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+        output_cap: usize,
+    ) -> Result<TransportOutput> {
+        (**self)
+            .exec_bounded(program, args, stdin, timeout, output_cap)
+            .await
     }
 
     async fn put_file(&self, local: &Path, remote: &str) -> Result<()> {
@@ -180,6 +215,18 @@ impl SshTransport {
         self.transfer_timeout = timeout;
         self
     }
+    fn for_output_cap(&self, cap: usize) -> Result<Self> {
+        if cap == 0 {
+            return Err(AnalyzerError::Transport(
+                "raw output budget exhausted".into(),
+            ));
+        }
+        Ok(Self {
+            target: self.target.clone(),
+            output_cap: self.output_cap.min(cap),
+            transfer_timeout: self.transfer_timeout,
+        })
+    }
 }
 
 #[async_trait]
@@ -211,17 +258,17 @@ impl ExecTransport for SshTransport {
             .spawn()
             .map_err(|err| AnalyzerError::Transport(format!("spawn ssh {}: {err}", self.target)))?;
 
-        if let Some(input) = stdin {
-            if let Some(mut pipe) = child.stdin.take() {
-                pipe.write_all(input).await.map_err(|err| {
-                    AnalyzerError::Transport(format!("ssh {}: writing stdin: {err}", self.target))
-                })?;
-                drop(pipe);
-            }
-        }
-
         let cap = self.output_cap;
-        match tokio::time::timeout(timeout, pump_child(&mut child, cap)).await {
+        let operation = async {
+            if let Some(input) = stdin {
+                if let Some(mut pipe) = child.stdin.take() {
+                    pipe.write_all(input).await?;
+                    drop(pipe);
+                }
+            }
+            pump_child(&mut child, cap).await
+        };
+        match tokio::time::timeout(timeout, operation).await {
             Ok(Ok((stdout, stderr, status, _capped))) => Ok(TransportOutput {
                 status: status.code(),
                 stdout,
@@ -243,6 +290,19 @@ impl ExecTransport for SshTransport {
                 )))
             }
         }
+    }
+
+    async fn exec_bounded(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+        output_cap: usize,
+    ) -> Result<TransportOutput> {
+        self.for_output_cap(output_cap)?
+            .exec(program, args, stdin, timeout)
+            .await
     }
 
     async fn put_file(&self, local: &Path, remote: &str) -> Result<()> {
@@ -311,9 +371,28 @@ async fn pump_child(
         .take()
         .ok_or_else(|| io::Error::other("stderr pipe missing"))?;
 
-    let (stdout, stderr) = tokio::join!(read_capped(stdout, cap), read_capped(stderr, cap));
-    let (stdout, stdout_capped) = stdout?;
-    let (stderr, stderr_capped) = stderr?;
+    let mut out_read = Box::pin(read_capped(stdout, cap));
+    let mut err_read = Box::pin(read_capped(stderr, cap));
+    // Kill as soon as either stream reaches the cap. Waiting for both first
+    // can deadlock when the other pipe belongs to a child waiting for input.
+    let ((stdout, stdout_capped), (stderr, stderr_capped)) = tokio::select! {
+        out = &mut out_read => {
+            let out = out?;
+            if out.1 {
+                let _ = child.kill().await;
+                return Ok((out.0, Vec::new(), child.wait().await?, true));
+            }
+            (out, err_read.await?)
+        }
+        err = &mut err_read => {
+            let err = err?;
+            if err.1 {
+                let _ = child.kill().await;
+                return Ok((Vec::new(), err.0, child.wait().await?, true));
+            }
+            (out_read.await?, err)
+        }
+    };
     let capped = stdout_capped || stderr_capped;
     if capped {
         let _ = child.kill().await;
@@ -325,8 +404,12 @@ async fn pump_child(
 /// Read at most `cap` bytes from a stream.
 async fn read_capped<R: AsyncRead + Unpin>(reader: R, cap: usize) -> io::Result<(Vec<u8>, bool)> {
     let mut buf = Vec::new();
-    reader.take(cap as u64).read_to_end(&mut buf).await?;
-    let capped = buf.len() >= cap;
+    reader
+        .take(cap.saturating_add(1) as u64)
+        .read_to_end(&mut buf)
+        .await?;
+    let capped = buf.len() > cap;
+    buf.truncate(cap);
     Ok((buf, capped))
 }
 
@@ -464,6 +547,7 @@ fn parse_triage_inner(log: &str) -> std::result::Result<RunOutput, String> {
         outcome: verdict.outcome,
         summary,
         facts,
+        capture: Some(capture_triage(log)),
     })
 }
 
@@ -812,7 +896,7 @@ fn is_call_site_like(call_site: &str) -> bool {
 fn module_of_call_site(call_site: &str) -> Option<String> {
     let end = call_site.find(['!', '+'])?;
     let module = &call_site[..end];
-    if module.is_empty() || !module.chars().all(is_module_name_char) {
+    if module.is_empty() || module.len() > 256 || !module.chars().all(is_module_name_char) {
         return None;
     }
     Some(module.to_string())
@@ -830,7 +914,7 @@ fn parse_module_line(line: &str) -> Option<ModuleInfo> {
         return None;
     }
     let name = fields[2];
-    if name.is_empty() || !name.chars().all(is_module_name_char) {
+    if name.is_empty() || name.len() > 256 || !name.chars().all(is_module_name_char) {
         return None;
     }
     let rest = fields[3..].join(" ");
@@ -1227,7 +1311,7 @@ fn symbols_facts(parsed: &ParsedLog) -> Value {
 // Bounded SSH/CDB runner
 // ---------------------------------------------------------------------------
 
-/// The v1 tool runner: CDB over an [`ExecTransport`] against the analysis box.
+/// Bounded two-phase CDB acquisition over an [`ExecTransport`].
 #[derive(Debug)]
 pub struct SshCdbRunner<T: ExecTransport> {
     transport: T,
@@ -1288,7 +1372,7 @@ impl<T: ExecTransport> SshCdbRunner<T> {
             )));
         }
 
-        let script = triage_script(&request.symbol_path);
+        let script = essential_script();
         if script.len() > MAX_SCRIPT_BYTES {
             return Err(AnalyzerError::Runner(format!(
                 "generated triage script is {} bytes, over the {MAX_SCRIPT_BYTES} byte cap",
@@ -1301,7 +1385,9 @@ impl<T: ExecTransport> SshCdbRunner<T> {
         Ok(RemotePlan {
             remote_dump: format!("{remote_dir}/{REMOTE_DUMP_NAME}"),
             remote_script: format!("{remote_dir}/{TRIAGE_SCRIPT_NAME}"),
+            remote_symbols_script: format!("{remote_dir}/symbols.cdb"),
             remote_dir,
+            local_symbols_script: request.work_dir.join("symbols.cdb"),
             local_script: request.work_dir.join(TRIAGE_SCRIPT_NAME),
             script,
         })
@@ -1362,40 +1448,69 @@ impl<T: ExecTransport> SshCdbRunner<T> {
             plan.remote_dump.as_str(),
             "-cf",
             plan.remote_script.as_str(),
+            "-y",
+            plan.remote_dir.as_str(),
         ];
         let output = self
             .transport
-            .exec(&self.cdb_program, &args, None, budget)
+            .exec_bounded(
+                &self.cdb_program,
+                &args,
+                None,
+                budget,
+                request
+                    .bounds
+                    .max_output_bytes
+                    .min(report::MAX_TRANSCRIPT_BYTES),
+            )
             .await
             .map_err(|err| AnalyzerError::Runner(format!("cdb execution failed: {err}")))?;
 
-        classify_output(&request.bounds, output)
+        let mut output = classify_output(&request.bounds, output)?;
+        // Mandatory evidence is now owned. Network symbol loading runs in a
+        // second CDB process, so its timeout cannot erase the saved baseline.
+        if output
+            .capture
+            .as_ref()
+            .is_some_and(|capture| !capture.evidence.iter().any(|e| e.id == "legacy-transcript"))
+        {
+            self.refine_symbols(request, plan, deadline, &mut output)
+                .await;
+        }
+        if let Some(capture) = &mut output.capture {
+            attach_dump_modules(capture, &request.dump_path);
+            self.qualify_pdbs(capture, deadline).await;
+            apply_symbol_quality(capture);
+            capture.root_cause = crate::assessment::assess(capture);
+        }
+        Ok(output)
     }
 
     /// Best-effort removal of the remote run directory (a wiped workspace is
     /// part of the security model); failures are logged, never propagated.
     async fn cleanup_remote(&self, remote_dir: &str) {
-        let response = self
-            .transport
-            .exec(
-                "rm",
-                &["-rf", &bash_path(remote_dir)],
-                None,
-                CLEANUP_TIMEOUT,
-            )
-            .await;
+        let remote_path = bash_path(remote_dir);
+        let response = tokio::time::timeout(
+            CLEANUP_TIMEOUT,
+            self.transport
+                .exec("rm", &["-rf", &remote_path], None, CLEANUP_TIMEOUT),
+        )
+        .await;
         match response {
-            Ok(output) if output.success() => {}
-            Ok(output) => {
-                tracing::warn!(
-                    remote_dir,
-                    status = ?output.status,
-                    "remote workspace cleanup failed"
-                );
-            }
-            Err(err) => {
-                tracing::warn!(remote_dir, error = %err, "remote workspace cleanup failed");
-            }
+            Err(_) => tracing::warn!(remote_dir, "remote workspace cleanup deadline expired"),
+            Ok(response) => match response {
+                Ok(output) if output.success() => {}
+                Ok(output) => {
+                    tracing::warn!(
+                        remote_dir,
+                        status = ?output.status,
+                        "remote workspace cleanup failed"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(remote_dir, error = %err, "remote workspace cleanup failed");
+                }
+            },
         }
     }
 }
@@ -1403,16 +1518,25 @@ impl<T: ExecTransport> SshCdbRunner<T> {
 #[async_trait]
 impl<T: ExecTransport> ToolRunner for SshCdbRunner<T> {
     async fn run(&self, request: RunRequest) -> Result<RunOutput> {
-        let plan = self.plan(&request)?;
         let deadline = Instant::now() + request.bounds.wall_timeout;
-
-        let budget = match remaining_budget("create remote workspace", deadline) {
-            Ok(budget) => budget,
-            Err(err) => return Err(err),
-        };
-        self.ensure_remote_dir(&plan.remote_dir, budget).await?;
-
-        let result = self.analyze(&request, &plan, deadline).await;
+        let plan = self.plan(&request)?;
+        let budget = remaining_budget("create remote workspace", deadline)?;
+        // The outer deadline also bounds put_file implementations, including
+        // their independently configured transfer timeout.
+        let result = tokio::time::timeout(budget, async {
+            self.ensure_remote_dir(
+                &plan.remote_dir,
+                remaining_budget("create remote workspace", deadline)?,
+            )
+            .await?;
+            self.analyze(&request, &plan, deadline).await
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(AnalyzerError::Runner(
+                "run wall-time budget exhausted during staging or execution".into(),
+            ))
+        });
         self.cleanup_remote(&plan.remote_dir).await;
         result
     }
@@ -1424,7 +1548,9 @@ struct RemotePlan {
     remote_dir: String,
     remote_dump: String,
     remote_script: String,
+    remote_symbols_script: String,
     local_script: PathBuf,
+    local_symbols_script: PathBuf,
     script: String,
 }
 
@@ -1438,17 +1564,25 @@ fn remaining_budget(stage: &str, deadline: Instant) -> Result<Duration> {
         })
 }
 
-/// The fixed, bounded v1 triage script (`.sympath`, `.reload`, `.ecxr`,
-/// `kc`, `lm`, `|`, `q`).
-fn triage_script(symbol_path: &str) -> String {
-    let mut script = String::new();
-    script.push_str("$$ DumpAnalyzer CDB triage script (v1)\n");
+/// Combined named script useful for authored fixtures and manual inspection.
+/// Production executes essential acquisition and optional symbol refinement in
+/// separate processes so symbol-loading failure preserves the baseline.
+pub fn triage_script(symbol_path: &str) -> String {
+    let mut script = String::from("$$ DumpAnalyzer CDB evidence script (v2)\n");
     let _ = writeln!(script, ".sympath {symbol_path}");
-    script.push_str(".reload\n");
-    script.push_str(".ecxr\n");
-    script.push_str("kc\n");
-    script.push_str("lm\n");
-    script.push_str("|\n");
+    // Every command has explicit markers; command echoes cannot become facts.
+    for (id, command) in [
+        ("target", "version; vertarget; ~; |"),
+        ("exception", ".exr -1"),
+        ("context", ".ecxr; ~.; r"),
+        ("instruction", "u @$ip L0n16"),
+        ("stack-before-symbols", "kn 0n128"),
+        ("symbols-load", ".lines -e; .reload /f"),
+        ("modules", "lmv"),
+        ("stack", ".lines -e; .ecxr; ~.; kn 0n128"),
+    ] {
+        let _ = writeln!(script, ".echo DA_BEGIN:{id}\n{command}\n.echo DA_END:{id}");
+    }
     script.push_str("q\n");
     script
 }
@@ -1526,7 +1660,10 @@ fn classify_output(bounds: &RunBounds, output: TransportOutput) -> Result<RunOut
         raw.extend_from_slice(&output.stderr);
     }
     let total = raw.len();
-    let (log, truncated) = truncate_utf8(raw, bounds.max_output_bytes);
+    let (log, truncated) = truncate_utf8(
+        raw,
+        bounds.max_output_bytes.min(report::MAX_TRANSCRIPT_BYTES),
+    );
 
     match parse_triage_inner(&log) {
         Ok(mut run_output) => {
@@ -1547,6 +1684,12 @@ fn classify_output(bounds: &RunBounds, output: TransportOutput) -> Result<RunOut
                 );
             }
             if truncated {
+                if let Some(capture) = &mut run_output.capture {
+                    capture.completeness.truncated = true;
+                    capture.completeness.omissions.push(
+                        "Combined debugger transcript exceeded the configured output budget".into(),
+                    );
+                }
                 run_output.summary = bounded(
                     format!(
                         "{} (CDB output truncated to {} bytes)",
@@ -1592,4 +1735,1373 @@ fn bounded(text: String, max_chars: usize) -> String {
     let mut out: String = text.chars().take(max_chars.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+// ---------------------------------------------------------------------------
+// Named, owned forensic evidence (v2)
+// ---------------------------------------------------------------------------
+
+fn canonical_address(text: &str) -> Option<String> {
+    let token = text
+        .trim()
+        .trim_end_matches([',', ':', ';'])
+        .trim_start_matches("0x");
+    let digits = token.replace('`', "");
+    if digits.is_empty() || digits.len() > 16 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("0x{}", digits.to_ascii_lowercase()))
+}
+
+fn section_command(id: &str) -> &str {
+    match id {
+        "target" => "version; vertarget; ~; |",
+        "exception" => ".exr -1",
+        "context" => ".ecxr; ~.; r",
+        "instruction" => "u @$ip L0n16",
+        "stack-before-symbols" => "kn 0n128",
+        "symbols-load" => ".lines -e; .reload /f",
+        "modules" => "lmv",
+        "modules-initial" => "lm",
+        "stack" => ".lines -e; .ecxr; ~.; kn 0n128",
+        _ => "legacy debugger transcript",
+    }
+}
+
+fn bounded_bytes(text: &str, cap: usize) -> String {
+    let mut end = text.len().min(cap);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
+}
+
+fn evidence_text(text: &str) -> (String, bool) {
+    let mut end = text.len().min(report::MAX_SECTION_BYTES);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (text[..end].to_owned(), end < text.len())
+}
+
+fn capture_sections(log: &str) -> (BTreeMap<String, String>, Vec<Evidence>, bool) {
+    let mut sections = BTreeMap::new();
+    let mut evidence = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    let mut truncated = false;
+    for line in log.lines() {
+        let line = line.trim_end();
+        if let Some(id) = line.strip_prefix("DA_BEGIN:") {
+            if let Some((id, body)) = current.take() {
+                let (text, _) = evidence_text(&body);
+                evidence.push(Evidence {
+                    id: id.clone(),
+                    command: section_command(&id).into(),
+                    status: CaptureStatus::Truncated,
+                    text,
+                    truncated: true,
+                    error: Some("Missing section end marker".into()),
+                });
+                sections.insert(id, body);
+                truncated = true;
+            }
+            if evidence.len() >= report::MAX_EVIDENCE || sections.contains_key(id) {
+                truncated = true;
+                continue;
+            }
+            if [
+                "target",
+                "exception",
+                "context",
+                "instruction",
+                "stack-before-symbols",
+                "symbols-load",
+                "modules",
+                "modules-initial",
+                "stack",
+            ]
+            .contains(&id)
+            {
+                current = Some((id.into(), String::new()));
+            }
+        } else if let Some(id) = line.strip_prefix("DA_END:") {
+            if current.as_ref().is_some_and(|(name, _)| name == id) {
+                let (id, body) = current.take().expect("checked section");
+                let (text, capped) = evidence_text(&body);
+                let lower = body.to_ascii_lowercase();
+                let failed = [
+                    "unable to get exception",
+                    "no exception record",
+                    "unable to read",
+                    "could not read",
+                    "memory access error",
+                    "couldn't resolve error",
+                ]
+                .iter()
+                .any(|m| lower.contains(m));
+                evidence.push(Evidence {
+                    id: id.clone(),
+                    command: section_command(&id).into(),
+                    status: if failed {
+                        CaptureStatus::Failed
+                    } else if capped {
+                        CaptureStatus::Truncated
+                    } else if body.trim().is_empty() {
+                        CaptureStatus::Absent
+                    } else {
+                        CaptureStatus::Present
+                    },
+                    text,
+                    truncated: capped,
+                    error: failed
+                        .then(|| "Debugger reported unavailable or unreadable evidence".into()),
+                });
+                sections.insert(id, body);
+                truncated |= capped;
+            }
+        } else if let Some((_, body)) = &mut current {
+            // Command echoes are metadata, not part of the acquired value.
+            if prompt_command(line).is_none() {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+    }
+    if let Some((id, body)) = current {
+        let (text, _) = evidence_text(&body);
+        evidence.push(Evidence {
+            id: id.clone(),
+            command: section_command(&id).into(),
+            status: CaptureStatus::Truncated,
+            text,
+            truncated: true,
+            error: Some("Missing section end marker".into()),
+        });
+        sections.insert(id, body);
+        truncated = true;
+    }
+    (sections, evidence, truncated)
+}
+
+/// Parse rich evidence without making debugger symbol labels into independent
+/// identity proofs. Old logs remain readable, with their missing fields marked.
+pub fn capture_triage(log: &str) -> ReportCapture {
+    let (mut sections, mut evidence, truncated) = capture_sections(log);
+    let named = !sections.is_empty();
+    let mut capture = ReportCapture::default();
+    capture.provenance.provider = "cdb-ssh".into();
+    capture.provenance.analysis_revision = "deterministic-cdb-v2.1".into();
+    capture.completeness.truncated = truncated;
+    if !named {
+        let (text, capped) = evidence_text(log);
+        evidence.push(Evidence {
+            id: "legacy-transcript".into(),
+            command: "legacy debugger transcript".into(),
+            status: CaptureStatus::Partial,
+            text,
+            truncated: capped,
+            error: None,
+        });
+        sections.insert("legacy-transcript".into(), log.into());
+        capture.completeness.omissions.push("Legacy unmarked transcript: complete exception record and section provenance were not captured".into());
+        capture.completeness.truncated |= capped;
+    }
+    capture.evidence = evidence;
+    if truncated {
+        capture
+            .completeness
+            .omissions
+            .push("One or more evidence excerpts or command sections were truncated".into());
+    }
+    let target = sections.get("target").map(String::as_str).unwrap_or(log);
+    for line in target.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("windows debugger version") {
+            capture.provenance.debugger_version = Some(line.trim().chars().take(256).collect());
+        }
+        if lower.contains("amd64") || lower.contains(" free x64") {
+            capture.provenance.architecture = Some("amd64".into());
+            capture.provenance.pointer_width = Some(64);
+        } else if lower.contains("arm64") {
+            capture.provenance.architecture = Some("arm64".into());
+            capture.provenance.pointer_width = Some(64);
+        } else if lower.contains(" free x86") || lower.contains(" x86") {
+            capture.provenance.architecture = Some("x86".into());
+            capture.provenance.pointer_width = Some(32);
+        }
+        if let Some(pid) = parse_process_id(line) {
+            capture.provenance.process_id = canonical_address(&pid);
+        }
+        if line.trim_start().starts_with('.')
+            && let Some((_, ids)) = line.split_once("Id:").or_else(|| line.split_once("id:"))
+        {
+            if let Some((_, tid)) = ids
+                .split_whitespace()
+                .next()
+                .and_then(|s| s.split_once('.'))
+            {
+                capture.context.thread_id = canonical_address(tid);
+            }
+        }
+    }
+    let fallback_id = "legacy-transcript";
+    let exr = sections.get("exception");
+    capture.exception = parse_exception_record(exr.map(String::as_str).unwrap_or(""), "exception");
+    if !named {
+        let parsed = scan_log(log);
+        capture.exception.code = parsed.exception_code;
+        capture.exception.address = parsed.exception_address;
+        capture.exception.status = CaptureStatus::Unavailable;
+        capture.exception.evidence_refs = vec![fallback_id.into()];
+    }
+    let context = sections
+        .get("context")
+        .map(String::as_str)
+        .unwrap_or(if named { "" } else { log });
+    let context_id = if named { "context" } else { fallback_id };
+    let context_failed = context
+        .to_ascii_lowercase()
+        .contains("unable to get exception")
+        || context
+            .to_ascii_lowercase()
+            .contains("no exception context");
+    // Capture the current OS thread identity alongside the saved context,
+    // rather than inferring it from a numbered stack-frame index.
+    for line in context.lines() {
+        if let Some((_, ids)) = line.split_once("Id:").or_else(|| line.split_once("id:")) {
+            if let Some((_, tid)) = ids
+                .split_whitespace()
+                .next()
+                .and_then(|s| s.split_once('.'))
+            {
+                capture.context.thread_id = canonical_address(tid);
+            }
+        }
+    }
+    capture.context.registers = parse_registers(context);
+    if !capture.context.registers.is_empty() {
+        capture.context.source = if named && !context_failed {
+            ContextSource::Exception
+        } else {
+            ContextSource::Initial
+        };
+        capture.context.evidence_refs = vec![context_id.into()];
+    }
+    let instruction = sections
+        .get("instruction")
+        .map(String::as_str)
+        .unwrap_or(if named { "" } else { log });
+    let instruction_id = if named { "instruction" } else { fallback_id };
+    capture.context.fault_instruction = parse_instruction(
+        instruction,
+        instruction_id,
+        capture.exception.address.as_deref(),
+    );
+    if let Some(instruction) = &mut capture.context.fault_instruction {
+        instruction.effective_address =
+            simple_effective_address(&instruction.disassembly, &capture.context.registers);
+    }
+    let module_section = if sections.contains_key("modules") {
+        "modules"
+    } else {
+        "modules-initial"
+    };
+    let modules = sections
+        .get(module_section)
+        .map(String::as_str)
+        .unwrap_or(if named { "" } else { log });
+    let module_id = if named { module_section } else { fallback_id };
+    let preliminary_text = sections
+        .get("stack")
+        .or_else(|| sections.get("stack-before-symbols"))
+        .map(String::as_str)
+        .unwrap_or(if named { "" } else { log });
+    let (referenced_frames, _, _) = parse_rich_frames(
+        preliminary_text,
+        "stack",
+        capture.provenance.architecture.as_deref(),
+        &[],
+        None,
+    );
+    let mut relevant: HashSet<String> = referenced_frames
+        .iter()
+        .filter_map(|f| f.module.as_deref())
+        .map(normalize_module)
+        .collect();
+    if let Some(address) = capture.exception.address.as_deref().and_then(parse_addr) {
+        for module in modules
+            .lines()
+            .filter_map(|line| parse_module_line(line.trim()))
+        {
+            if address >= module.start && address < module.end {
+                relevant.insert(normalize_module(&module.name));
+            }
+        }
+    }
+    let mut details = parse_detailed_modules(modules, module_id);
+    details.sort_by_key(|m| !relevant.contains(&normalize_module(&m.module)));
+    details.truncate(report::MAX_MODULES);
+    capture.symbols.modules = details;
+    let module_total = modules
+        .lines()
+        .filter_map(|line| parse_module_line(line.trim()))
+        .count();
+    if module_total > report::MAX_MODULES {
+        let omitted = module_total - report::MAX_MODULES;
+        capture.symbols.limitations.push(format!(
+            "{omitted} detailed module records omitted at the 64-module limit"
+        ));
+        capture
+            .completeness
+            .omissions
+            .push(format!("{omitted} module records omitted"));
+        capture.completeness.truncated = true;
+    }
+    capture.symbols.limitations.push("Debugger PDB labels alone are unverified; matching requires the dump RSDS identity and the loaded PDB Info stream identity".into());
+    let stack_id = if sections.contains_key("stack") {
+        "stack"
+    } else if sections.contains_key("stack-before-symbols") {
+        "stack-before-symbols"
+    } else {
+        fallback_id
+    };
+    let stack = sections.get(stack_id).map(String::as_str).unwrap_or("");
+    capture.stack.thread_id = capture.context.thread_id.clone();
+    let (frames, total, field_truncated) = parse_rich_frames(
+        stack,
+        stack_id,
+        capture.provenance.architecture.as_deref(),
+        &capture.symbols.modules,
+        if capture.context.source == ContextSource::Exception {
+            capture.exception.address.as_deref()
+        } else {
+            None
+        },
+    );
+    capture.stack.frames = frames;
+    if field_truncated {
+        capture.completeness.truncated = true;
+        capture.stack.limitations.push(
+            "Function/source labels exceeded their per-field bounds and were shortened".into(),
+        );
+    }
+    capture.stack.status = if total == 0 {
+        CaptureStatus::Unavailable
+    } else if total > report::MAX_FRAMES {
+        CaptureStatus::Truncated
+    } else {
+        CaptureStatus::Present
+    };
+    if total > report::MAX_FRAMES {
+        capture.stack.limitations.push(format!(
+            "{} additional frames omitted",
+            total - report::MAX_FRAMES
+        ));
+        capture.completeness.truncated = true;
+    } else if total == report::MAX_FRAMES {
+        capture
+            .stack
+            .limitations
+            .push("The debugger requested 128 frames; deeper frames were not requested".into());
+        capture.completeness.truncated = true;
+    }
+    if capture.context.source != ContextSource::Exception && total > 0 {
+        capture.stack.limitations.push("Stack belongs to the initial/fallback context because the saved exception context was unavailable".into());
+    }
+    if stack
+        .to_ascii_lowercase()
+        .contains("following frames may be wrong")
+        || stack
+            .to_ascii_lowercase()
+            .contains("stack unwind information not available")
+    {
+        capture.stack.status = CaptureStatus::Partial;
+        capture
+            .stack
+            .limitations
+            .push("Debugger reported unreliable or missing unwind information".into());
+        for frame in &mut capture.stack.frames {
+            frame.unwind = UnwindStatus::Unreliable;
+        }
+    }
+    if !named {
+        capture
+            .stack
+            .limitations
+            .push("Legacy stack may omit addresses and source locations".into());
+    }
+    for id in ["exception", "context", "instruction", "modules", "stack"] {
+        let available = sections.contains_key(id)
+            || (id == "modules" && sections.contains_key("modules-initial"))
+            || (id == "stack" && sections.contains_key("stack-before-symbols"));
+        if named && !available {
+            capture.completeness.omissions.push(format!(
+                "Required acquisition section {id} did not complete"
+            ));
+        }
+    }
+    apply_symbol_quality(&mut capture);
+    capture.root_cause = crate::assessment::assess(&capture);
+    capture
+}
+
+fn parse_exception_record(text: &str, id: &str) -> ExceptionRecord {
+    let mut record = ExceptionRecord {
+        status: CaptureStatus::Absent,
+        ..ExceptionRecord::default()
+    };
+    if text.is_empty() {
+        record.status = CaptureStatus::Unavailable;
+        return record;
+    }
+    record.evidence_refs.push(id.into());
+    let mut parameters = BTreeMap::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.trim().split_once(':') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let token = value.split_whitespace().next().unwrap_or_default();
+        match key.as_str() {
+            "exceptioncode" => record.code = canonical_address(token),
+            "exceptionflags" => record.flags = canonical_address(token),
+            "exceptionaddress" => record.address = canonical_address(token),
+            "exceptionrecord" => record.record_pointer = canonical_address(token),
+            "numberparameters" => {
+                record.parameter_count = token.parse::<u32>().ok().filter(|n| *n <= 15)
+            }
+            _ if key.starts_with("parameter[") => {
+                if let Some(index) = key
+                    .strip_prefix("parameter[")
+                    .and_then(|s| s.strip_suffix(']'))
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+                    .filter(|i| *i < 15)
+                    && let Some(value) = canonical_address(token)
+                {
+                    parameters.insert(index, value);
+                }
+            }
+            _ => (),
+        }
+    }
+    // Preserve order and refuse to shift later parameters into a missing slot.
+    for i in 0..record
+        .parameter_count
+        .unwrap_or(parameters.len() as u32)
+        .min(15) as usize
+    {
+        let Some(value) = parameters.get(&i) else {
+            break;
+        };
+        record.parameters.push(value.clone());
+    }
+    if record.code.is_some() {
+        record.status = if record.flags.is_some()
+            && record.address.is_some()
+            && record
+                .parameter_count
+                .is_some_and(|n| n as usize == record.parameters.len())
+        {
+            CaptureStatus::Present
+        } else {
+            CaptureStatus::Partial
+        };
+    } else if text.to_ascii_lowercase().contains("unable")
+        || text.to_ascii_lowercase().contains("error")
+    {
+        record.status = CaptureStatus::Failed;
+    }
+    if matches!(record.code.as_deref(), Some("0xc0000005" | "0xc0000006"))
+        && record.parameters.len() >= 2
+    {
+        let operation = match parse_addr(&record.parameters[0]) {
+            Some(0) => "read",
+            Some(1) => "write",
+            Some(8) => "execute",
+            _ => "unknown",
+        };
+        record.access = Some(AccessViolation {
+            operation: operation.into(),
+            address: record.parameters[1].clone(),
+            underlying_status: (record.code.as_deref() == Some("0xc0000006"))
+                .then(|| record.parameters.get(2).cloned())
+                .flatten(),
+        });
+    }
+    record
+}
+
+fn parse_registers(text: &str) -> BTreeMap<String, String> {
+    let mut registers = BTreeMap::new();
+    for token in text.split_whitespace() {
+        if let Some((name, value)) = token.split_once('=') {
+            let name = name.to_ascii_lowercase();
+            let known = [
+                "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip", "r8", "r9", "r10",
+                "r11", "r12", "r13", "r14", "r15", "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp",
+                "esp", "eip", "cs", "ss", "ds", "es", "fs", "gs", "efl", "eflags", "rflags", "sp",
+                "pc", "lr", "fp", "cpsr",
+            ]
+            .contains(&name.as_str())
+                || name
+                    .strip_prefix('x')
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .is_some_and(|n| n <= 30);
+            if known
+                && registers.len() < 80
+                && let Some(value) = canonical_address(value)
+            {
+                registers.insert(name, value);
+            }
+        }
+    }
+    registers
+}
+
+fn parse_instruction(text: &str, id: &str, wanted: Option<&str>) -> Option<FaultInstruction> {
+    let mut first = None;
+    for line in text.lines() {
+        let mut parts = line.trim().splitn(3, char::is_whitespace);
+        let Some(address) = parts.next().and_then(canonical_address) else {
+            continue;
+        };
+        let Some(rest) = parts.next().map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let remaining = parts.next().unwrap_or_default().trim();
+        let (bytes, disassembly) =
+            if rest.len() % 2 == 0 && rest.bytes().all(|b| b.is_ascii_hexdigit()) {
+                (Some(rest.to_ascii_lowercase()), remaining)
+            } else {
+                (None, remaining)
+            };
+        if disassembly.is_empty() {
+            continue;
+        }
+        let disassembly = disassembly.split(" ds:").next().unwrap_or(disassembly);
+        let instruction = FaultInstruction {
+            address: address.clone(),
+            bytes,
+            disassembly: disassembly.chars().take(1024).collect(),
+            effective_address: None,
+            evidence_refs: vec![id.into()],
+        };
+        if wanted.and_then(parse_addr) == parse_addr(&address) {
+            return Some(instruction);
+        }
+        if first.is_none() {
+            first = Some(instruction);
+        }
+    }
+    first
+}
+
+fn simple_effective_address(
+    disassembly: &str,
+    registers: &BTreeMap<String, String>,
+) -> Option<String> {
+    let start = disassembly.find('[')?;
+    let end = disassembly[start + 1..].find(']')? + start + 1;
+    registers
+        .get(&disassembly[start + 1..end].trim().to_ascii_lowercase())
+        .cloned()
+}
+
+fn parse_detailed_modules(text: &str, id: &str) -> Vec<ModuleSymbols> {
+    let mut modules: Vec<ModuleSymbols> = Vec::new();
+    for line in text.lines() {
+        if let Some(module) = parse_module_line(line.trim()) {
+            if modules.len() >= 8192 {
+                break;
+            }
+            let pdb_path = line
+                .rsplit_once(')')
+                .map(|(_, p)| p.trim())
+                .filter(|p| p.to_ascii_lowercase().ends_with(".pdb") && p.len() <= 2048)
+                .map(str::to_owned);
+            modules.push(ModuleSymbols {
+                module: module.name,
+                image_base: Some(format!("0x{:x}", module.start)),
+                image_size: Some(format!("0x{:x}", module.end - module.start)),
+                quality: match module.status {
+                    SymStatus::Export => SymbolQuality::ExportsOnly,
+                    SymStatus::NoSymbols => SymbolQuality::Missing,
+                    _ => SymbolQuality::Unverified,
+                },
+                pdb_path,
+                evidence_refs: vec![id.into()],
+                ..ModuleSymbols::default()
+            });
+        } else if let Some(module) = modules.last_mut() {
+            if let Some((key, value)) = line.trim().split_once(':') {
+                match key.trim().to_ascii_lowercase().as_str() {
+                    "timestamp" => {
+                        if let Some(value) = value
+                            .rsplit_once('(')
+                            .and_then(|(_, s)| s.strip_suffix(')'))
+                            .and_then(canonical_address)
+                        {
+                            module.timestamp = Some(value);
+                        }
+                    }
+                    "image size" | "imagesize" => {
+                        module.image_size = canonical_address(value.trim())
+                    }
+                    "loaded pdb file" | "pdb file" => {
+                        module.pdb_path = Some(bounded_bytes(value.trim(), 2048))
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+    modules
+}
+
+fn parse_rich_frames(
+    text: &str,
+    id: &str,
+    architecture: Option<&str>,
+    modules: &[ModuleSymbols],
+    fault_address: Option<&str>,
+) -> (Vec<StackFrame>, usize, bool) {
+    let mut frames = Vec::new();
+    let mut total = 0;
+    let mut field_truncated = false;
+    for line in text.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let mut frame = StackFrame {
+            index: total as u32,
+            unwind: UnwindStatus::Reported,
+            evidence_refs: vec![id.into()],
+            ..StackFrame::default()
+        };
+        let callsite;
+        if words.len() >= 4
+            && words[0].len() <= 3
+            && words[0].bytes().all(|b| b.is_ascii_hexdigit())
+            && is_frame_address(words[1])
+            && is_frame_address(words[2])
+        {
+            frame.index = u32::from_str_radix(words[0], 16).unwrap_or(total as u32);
+            if architecture == Some("x86") {
+                frame.frame_pointer = canonical_address(words[1]);
+            } else {
+                frame.stack_pointer = canonical_address(words[1]);
+            }
+            frame.return_address = canonical_address(words[2]);
+            let start = words
+                .iter()
+                .rposition(|s| *s == ":")
+                .map(|i| i + 1)
+                .unwrap_or(3);
+            let Some(site) = words.get(start) else {
+                continue;
+            };
+            callsite = *site;
+            if let Some(source) = line
+                .split_once('[')
+                .and_then(|(_, s)| s.rsplit_once(']').map(|(v, _)| v))
+            {
+                if let Some((file, number)) = source
+                    .rsplit_once(" @ ")
+                    .or_else(|| source.rsplit_once(':'))
+                {
+                    frame.source_line = number.trim().parse().ok();
+                    field_truncated |= file.trim().len() > 512;
+                    frame.source_file = Some(bounded_bytes(file.trim(), 512));
+                }
+            }
+        } else if words.len() == 1 && parse_clean_frame(words[0]).is_some() {
+            callsite = words[0];
+        } else {
+            continue;
+        }
+        if !is_call_site_like(callsite) {
+            continue;
+        }
+        frame.module = module_of_call_site(callsite);
+        if let Some((_, symbol)) = callsite.split_once('!') {
+            let (function, offset) = symbol
+                .rsplit_once("+0x")
+                .map(|(f, o)| (f, canonical_address(o)))
+                .unwrap_or((symbol, None));
+            field_truncated |= function.len() > 256;
+            frame.function = Some(bounded_bytes(function, 256));
+            frame.displacement = offset;
+        } else if let Some((_, offset)) = callsite.split_once("+0x") {
+            frame.module_rva = canonical_address(offset);
+        } else {
+            frame.instruction_pointer = canonical_address(callsite);
+        }
+        if total == 0 && frame.instruction_pointer.is_none() {
+            frame.instruction_pointer = fault_address.map(str::to_owned);
+        }
+        if let Some(module) = frame
+            .module
+            .as_deref()
+            .and_then(|name| modules.iter().find(|m| modules_eq(&m.module, name)))
+        {
+            frame.resolution = module.quality;
+        }
+        total += 1;
+        if frames.len() < report::MAX_FRAMES {
+            frames.push(frame);
+        }
+    }
+    (frames, total, field_truncated)
+}
+
+fn attach_dump_modules(capture: &mut ReportCapture, path: &Path) {
+    match crate::symbols::read_minidump_modules(path) {
+        Ok(modules) => {
+            for symbol in &mut capture.symbols.modules {
+                if let Some(module) = modules.iter().find(|module| {
+                    module.base
+                        == symbol
+                            .image_base
+                            .as_deref()
+                            .and_then(parse_addr)
+                            .unwrap_or(u64::MAX)
+                }) {
+                    symbol.expected_pdb = module.pdb.clone();
+                    symbol.evidence_refs.push("dump-module-identities".into());
+                    if symbol
+                        .timestamp
+                        .as_deref()
+                        .and_then(parse_addr)
+                        .is_some_and(|stamp| stamp != u64::from(module.timestamp))
+                        || symbol
+                            .image_size
+                            .as_deref()
+                            .and_then(parse_addr)
+                            .is_some_and(|size| size != u64::from(module.size))
+                    {
+                        symbol.quality = SymbolQuality::Mismatched;
+                        capture.symbols.limitations.push(format!(
+                            "{} image metadata differs from the minidump module identity",
+                            symbol.module
+                        ));
+                    }
+                }
+            }
+            let inventory: Vec<Value> = capture
+                .symbols
+                .modules
+                .iter()
+                .map(
+                    |m| json!({"module":m.module,"base":m.image_base,"expectedPdb":m.expected_pdb}),
+                )
+                .collect();
+            let raw = serde_json::to_string(
+                &json!({"dumpModuleCount":modules.len(),"selected":inventory}),
+            )
+            .unwrap_or_default();
+            let (text, truncated) = evidence_text(&raw);
+            capture.evidence.push(Evidence { id:"dump-module-identities".into(),command:"Read minidump ModuleList and RSDS CodeView identities from the SHA-256-verified pipeline input".into(),status:if truncated {CaptureStatus::Truncated}else{CaptureStatus::Present},text,truncated,error:None });
+            capture.completeness.truncated |= truncated;
+        }
+        Err(error) => {
+            capture
+                .symbols
+                .limitations
+                .push(format!("Expected PDB identity unavailable: {error}"));
+            capture.evidence.push(Evidence {
+                id: "dump-module-identities".into(),
+                command: "Read minidump ModuleList and RSDS CodeView identities".into(),
+                status: if error.contains("no module-list") {
+                    CaptureStatus::Absent
+                } else {
+                    CaptureStatus::Failed
+                },
+                text: String::new(),
+                truncated: false,
+                error: Some(bounded_bytes(&error, 1024)),
+            });
+        }
+    }
+}
+
+fn apply_symbol_quality(capture: &mut ReportCapture) {
+    for frame in &mut capture.stack.frames {
+        if let Some(module) = frame.module.as_deref().and_then(|name| {
+            capture
+                .symbols
+                .modules
+                .iter()
+                .find(|m| modules_eq(&m.module, name))
+        }) {
+            frame.resolution = module.quality;
+            if frame.index == 0 {
+                if let (Some(ip), Some(base), Some(size)) = (
+                    frame.instruction_pointer.as_deref().and_then(parse_addr),
+                    module.image_base.as_deref().and_then(parse_addr),
+                    module.image_size.as_deref().and_then(parse_addr),
+                ) {
+                    if let Some(rva) = ip.checked_sub(base).filter(|rva| *rva < size) {
+                        frame.module_rva = Some(format!("0x{rva:x}"));
+                    }
+                }
+            }
+            if module.quality == SymbolQuality::Mismatched {
+                frame.function = None;
+                frame.source_file = None;
+                frame.source_line = None;
+                frame.displacement = None;
+            }
+        }
+    }
+}
+
+fn local_pdb_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 7
+        && bytes.len() <= 2048
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+        && !path[2..].contains([':', '\0', '\r', '\n'])
+        && path.to_ascii_lowercase().ends_with(".pdb")
+}
+
+fn base64_utf16(text: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut result = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for part in bytes.chunks(3) {
+        let bits = (u32::from(part[0]) << 16)
+            | (u32::from(*part.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*part.get(2).unwrap_or(&0));
+        result.push(ALPHABET[((bits >> 18) & 63) as usize] as char);
+        result.push(ALPHABET[((bits >> 12) & 63) as usize] as char);
+        result.push(if part.len() > 1 {
+            ALPHABET[((bits >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        result.push(if part.len() > 2 {
+            ALPHABET[(bits & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    result
+}
+
+// Read only MSF header, bounded stream directory and 28 Info-stream bytes.
+// Paths arrive as escaped PowerShell literals inside EncodedCommand, never as
+// remote-shell syntax. The probe has no write operations and no shell tools.
+const PDB_METADATA_PROBE: &str = r#"
+$ErrorActionPreference='Stop'
+function U32($b,$n) { [BitConverter]::ToUInt32($b,$n) }
+function ReadAt($s,[long]$o,[int]$n) {
+ if($o -lt 0 -or $n -lt 0 -or $n -gt 8388608 -or $o+$n -gt $s.Length){throw 'PDB offset/budget'}
+ [void]$s.Seek($o,[IO.SeekOrigin]::Begin)
+ $b=New-Object byte[] $n; $read=0
+ while($read -lt $n){$got=$s.Read($b,$read,$n-$read);if($got -eq 0){throw 'short PDB'};$read+=$got}
+ return ,$b
+}
+function PdbIdentity($path) {
+ $drive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($path))
+ if($drive.DriveType -eq [IO.DriveType]::Network){throw 'Network PDB paths are disabled'}
+ $s=[IO.File]::OpenRead($path)
+ try {
+  $h=ReadAt $s 0 56
+  if([Text.Encoding]::ASCII.GetString($h,0,24) -ne 'Microsoft C/C++ MSF 7.00'){throw 'unsupported PDB'}
+  $page=[long](U32 $h 32);$length=[long](U32 $h 44);$map=[long](U32 $h 52)
+  if($page -lt 512 -or $page -gt 65536 -or ($page -band ($page-1)) -ne 0 -or $length -gt 8388608){throw 'PDB budget'}
+  $blocks=[int][Math]::Ceiling($length/$page)
+  if($blocks -gt $page/4){throw 'PDB directory map budget'}
+  $indices=ReadAt $s ($map*$page) ($blocks*4)
+  $directory=New-Object byte[] ([int]$length)
+  for($i=0;$i -lt $blocks;$i++){
+   $n=[int][Math]::Min($page,$length-$i*$page)
+   $part=ReadAt $s (([long](U32 $indices ($i*4)))*$page) $n
+   [Array]::Copy($part,0,$directory,[int]($i*$page),$n)
+  }
+  $count=[long](U32 $directory 0);$zero=[long](U32 $directory 4);$size=[long](U32 $directory 8)
+  if($count -lt 2 -or $count -gt 1000000 -or $size -lt 28 -or $size -eq 4294967295){throw 'PDB Info missing'}
+  $skip=0;if($zero -ne 4294967295){$skip=[long][Math]::Ceiling($zero/$page)}
+  $at=4+$count*4+$skip*4
+  if($at+4 -gt $directory.Length){throw 'PDB Info map missing'}
+  $info=ReadAt $s (([long](U32 $directory ([int]$at)))*$page) 28
+  $g=[guid]::new([byte[]]($info[12..27]))
+  return @{guid=$g.ToString('D');age=(U32 $info 8)}
+ } finally { $s.Dispose() }
+}
+"#;
+
+impl<T: ExecTransport> SshCdbRunner<T> {
+    async fn qualify_pdbs(&self, capture: &mut ReportCapture, deadline: Instant) {
+        let mut rejected_paths = 0;
+        let mut paths: Vec<(String, String)> = capture
+            .symbols
+            .modules
+            .iter()
+            .filter(|m| m.expected_pdb.is_some())
+            .filter_map(|m| {
+                let path = m.pdb_path.as_ref()?;
+                if !local_pdb_path(path) {
+                    rejected_paths += 1;
+                    return None;
+                }
+                Some((m.module.clone(), path.clone()))
+            })
+            .collect();
+        if rejected_paths > 0 {
+            capture.symbols.limitations.push(format!("{rejected_paths} PDB metadata path(s) rejected: only local absolute drive paths are permitted"));
+        }
+        if paths.is_empty() {
+            return;
+        }
+        let relevant: HashSet<String> = capture
+            .stack
+            .frames
+            .iter()
+            .filter_map(|f| f.module.as_deref())
+            .map(normalize_module)
+            .collect();
+        paths.sort_by_key(|(name, _)| !relevant.contains(&normalize_module(name)));
+        let Ok(remaining) = remaining_budget("PDB metadata probe", deadline) else {
+            capture
+                .symbols
+                .limitations
+                .push("PDB identity probe omitted: run deadline exhausted".into());
+            return;
+        };
+        let Some(budget) = remaining
+            .checked_sub(Duration::from_millis(50))
+            .filter(|b| *b > Duration::from_millis(50))
+        else {
+            capture.symbols.limitations.push(
+                "PDB identity probe omitted to preserve the acquired report at the run deadline"
+                    .into(),
+            );
+            return;
+        };
+        let budget = budget.min(Duration::from_secs(15));
+        let mut script = PDB_METADATA_PROBE.to_owned();
+        let mut omitted = 0;
+        for (module, path) in &paths {
+            let module = module.replace('\'', "''");
+            let path = path.replace('\'', "''");
+            // EncodedCommand must also fit Windows' command-line bound.
+            if script.len() + module.len() + path.len() + 300 > 8192 {
+                omitted += 1;
+                continue;
+            }
+            let _ = writeln!(
+                script,
+                "try {{$r=PdbIdentity '{path}';@{{module='{module}';guid=$r.guid;age=$r.age}}|ConvertTo-Json -Compress}} catch {{@{{module='{module}';error='PDB Info stream unavailable'}}|ConvertTo-Json -Compress}}"
+            );
+        }
+        if omitted > 0 {
+            capture.symbols.limitations.push(format!("{omitted} loaded-PDB probes omitted to fit the bounded remote command; stack-referenced modules are prioritized"));
+        }
+        let encoded = base64_utf16(&script);
+        let result = tokio::time::timeout(
+            budget,
+            self.transport.exec_bounded(
+                "powershell.exe",
+                &[
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-EncodedCommand",
+                    &encoded,
+                ],
+                None,
+                budget,
+                PDB_METADATA_OUTPUT_CAP,
+            ),
+        )
+        .await;
+        let output = match result {
+            Ok(Ok(output)) if output.success() => output,
+            _ => {
+                capture.symbols.limitations.push("Independent loaded-PDB identity acquisition failed or timed out; debugger labels remain unverified".into());
+                return;
+            }
+        };
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let (text, capped) = evidence_text(&raw);
+        let id = "pdb-info";
+        capture.evidence.push(Evidence { id:id.into(), command:"Read loaded PDB MSF7 Info stream 1 (GUID and age), read-only bounded metadata probe".into(),status:if capped {CaptureStatus::Truncated}else{CaptureStatus::Present},text,truncated:capped,error:None });
+        capture.completeness.truncated |= capped;
+        let mut verified_files = 0;
+        let mut failed_files = 0;
+        for line in raw.lines().take(report::MAX_MODULES) {
+            let Ok(value) =
+                serde_json::from_str::<Value>(line.trim().trim_start_matches('\u{feff}'))
+            else {
+                continue;
+            };
+            let Some(name) = value["module"].as_str() else {
+                continue;
+            };
+            if value["error"].is_string() {
+                failed_files += 1;
+            }
+            let Some(module) = capture
+                .symbols
+                .modules
+                .iter_mut()
+                .find(|m| m.module == name)
+            else {
+                continue;
+            };
+            let Some(guid) = value["guid"].as_str().filter(|s| {
+                s.len() == 36
+                    && s.bytes()
+                        .filter(|b| *b != b'-')
+                        .all(|b| b.is_ascii_hexdigit())
+            }) else {
+                continue;
+            };
+            let Some(age) = value["age"].as_u64().and_then(|n| u32::try_from(n).ok()) else {
+                continue;
+            };
+            verified_files += 1;
+            module.loaded_pdb = Some(report::PdbIdentity {
+                guid: guid.to_ascii_lowercase(),
+                age,
+            });
+            if module.quality != SymbolQuality::Mismatched {
+                module.quality = crate::symbols::qualify(
+                    module.expected_pdb.as_ref(),
+                    module.loaded_pdb.as_ref(),
+                    module.quality,
+                );
+            }
+            module.evidence_refs.push(id.into());
+        }
+        if failed_files > 0 || verified_files == 0 {
+            if let Some(evidence) = capture.evidence.iter_mut().find(|e| e.id == id) {
+                evidence.status = if verified_files == 0 {
+                    CaptureStatus::Failed
+                } else {
+                    CaptureStatus::Partial
+                };
+                evidence.error = Some(format!(
+                    "{failed_files} loaded-PDB metadata read(s) failed; {verified_files} identity record(s) acquired"
+                ));
+            }
+        }
+        for frame in &mut capture.stack.frames {
+            if let Some(module) = frame.module.as_deref().and_then(|name| {
+                capture
+                    .symbols
+                    .modules
+                    .iter()
+                    .find(|m| modules_eq(&m.module, name))
+            }) {
+                frame.resolution = module.quality;
+                // A mismatching PDB cannot supply qualified function/source
+                // attribution. Addresses and the command transcript survive.
+                if module.quality == SymbolQuality::Mismatched {
+                    frame.function = None;
+                    frame.source_file = None;
+                    frame.source_line = None;
+                    frame.displacement = None;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod process_tests {
+    use super::*;
+    #[test]
+    fn pdb_probe_accepts_local_drive_paths_and_rejects_remote_or_device_paths() {
+        assert!(local_pdb_path("D:/safe/symbols/app.pdb"));
+        assert!(local_pdb_path("C:\\symbols\\O'Brien.pdb"));
+        for path in [
+            "\\\\server\\share\\app.pdb",
+            "https://server/app.pdb",
+            "\\\\?\\D:\\app.pdb",
+            "D:/app:secret.pdb",
+            "D:/app\n.pdb",
+        ] {
+            assert!(!local_pdb_path(path), "{path}");
+        }
+    }
+    #[tokio::test]
+    async fn request_cap_limits_production_transport_configuration_and_actual_read() {
+        for (transport_cap, request_cap, expected) in [(32, 4, 4), (2, 4, 2)] {
+            let transport = SshTransport::new("unused-test-host")
+                .with_output_cap(transport_cap)
+                .for_output_cap(request_cap)
+                .unwrap();
+            let mut child = Command::new("sh")
+                .args(["-c", "printf '123456789'; exec sleep 30"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            let (stdout, stderr, _, capped) = tokio::time::timeout(
+                Duration::from_secs(1),
+                pump_child(&mut child, transport.output_cap),
+            )
+            .await
+            .expect("raw cap must kill promptly")
+            .unwrap();
+            assert_eq!(stdout.len(), expected);
+            assert!(stderr.is_empty());
+            assert!(capped);
+        }
+        assert!(
+            SshTransport::new("unused-test-host")
+                .for_output_cap(0)
+                .is_err()
+        );
+    }
+    #[tokio::test]
+    async fn capped_stdout_does_not_wait_for_stderr_eof() {
+        let mut child = Command::new("sh")
+            .args(["-c", "printf '123456789'; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (_, _, _, capped) =
+            tokio::time::timeout(Duration::from_secs(1), pump_child(&mut child, 4))
+                .await
+                .expect("cap must terminate promptly")
+                .unwrap();
+        assert!(capped);
+    }
+    #[tokio::test]
+    async fn capped_stderr_does_not_wait_for_stdout_eof() {
+        let mut child = Command::new("sh")
+            .args(["-c", "printf '123456789' >&2; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (_, _, _, capped) =
+            tokio::time::timeout(Duration::from_secs(1), pump_child(&mut child, 4))
+                .await
+                .expect("cap must terminate promptly")
+                .unwrap();
+        assert!(capped);
+    }
+    #[tokio::test]
+    async fn child_wait_after_stdout_eof_stays_inside_caller_deadline() {
+        let mut child = Command::new("sh")
+            .args(["-c", "exec 1>&-; exec 2>&-; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), pump_child(&mut child, 1024))
+                .await
+                .is_err()
+        );
+        let _ = child.kill().await;
+    }
+}
+
+/// Essential acquisition deliberately has no HTTP symbol path. `-y` points at
+/// the per-run workspace, which contains only the staged dump and scripts.
+/// Symbol refinement runs separately after this process has returned evidence.
+pub fn essential_script() -> String {
+    let mut script = String::from("$$ DumpAnalyzer essential evidence (v2)\n");
+    for (id, command) in [
+        ("target", "version; vertarget; ~; |"),
+        ("exception", ".exr -1"),
+        ("context", ".ecxr; ~.; r"),
+        ("instruction", "u @$ip L0n16"),
+        ("stack-before-symbols", "kn 0n128"),
+        ("modules-initial", "lm"),
+    ] {
+        let _ = writeln!(script, ".echo DA_BEGIN:{id}\n{command}\n.echo DA_END:{id}");
+    }
+    script.push_str("q\n");
+    script
+}
+fn symbols_script(path: &str) -> String {
+    let mut script = String::from("$$ DumpAnalyzer optional symbol refinement (v2)\n");
+    let _ = writeln!(script, ".sympath {path}");
+    for (id, command) in [
+        ("symbols-load", ".lines -e; .reload /f"),
+        ("modules", "lmv"),
+        ("stack", ".lines -e; .ecxr; ~.; kn 0n128"),
+    ] {
+        let _ = writeln!(script, ".echo DA_BEGIN:{id}\n{command}\n.echo DA_END:{id}");
+    }
+    script.push_str("q\n");
+    script
+}
+impl<T: ExecTransport> SshCdbRunner<T> {
+    async fn refine_symbols(
+        &self,
+        request: &RunRequest,
+        plan: &RemotePlan,
+        deadline: Instant,
+        baseline: &mut RunOutput,
+    ) {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or_default();
+        let Some(budget) = remaining
+            .checked_sub(Duration::from_millis(100))
+            .filter(|b| !b.is_zero())
+        else {
+            mark_refinement_failure(
+                baseline,
+                CaptureStatus::TimedOut,
+                "Optional symbol refinement omitted: acquisition consumed the run budget",
+            );
+            return;
+        };
+        let transcript_limit = request
+            .bounds
+            .max_output_bytes
+            .min(report::MAX_TRANSCRIPT_BYTES);
+        let baseline_bytes = baseline.facts["log"]["bytes"]
+            .as_u64()
+            .unwrap_or(0)
+            .min(usize::MAX as u64) as usize;
+        let mut optional_bounds = request.bounds;
+        optional_bounds.max_output_bytes = transcript_limit.saturating_sub(baseline_bytes);
+        if optional_bounds.max_output_bytes == 0 {
+            mark_refinement_failure(
+                baseline,
+                CaptureStatus::Truncated,
+                "Optional symbol refinement omitted: essential output exhausted the shared transcript budget",
+            );
+            return;
+        }
+        let result = tokio::time::timeout(budget, async {
+            tokio::fs::write(
+                &plan.local_symbols_script,
+                symbols_script(&request.symbol_path),
+            )
+            .await
+            .map_err(|e| AnalyzerError::Runner(format!("writing optional symbol script: {e}")))?;
+            self.transport
+                .put_file(&plan.local_symbols_script, &plan.remote_symbols_script)
+                .await?;
+            let output = self
+                .transport
+                .exec_bounded(
+                    &self.cdb_program,
+                    &[
+                        "-z",
+                        &plan.remote_dump,
+                        "-cf",
+                        &plan.remote_symbols_script,
+                        "-y",
+                        &plan.remote_dir,
+                    ],
+                    None,
+                    budget,
+                    optional_bounds.max_output_bytes,
+                )
+                .await?;
+            classify_output(&optional_bounds, output)
+        })
+        .await;
+        let optional = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(error)) => {
+                mark_refinement_failure(
+                    baseline,
+                    CaptureStatus::Failed,
+                    &format!("Optional symbol refinement failed: {error}"),
+                );
+                return;
+            }
+            Err(_) => {
+                mark_refinement_failure(
+                    baseline,
+                    CaptureStatus::TimedOut,
+                    "Optional symbol refinement timed out; essential exception/context/stack evidence is retained",
+                );
+                return;
+            }
+        };
+        let Some(mut extra) = optional.capture else {
+            mark_refinement_failure(
+                baseline,
+                CaptureStatus::Failed,
+                "Optional symbol refinement produced no structured evidence",
+            );
+            return;
+        };
+        let Some(capture) = &mut baseline.capture else {
+            return;
+        };
+        if !extra.symbols.modules.is_empty() {
+            capture.symbols = extra.symbols;
+        }
+        if !extra.stack.frames.is_empty() {
+            extra.stack.thread_id = capture.context.thread_id.clone();
+            if capture.context.source == ContextSource::Exception {
+                extra
+                    .stack
+                    .limitations
+                    .retain(|s| !s.starts_with("Stack belongs to the initial/fallback context"));
+            }
+            if let Some(frame) = extra.stack.frames.first_mut() {
+                frame.instruction_pointer = if capture.context.source == ContextSource::Exception {
+                    capture.exception.address.clone()
+                } else {
+                    None
+                };
+            }
+            capture.stack = extra.stack;
+        } else {
+            capture.stack.limitations.push(
+                "Symbol refinement produced no final stack; preliminary addresses retained".into(),
+            );
+        }
+        for evidence in extra
+            .evidence
+            .into_iter()
+            .filter(|e| ["symbols-load", "modules", "stack"].contains(&e.id.as_str()))
+        {
+            capture.evidence.retain(|e| e.id != evidence.id);
+            capture.evidence.push(evidence);
+        }
+        capture.completeness.truncated |= extra.completeness.truncated;
+        if extra.completeness.truncated {
+            capture
+                .completeness
+                .omissions
+                .push("Optional symbol-refinement output was truncated".into());
+        }
+        // Keep baseline outcome: a missing-symbol assessment cannot erase the
+        // acquired exception. Full qualification is represented by each frame.
+        baseline.summary = optional.summary;
+        baseline.facts = optional.facts;
+    }
+}
+fn mark_refinement_failure(baseline: &mut RunOutput, status: CaptureStatus, message: &str) {
+    if let Some(capture) = &mut baseline.capture {
+        capture
+            .completeness
+            .omissions
+            .push(bounded_bytes(message, 1024));
+        capture
+            .stack
+            .limitations
+            .push("Final symbol-resolved stack unavailable; preliminary stack retained".into());
+        capture.evidence.retain(|e| e.id != "symbols-load");
+        capture.evidence.push(Evidence {
+            id: "symbols-load".into(),
+            command: "Optional .reload /f, lmv, and final numbered stack in a separate CDB process"
+                .into(),
+            status,
+            text: String::new(),
+            truncated: false,
+            error: Some(bounded_bytes(message, 1024)),
+        });
+    }
 }

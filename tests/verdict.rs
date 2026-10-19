@@ -104,6 +104,7 @@ fn identity_for(dump_id: &str, kind: &str) -> JobIdentity {
 
 fn run_output(summary: impl Into<String>, facts: Value) -> RunOutput {
     RunOutput {
+        capture: None,
         outcome: ReportOutcome::Completed,
         summary: summary.into(),
         facts,
@@ -788,6 +789,7 @@ fn verdict_assemble_enforces_the_4kib_facts_budget() {
         "frames": big,
     });
     let output = RunOutput {
+        capture: None,
         outcome: ReportOutcome::Completed,
         summary: "bounded".to_string(),
         facts,
@@ -810,6 +812,7 @@ fn verdict_assemble_facts_budget_alone_can_absent_facts() {
     // an empty object, which becomes absent.
     let facts = serde_json::json!({ "frames": "x".repeat(5000) });
     let output = RunOutput {
+        capture: None,
         outcome: ReportOutcome::Completed,
         summary: "bounded".to_string(),
         facts,
@@ -1028,6 +1031,7 @@ async fn verdict_local_sink_records_and_settles_without_any_http() {
         &sink,
         &identity,
         RunOutput {
+            capture: None,
             outcome: ReportOutcome::Completed,
             summary: "local only".to_string(),
             facts: json!({ "k": 1 }),
@@ -1141,4 +1145,264 @@ async fn verdict_boot_requeues_reportless_job_without_waiting_for_the_ledger() {
         .unwrap();
     assert_eq!(report.unresolved, vec![identity]);
     assert_job_phase(&harness.store, JobPhase::Discovered);
+}
+
+fn prepare_rich(h: &Harness) -> (dump_analyzer::state::StoredReport, AnalysisReportSubmission) {
+    let job = identity();
+    h.store.jobs().upsert_discovered(&job).unwrap();
+    h.store.jobs().set_phase(&job, JobPhase::Analyzing).unwrap();
+    verdict::prepare_report(
+        &h.store,
+        &job,
+        &run_output("Rich report; cause unknown", json!({})),
+        &h.config,
+        dump_analyzer::state::ReportHandoff::Scheduled,
+    )
+    .unwrap()
+}
+fn rich_ack(submission: &AnalysisReportSubmission) -> Value {
+    let mut ack = analysis_report();
+    ack["summary"] = json!(submission.summary);
+    ack["outcome"] = json!(submission.outcome);
+    ack["facts"] = json!(submission.facts);
+    ack
+}
+fn rich_v2_ack(
+    submission: &AnalysisReportSubmission,
+    stored: &dump_analyzer::state::StoredReport,
+) -> Value {
+    let mut ack = rich_ack(submission);
+    ack["reportJson"] = json!(stored.report_json);
+    ack["reportDigest"] = json!(stored.digest);
+    ack
+}
+
+#[tokio::test]
+async fn rich_summary_fallback_later_promotes_full_detail_without_losing_it() {
+    use dump_analyzer::state::FullDelivery;
+    let h = harness().await;
+    let (stored, compact) = prepare_rich(&h);
+    Mock::given(method("POST"))
+        .and(path(analyses_path()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(rich_ack(&compact)))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    let client = LedgerClient::new(&h.config).unwrap();
+    // Unregistered v2 route is the old-server fallback.
+    verdict::submit(&client, &h.store, &identity(), &compact)
+        .await
+        .unwrap();
+    assert!(
+        h.store
+            .local_reports()
+            .get(&identity())
+            .unwrap()
+            .unwrap()
+            .posted
+    );
+    assert_eq!(
+        h.store
+            .local_reports()
+            .get_rich(&identity())
+            .unwrap()
+            .unwrap()
+            .delivery,
+        FullDelivery::SummaryOnly
+    );
+    assert_eq!(
+        h.store.jobs().phase_of(&identity()).unwrap(),
+        Some(JobPhase::Done)
+    );
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v2/dumps/{DUMP_ID}/analyses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rich_v2_ack(&compact, &stored)))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    verdict::replay_pending(&client, &h.store, &h.config)
+        .await
+        .unwrap();
+    let delivered = h
+        .store
+        .local_reports()
+        .get_rich(&identity())
+        .unwrap()
+        .unwrap();
+    assert_eq!(delivered.delivery, FullDelivery::FullyDelivered);
+    assert_eq!(delivered.report_json, stored.report_json);
+}
+
+#[tokio::test]
+async fn rich_ack_loss_replays_exact_document_and_rejects_wrong_ack_identity() {
+    use dump_analyzer::state::FullDelivery;
+    let h = harness().await;
+    let (stored, compact) = prepare_rich(&h);
+    let v2 = format!("/api/v2/dumps/{DUMP_ID}/analyses");
+    Mock::given(method("POST"))
+        .and(path(&v2))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&h.server)
+        .await;
+    let client = LedgerClient::new(&h.config).unwrap();
+    assert!(
+        verdict::submit(&client, &h.store, &identity(), &compact)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        h.store
+            .local_reports()
+            .get_rich(&identity())
+            .unwrap()
+            .unwrap()
+            .delivery,
+        FullDelivery::PendingFull
+    );
+    h.server.reset().await;
+    Mock::given(method("POST"))
+        .and(path(&v2))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rich_v2_ack(&compact, &stored)))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    verdict::replay_pending(&client, &h.store, &h.config)
+        .await
+        .unwrap();
+    let request = h.server.received_requests().await.unwrap().pop().unwrap();
+    let body: Value = serde_json::from_slice(&request.body).unwrap();
+    assert_eq!(body["reportJson"], stored.report_json);
+    assert_eq!(body["reportDigest"], stored.digest);
+    assert_eq!(
+        h.store.jobs().phase_of(&identity()).unwrap(),
+        Some(JobPhase::Done)
+    );
+    h.server.reset().await;
+    let mut wrong = rich_v2_ack(&compact, &stored);
+    wrong["inputSha256"] = json!("b".repeat(64));
+    Mock::given(method("POST"))
+        .and(path(&v2))
+        .respond_with(ResponseTemplate::new(200).set_body_json(wrong))
+        .mount(&h.server)
+        .await;
+    assert!(matches!(
+        client.post_rich_analysis(&stored, &compact).await,
+        Err(AnalyzerError::Integrity(_))
+    ));
+}
+
+#[tokio::test]
+async fn rich_remote_read_checks_digest_and_preserves_document() {
+    let h = harness().await;
+    let (stored, compact) = prepare_rich(&h);
+    let endpoint = format!("/api/v2/dumps/{DUMP_ID}/analyses/analysis_01JABC001");
+    Mock::given(method("GET"))
+        .and(path(&endpoint))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rich_v2_ack(&compact, &stored)))
+        .mount(&h.server)
+        .await;
+    let client = LedgerClient::new(&h.config).unwrap();
+    assert_eq!(
+        client
+            .get_rich_report(DUMP_ID, "analysis_01JABC001")
+            .await
+            .unwrap(),
+        stored.report
+    );
+    h.server.reset().await;
+    let mut invalid_digest = rich_v2_ack(&compact, &stored);
+    invalid_digest["reportDigest"] = json!("b".repeat(64));
+    Mock::given(method("GET"))
+        .and(path(&endpoint))
+        .respond_with(ResponseTemplate::new(200).set_body_json(invalid_digest))
+        .mount(&h.server)
+        .await;
+    assert!(matches!(
+        client.get_rich_report(DUMP_ID, "analysis_01JABC001").await,
+        Err(AnalyzerError::Integrity(_))
+    ));
+}
+
+#[tokio::test]
+async fn rich_prepare_rejects_conflicting_fresh_capture_without_hiding_it() {
+    let h = harness().await;
+    let (original, _) = prepare_rich(&h);
+    let mut changed_capture = original.report.capture.clone();
+    changed_capture
+        .completeness
+        .omissions
+        .push("Different evidence from a concurrent run".into());
+    let changed = RunOutput {
+        outcome: original.report.outcome,
+        summary: original.report.summary.clone(),
+        facts: json!({}),
+        capture: Some(changed_capture),
+    };
+    let result = verdict::prepare_report(
+        &h.store,
+        &identity(),
+        &changed,
+        &h.config,
+        dump_analyzer::state::ReportHandoff::Scheduled,
+    );
+    assert!(
+        matches!(result, Err(AnalyzerError::Integrity(_))),
+        "fresh contradictory output must be an explicit conflict"
+    );
+    assert_eq!(
+        h.store.local_reports().get_rich(&identity()).unwrap(),
+        Some(original)
+    );
+    assert_eq!(
+        h.store.jobs().phase_of(&identity()).unwrap(),
+        Some(JobPhase::Reporting)
+    );
+}
+
+#[tokio::test]
+async fn rich_terminal_v1_fallback_abandons_full_delivery_and_settles_queue() {
+    use dump_analyzer::state::FullDelivery;
+    for (status, code, expected) in [
+        (400, "invalid_request", JobPhase::Failed),
+        (404, "not_found", JobPhase::Dropped),
+        (410, "gone", JobPhase::Dropped),
+        (409, "conflict", JobPhase::Failed),
+    ] {
+        let h = harness().await;
+        let (_, compact) = prepare_rich(&h);
+        // v2 is absent; v1 exists but permanently rejects this report.
+        Mock::given(method("POST"))
+            .and(path(analyses_path()))
+            .respond_with(ResponseTemplate::new(status).set_body_json(error_envelope(code)))
+            .expect(1)
+            .mount(&h.server)
+            .await;
+        let client = LedgerClient::new(&h.config).unwrap();
+        verdict::submit(&client, &h.store, &identity(), &compact)
+            .await
+            .unwrap();
+        assert_eq!(
+            h.store
+                .local_reports()
+                .get_rich(&identity())
+                .unwrap()
+                .unwrap()
+                .delivery,
+            FullDelivery::Abandoned,
+            "status {status}"
+        );
+        assert!(
+            h.store.local_reports().pending_full().unwrap().is_empty(),
+            "status {status}"
+        );
+        assert_eq!(
+            h.store.jobs().phase_of(&identity()).unwrap(),
+            Some(expected),
+            "status {status}"
+        );
+        assert!(
+            h.store.jobs().work_queue().unwrap().is_empty(),
+            "status {status}"
+        );
+    }
 }

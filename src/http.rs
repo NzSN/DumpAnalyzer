@@ -21,7 +21,7 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::analyzer::{AnalysisScope, AnalyzeError, Report, ScopeReport};
 use crate::client::LedgerClient;
 use crate::config::Config;
-use crate::state::{JobRow, LocalReport, Store};
+use crate::state::{JobRow, Store};
 use crate::sync::{CancellationToken, initial_scan};
 use crate::types::{AnalyzerError, Result};
 
@@ -136,7 +136,7 @@ pub async fn serve(
     let local = listener
         .local_addr()
         .map_err(|err| AnalyzerError::State(format!("status UI local address: {err}")))?;
-    tracing::info!(%local, "status UI listening (read-only, GET only)");
+    tracing::info!(%local, "dashboard listening (read views and explicit analysis actions)");
     serve_listener(listener, Arc::new(context), shutdown).await
 }
 
@@ -404,6 +404,43 @@ async fn route(request: &Request, context: &UiContext) -> Response {
             }),
         ),
         ("GET", "/api/status") => json_response(200, status_json(context)),
+        ("GET", detail_path) if detail_path.starts_with("/api/reports/") => {
+            if request.path.contains('?') {
+                return invalid_query();
+            }
+            let suffix = &detail_path["/api/reports/".len()..];
+            let segments: Vec<&str> = suffix.split('/').collect();
+            let report_id = segments[0];
+            if report_id.len() > 80
+                || !report_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                return invalid_query();
+            }
+            match context.store.local_reports().get_detail(report_id) {
+                Ok(Some(detail)) => {
+                    let value = detail_json(detail);
+                    if segments.len() == 1 {
+                        json_response(200, value)
+                    } else if segments.len() == 3 && segments[1] == "evidence" {
+                        let found = value["report"]["evidence"].as_array().and_then(|entries| {
+                            entries
+                                .iter()
+                                .find(|entry| entry["id"].as_str() == Some(segments[2]))
+                        });
+                        match found {
+                            Some(evidence) => json_response(200, evidence.clone()),
+                            None => json_response(404, json!({"error":"evidence_not_found"})),
+                        }
+                    } else {
+                        json_response(404, json!({"error":"not_found"}))
+                    }
+                }
+                Ok(None) => json_response(404, json!({"error":"report_not_found"})),
+                Err(err) => json_response(500, json!({"error":format!("state: {err}")})),
+            }
+        }
         ("GET", "/api/jobs") => match queue_jobs(context) {
             Ok(jobs) => json_response(200, json!({ "jobs": jobs_json(&jobs) })),
             Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
@@ -1144,7 +1181,7 @@ fn jobs_json(jobs: &[JobRow]) -> Vec<Json> {
         .collect()
 }
 
-fn reports_json(reports: &[LocalReport]) -> Vec<Json> {
+fn reports_json(reports: &[crate::state::ReportListRow]) -> Vec<Json> {
     reports
         .iter()
         .map(|report| {
@@ -1159,9 +1196,30 @@ fn reports_json(reports: &[LocalReport]) -> Vec<Json> {
                 "posted": report.posted,
                 "createdAt": report.created_at,
                 "summary": report.summary,
+                "reportId": report.report_id,
+                "schemaVersion": report.schema_version,
+                "detailAvailable": report.detail_available,
+                "fullDelivery": report.full_delivery,
             })
         })
         .collect()
+}
+
+fn detail_json(detail: crate::state::ReportDetail) -> Json {
+    match detail {
+        crate::state::ReportDetail::Rich(stored) => json!({
+            "reportId":stored.report.report_id,"schemaVersion":2,"detailAvailable":true,
+            "fullDelivery":stored.delivery,"digest":stored.digest,"report":stored.report,
+            "legacy":null,"warning":null,
+        }),
+        crate::state::ReportDetail::Legacy(row) => json!({
+            "reportId":crate::report::legacy_id(&row.identity()),"schemaVersion":1,"detailAvailable":false,
+            "fullDelivery":if row.posted {"summaryOnly"} else {"localOnly"},"digest":null,"report":null,
+            "legacy":{"identity":row.identity(),"outcome":row.outcome,"summary":row.summary,
+                "facts":serde_json::from_str::<Json>(&row.facts_json).unwrap_or(Json::Null),"createdAt":row.created_at,"posted":row.posted},
+            "warning":"Legacy report — detailed sections were not captured",
+        }),
+    }
 }
 
 fn phase_name(phase: crate::types::JobPhase) -> &'static str {

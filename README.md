@@ -5,6 +5,9 @@ daemon that discovers Windows minidumps through the DumpLedger catalog,
 analyzes them with an internal agent (CDB toolchain on a Windows analysis
 box via SSH), and writes verdicts back as analysis reports.
 
+Architecture baseline: [block, control-flow and data-flow diagrams](docs/architecture.md)
+([rendered view](docs/architecture.html)).
+Rich reports: [capture, evidence, detail API, delivery, and rollout](docs/rich-reports.md).
 Design: [`docs/analyzer-design.md`](docs/analyzer-design.md).
 Formal model of the job lifecycle: [`specs/DumpAnalyzer.tla`](specs/DumpAnalyzer.tla)
 (TLC-clean; see the design doc for the bounded evidence).
@@ -38,7 +41,10 @@ export DUMP_ANALYZER_TOKEN='<analyzer bearer token>'   # sha256 goes to the serv
 # UI's action auth uses it immediately; the daemon's server-side pipeline
 # picks it up at the next boot.
 export DUMP_ANALYZER_SSH_TARGET='windows-dev'          # Windows analysis box running CDB
-export DUMP_ANALYZER_SYMBOL_CACHE_DIR='C:/symcache'    # on the analysis box
+export DUMP_ANALYZER_SYMBOL_CACHE_DIR='C:\symcache'  # on the analysis box;
+# symsrv requires the Windows-native backslash form (C:/symcache makes dbghelp
+# reject the store as "not a valid store"). In a systemd EnvironmentFile the
+# backslash must be doubled: DUMP_ANALYZER_SYMBOL_CACHE_DIR=C:\\symcache
 dump-analyzer
 ```
 
@@ -56,15 +62,20 @@ The token never appears in logs, errors, or URLs.
 
 The agent's analysis backend is selected with `DUMP_ANALYZER_RUNNER`:
 
-- **`cdb-ssh`** (default): a deterministic CDB triage script runs on the
-  analysis box over SSH (`src/runner.rs`).
-- **`claude-cdb`**: the `claude` CLI drives CDB agentically over SSH
-  (`src/claude_runner.rs`). The dump is staged to the box first; claude runs
-  in `--restricted` mode with only `Bash` re-enabled and only
-  `Bash(ssh:*)`/`Bash(scp:*)` pre-approved, cwd pinned to the per-run
-  workspace, no session persistence, output forced through a JSON schema into
-  the report contract. Unparseable output, timeouts, and spawn failures are
-  runner errors (bounded retry), never verdicts.
+- **`cdb-ssh`** (default): deterministic CDB collection runs over SSH
+  (`src/runner.rs`). Essential exception/context evidence is collected before
+  optional symbol refinement. A symbol-stage failure preserves that evidence.
+- **`claude-cdb`**: the same deterministic collector runs first, then a
+  persistent, isolated Claude host assesses bounded captured evidence
+  (`src/claude_runner.rs`). Tools and MCP servers are disabled; every tool
+  request is denied. Malformed or unavailable reasoning leaves the captured
+  report readable, with a deterministic assessment and an explicit omission.
+
+Both produce the same canonical report: exception record/context, qualified
+native stack, module/PDB evidence and an assessment separating the immediate
+mechanism from the underlying cause. Full evidence is saved before generating
+the compact v1 verdict. The default analyzer version is now `0.2.0`; legacy
+reports remain readable and require a new version for detailed reanalysis.
 
 ```sh
 export DUMP_ANALYZER_RUNNER='claude-cdb'
@@ -73,8 +84,10 @@ export DUMP_ANALYZER_CLAUDE_MODEL=''            # optional override
 # claude itself needs its own auth (subscription or API key) on this host.
 ```
 
-Both providers require `DUMP_ANALYZER_SSH_TARGET` (the Windows analysis box)
-and honor the same `RunBounds` (wall timeout, output cap, workspace cap).
+Both providers require `DUMP_ANALYZER_SSH_TARGET` (the Windows analysis box).
+Run bounds cover local staging/execution waits and captured output; cleanup has
+a separate two-second grace. Killing local SSH does not prove remote CDB
+termination. See the rich-report guide for the precise containment limits.
 
 ## On-demand analysis
 
@@ -134,7 +147,8 @@ transient budget exhausted · `500` terminal.
 The dashboard has separate **Queue**, **Dumps**, **Reports**, and **Settings**
 panels. Queue shows current analysis work. Dumps navigates from customers to
 cases to a page of dumps. Reports has search, outcome/delivery filters, and
-expandable summary details. Settings holds credentials, manual actions, and
+lazy full detail with stack, exception/context, assessment and evidence.
+Settings holds credentials, manual actions, and
 diagnostics. The listener binds to loopback by default:
 
 ```sh
@@ -166,7 +180,9 @@ receives one page and analysis state is read only for returned dumps.
 `delivery` (`all`, `pending`, `posted`), `page`, and `pageSize`. It returns the
 page, matching count, complete report count, and pending count. Both page APIs
 default to 25 rows and accept sizes from 1 through 100. Search/filter changes
-reset the page, and summaries remain compact until Details is opened.
+reset the page. Details loads only the selected `GET /api/reports/:reportId`;
+the paged list never loads canonical evidence JSON. Legacy reports are explicitly
+labelled when detailed evidence was not captured.
 
 Catalog and report errors stay inside their panels, retaining the last loaded
 results. Browsing never starts analysis. A manual run appears in Jobs while
