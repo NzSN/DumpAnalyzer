@@ -122,6 +122,22 @@ pending report replay runs every 60 seconds, even while automatic execution is
 disabled or busy. SIGTERM/SIGINT cancels the loops; the scheduler drains its
 current bounded run before exiting. This is distinct from crash recovery.
 
+### Webhook tap
+
+`DUMP_ANALYZER_WEBHOOK=on` adds a low-latency discovery tap beside the feed
+follower. At boot the daemon self-registers at the ledger through the WH2
+webhook-admin bearer (`GET`/`POST`/`DELETE /api/v1/webhooks`), reusing the
+subscription for its `DUMP_ANALYZER_WEBHOOK_URL` and rotating it only when the
+locally stored signing secret is missing; failure is logged and retried on a
+slow cadence without touching the pipeline. Deliveries arrive on
+`POST /webhooks`, are verified as HMAC-SHA256 over the raw body against that
+secret (`X-DumpLedger-Signature-256`, constant-time compare; absent or invalid
+signatures answer 401, malformed events 400, registration outstanding 503),
+then decoded as feed events and applied through the same idempotent
+`apply_event` path. The webhook never advances the feed cursor and is not a
+delivery guarantee: the feed follower remains the resumable truth. The route
+needs `DUMP_ANALYZER_HTTP_ADDR` reachable from the ledger host.
+
 ## Capture and report handoff
 
 Scheduled execution follows persisted phases

@@ -50,10 +50,10 @@ use serde::de::DeserializeOwned;
 use crate::config::Config;
 use crate::types::{AnalyzerError, Result};
 use crate::wire::{
-    AnalysisReport, AnalysisReportSubmission, CustomerListResponse, CustomerSummary,
-    DumpCatalogEntry, DumpCatalogQuery, DumpCatalogResponse, DumpDetail, ErrorEnvelope,
-    EventFeedResponse, MAX_ACTIVITY_ACTION_CHARS, MAX_CURSOR_CHARS, MAX_IDENTIFIER_CHARS,
-    SHA256_CHARS,
+    AnalysisReport, AnalysisReportSubmission, CreateWebhookResponse, CustomerListResponse,
+    CustomerSummary, DumpCatalogEntry, DumpCatalogQuery, DumpCatalogResponse, DumpDetail,
+    ErrorEnvelope, EventFeedResponse, MAX_ACTIVITY_ACTION_CHARS, MAX_CURSOR_CHARS,
+    MAX_IDENTIFIER_CHARS, SHA256_CHARS, WebhookListResponse,
 };
 
 /// Media type of JSON request and response bodies.
@@ -427,6 +427,88 @@ impl LedgerClient {
         Ok(body.customers)
     }
 
+    /// `GET /api/v1/webhooks` (WH2): every subscription, via the
+    /// webhook-admin bearer token (the analyzer token is rejected there).
+    ///
+    /// # Errors
+    ///
+    /// `Server` for non-2xx (401 on a wrong/disabled admin token),
+    /// `Transport`/`Decode` as usual.
+    pub async fn list_webhooks(
+        &self,
+        admin_token: &crate::config::SecretToken,
+    ) -> Result<WebhookListResponse> {
+        let url = self.endpoint(&["api", "v1", "webhooks"])?;
+        // Built from the bare builder: `RequestBuilder::header` appends, so
+        // going through `get_json` would also carry the analyzer bearer and
+        // send two `Authorization` values.
+        self.json_response(
+            self.http
+                .get(url)
+                .header(AUTHORIZATION, admin_bearer(admin_token)?)
+                .header(ACCEPT, JSON),
+            &[StatusCode::OK],
+            "GET /api/v1/webhooks",
+        )
+        .await
+    }
+
+    /// `POST /api/v1/webhooks` (WH2): create a subscription; the signing
+    /// secret appears only in this response.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::list_webhooks`].
+    pub async fn create_webhook(
+        &self,
+        admin_token: &crate::config::SecretToken,
+        url: &str,
+        actions: &[String],
+    ) -> Result<CreateWebhookResponse> {
+        const WHAT: &str = "POST /api/v1/webhooks";
+        let endpoint = self.endpoint(&["api", "v1", "webhooks"])?;
+        let body = serde_json::to_vec(&serde_json::json!({ "url": url, "actions": actions }))
+            .map_err(|err| AnalyzerError::Decode(format!("{WHAT}: failed to encode: {err}")))?;
+        let request = self
+            .http
+            .post(endpoint)
+            .header(AUTHORIZATION, admin_bearer(admin_token)?)
+            .header(ACCEPT, JSON)
+            .header(CONTENT_TYPE, JSON)
+            .body(body);
+        self.json_response(request, &[StatusCode::CREATED], WHAT)
+            .await
+    }
+
+    /// `DELETE /api/v1/webhooks/:webhookId` (WH2): remove a subscription;
+    /// delivery rows cascade server-side.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::list_webhooks`].
+    pub async fn delete_webhook(
+        &self,
+        admin_token: &crate::config::SecretToken,
+        webhook_id: &str,
+    ) -> Result<()> {
+        let url = self.endpoint(&["api", "v1", "webhooks", webhook_id])?;
+        let request = self
+            .http
+            .delete(url)
+            .header(AUTHORIZATION, admin_bearer(admin_token)?);
+        let response = self.send(request.timeout(self.api_timeout)).await?;
+        if response.status() != StatusCode::NO_CONTENT {
+            let status = response.status();
+            let body = read_body(response, "DELETE /api/v1/webhooks/:id").await?;
+            return Err(unexpected_status(
+                status,
+                &body,
+                "DELETE /api/v1/webhooks/:id",
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn get_events(
         &self,
         since: Option<&str>,
@@ -669,6 +751,17 @@ impl LedgerClient {
             .await?;
         Ok(response.analyses)
     }
+}
+
+/// Builds the webhook-admin `Authorization` header without echoing the
+/// token into errors.
+fn admin_bearer(token: &crate::config::SecretToken) -> Result<HeaderValue> {
+    HeaderValue::from_str(&format!("Bearer {}", token.expose())).map_err(|_| {
+        AnalyzerError::Config(
+            "DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN cannot form a valid `Authorization: Bearer` header"
+                .to_owned(),
+        )
+    })
 }
 
 /// Closed v2 envelope: exactly the v1 metadata fields plus two detail fields.

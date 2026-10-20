@@ -1195,6 +1195,34 @@ pub struct CustomerSummary {
     pub customer_no: Option<u64>,
 }
 
+/// One webhook subscription row (`GET /api/v1/webhooks`; never carries the
+/// signing secret).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WebhookSubscription {
+    pub id: String,
+    pub url: String,
+    pub actions: Option<Vec<String>>,
+    pub case_id: Option<String>,
+    pub cursor: String,
+    pub created_at: String,
+}
+
+/// `GET /api/v1/webhooks` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WebhookListResponse {
+    pub subscriptions: Vec<WebhookSubscription>,
+}
+
+/// `POST /api/v1/webhooks` success; `secret` appears only in this response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateWebhookResponse {
+    pub subscription: WebhookSubscription,
+    pub secret: String,
+}
+
 /// `GET /api/v1/customers` response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

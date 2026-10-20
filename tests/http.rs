@@ -11,8 +11,11 @@ use dump_analyzer::sync::CancellationToken;
 use dump_analyzer::types::{JobIdentity, JobPhase, ReportOutcome};
 use reqwest::Url;
 use tokio::net::TcpListener;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+#[path = "support/hmac.rs"]
+mod hmac;
 
 const SHA256_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA256_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -47,6 +50,10 @@ fn test_config() -> dump_analyzer::config::Config {
         claude_bin: "claude".to_string(),
         claude_model: None,
         tls_ca_cert: None,
+        webhook_enabled: false,
+        webhook_admin_token: None,
+        webhook_url: None,
+        webhook_actions: Vec::new(),
         scheduler_enabled: true,
         writeback_enabled: true,
     }
@@ -2095,4 +2102,396 @@ async fn rich_report_is_lazy_and_legacy_detail_is_explicit() {
     );
     ui.shutdown.cancel();
     ui.task.await.unwrap().unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Webhook receiver (`POST /webhooks`)
+// ---------------------------------------------------------------------------
+
+/// HMAC key the route reads from the `secrets` table (`webhook.secret`).
+const WEBHOOK_SECRET: &str = "whsec_http_0123456789abcdef";
+
+/// The analyzer token `test_config()` installs; ledger reads made from the
+/// webhook path must use it (never the webhook-admin token).
+const ANALYZER_TOKEN: &str = "never-me-in-output";
+
+struct WebhookUi {
+    ui: RunningUi,
+    ledger: MockServer,
+    store: Store,
+}
+
+/// Starts the UI with the webhook receiver wired to a wiremock ledger.
+async fn start_with_webhook(store: Store) -> WebhookUi {
+    let ledger = MockServer::start().await;
+    let mut config = test_config();
+    config.base_url = Url::parse(&ledger.uri()).expect("mock server URI");
+    config.webhook_enabled = true;
+    let client = Arc::new(dump_analyzer::client::LedgerClient::new(&config).expect("client"));
+    let shutdown = CancellationToken::new();
+    let context = http::UiContext::new(&config, store.clone()).with_webhook(
+        http::WebhookDeps::new(client, store.clone(), config.clone(), shutdown.clone()),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    let task = tokio::spawn(http::serve_listener(
+        listener,
+        Arc::new(context),
+        shutdown.clone(),
+    ));
+    WebhookUi {
+        ui: RunningUi {
+            addr,
+            shutdown,
+            task,
+        },
+        ledger,
+        store,
+    }
+}
+
+async fn stop_webhook_ui(ui: WebhookUi) {
+    ui.ui.shutdown.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(5), ui.ui.task)
+        .await
+        .expect("server stops on shutdown")
+        .expect("join");
+    assert!(result.is_ok(), "clean stop: {result:?}");
+}
+
+/// A decodable `EventFeedEntry` body for the route.
+fn feed_event(action: &str, dump_id: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "cursor": "0000000000000042",
+        "eventId": "event_01JWH001",
+        "occurredAt": "2026-10-20T03:00:00.000Z",
+        "action": action,
+        "customerId": null,
+        "caseId": "case_01JAB0XYZ",
+        "dumpId": dump_id,
+        "detail": { "outcome": "recorded" }
+    })
+}
+
+fn event_body(action: &str, dump_id: Option<&str>) -> Vec<u8> {
+    serde_json::to_vec(&feed_event(action, dump_id)).expect("serialize event")
+}
+
+fn ledger_error(code: &str) -> serde_json::Value {
+    serde_json::json!({
+        "error": {
+            "code": code,
+            "message": "Synthetic ledger failure",
+            "retryable": false
+        }
+    })
+}
+
+async fn post_webhook(
+    base: &str,
+    body: &[u8],
+    signature: Option<&str>,
+) -> (reqwest::StatusCode, serde_json::Value) {
+    let mut request = test_client()
+        .post(format!("{base}/webhooks"))
+        .body(body.to_vec());
+    if let Some(signature) = signature {
+        request = request.header("X-DumpLedger-Signature-256", signature);
+    }
+    let response = request.send().await.expect("POST /webhooks");
+    let status = response.status();
+    let body = response.bytes().await.expect("response body");
+    let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+/// Signs `body` with the stored secret and posts it to the running UI.
+async fn post_signed(ui: &WebhookUi, body: &[u8]) -> (reqwest::StatusCode, serde_json::Value) {
+    let signature = hmac::signature_header(WEBHOOK_SECRET.as_bytes(), body);
+    post_webhook(&format!("http://{}", ui.ui.addr), body, Some(&signature)).await
+}
+
+#[tokio::test]
+async fn http_webhook_route_is_404_when_unwired() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start(store).await;
+    let base = format!("http://{}", ui.addr);
+
+    let body = event_body("RecordAnalysis", Some("dump_01WH"));
+    let signature = hmac::signature_header(WEBHOOK_SECRET.as_bytes(), &body);
+    let (status, json) = post_webhook(&base, &body, Some(&signature)).await;
+    assert_eq!(status, 404);
+    assert_eq!(json, serde_json::json!({ "error": "not_found" }));
+
+    ui.shutdown.cancel();
+    ui.task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn http_webhook_accepts_signed_events_that_need_no_ledger_call() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+
+    // Ignored action family: acknowledged without a ledger lookup.
+    let body = event_body("RecordAnalysis", Some("dump_01WH"));
+    let (status, json) = post_signed(&ui, &body).await;
+    assert_eq!(status, 200);
+    assert_eq!(json, serde_json::json!({ "accepted": true }));
+
+    // Intake-family action without a dumpId: same early acknowledgement.
+    let body = event_body("AcceptDump", None);
+    let (status, json) = post_signed(&ui, &body).await;
+    assert_eq!(status, 200);
+    assert_eq!(json, serde_json::json!({ "accepted": true }));
+
+    assert!(
+        ui.ledger
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty(),
+        "ignorable events must not call the ledger"
+    );
+    assert_eq!(
+        ui.store.cursors().get("event_cursor").expect("cursor"),
+        None,
+        "the webhook never advances the feed cursor"
+    );
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_applies_purge_events_to_the_local_store() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let job = identity("dump_01WH", SHA256_A);
+    store.jobs().upsert_discovered(&job).expect("discover job");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+
+    let body = event_body("FinishPurge", Some("dump_01WH"));
+    let (status, json) = post_signed(&ui, &body).await;
+    assert_eq!(status, 200);
+    assert_eq!(json, serde_json::json!({ "accepted": true }));
+    assert_eq!(
+        ui.store.jobs().phase_of(&job).expect("phase"),
+        Some(JobPhase::Dropped),
+        "the purge event drops the local job through apply_event"
+    );
+    assert!(
+        ui.ledger
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty(),
+        "purge application needs no ledger call"
+    );
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_missing_or_malformed_signature_is_401() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+    let base = format!("http://{}", ui.ui.addr);
+    let body = event_body("RecordAnalysis", Some("dump_01WH"));
+
+    let (status, json) = post_webhook(&base, &body, None).await;
+    assert_eq!(status, 401);
+    assert_eq!(json, serde_json::json!({ "error": "invalid_signature" }));
+
+    for header in ["deadbeef", "sha256=", "sha256=not-hex"] {
+        let (status, json) = post_webhook(&base, &body, Some(header)).await;
+        assert_eq!(status, 401, "malformed header {header:?}");
+        assert_eq!(json, serde_json::json!({ "error": "invalid_signature" }));
+    }
+
+    assert!(
+        ui.ledger
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty()
+    );
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_tampered_or_wrongly_signed_body_is_401() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+    let base = format!("http://{}", ui.ui.addr);
+
+    let body = event_body("RecordAnalysis", Some("dump_01WH"));
+    let signature = hmac::signature_header(WEBHOOK_SECRET.as_bytes(), &body);
+
+    // Signature for a different body (tampering after signing).
+    let tampered = event_body("RecordAnalysis", Some("dump_01EVIL"));
+    let (status, json) = post_webhook(&base, &tampered, Some(&signature)).await;
+    assert_eq!(status, 401);
+    assert_eq!(json, serde_json::json!({ "error": "invalid_signature" }));
+
+    // Well-formed signature computed with a different key.
+    let wrong_key = hmac::signature_header(b"whsec_someone_else", &body);
+    let (status, json) = post_webhook(&base, &body, Some(&wrong_key)).await;
+    assert_eq!(status, 401);
+    assert_eq!(json, serde_json::json!({ "error": "invalid_signature" }));
+
+    assert!(
+        ui.ledger
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty()
+    );
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_bad_json_or_invalid_event_is_400() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+
+    // Garbage bytes, correctly signed.
+    let (status, json) = post_signed(&ui, b"this is not json").await;
+    assert_eq!(status, 400);
+    assert_eq!(json, serde_json::json!({ "error": "invalid_request" }));
+
+    // Valid JSON missing the required event fields.
+    let body = serde_json::to_vec(&serde_json::json!({ "action": "AcceptDump" })).expect("json");
+    let (status, json) = post_signed(&ui, &body).await;
+    assert_eq!(status, 400);
+    assert_eq!(json, serde_json::json!({ "error": "invalid_request" }));
+
+    // Decodable shape but `detail` is not a JSON object.
+    let mut event = feed_event("RecordAnalysis", None);
+    event["detail"] = serde_json::json!("not-an-object");
+    let body = serde_json::to_vec(&event).expect("json");
+    let (status, _) = post_signed(&ui, &body).await;
+    assert_eq!(status, 400);
+
+    // Action beyond the 64-char bound.
+    let body = event_body(&"a".repeat(65), None);
+    let (status, _) = post_signed(&ui, &body).await;
+    assert_eq!(status, 400);
+
+    assert!(
+        ui.ledger
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty()
+    );
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_without_stored_secret_is_503() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    let base = format!("http://{}", ui.ui.addr);
+
+    // The secret gate precedes signature checks: even a valid-looking
+    // signature gets the registration-outstanding answer.
+    let body = event_body("RecordAnalysis", Some("dump_01WH"));
+    let signature = hmac::signature_header(WEBHOOK_SECRET.as_bytes(), &body);
+    let (status, json) = post_webhook(&base, &body, Some(&signature)).await;
+    assert_eq!(status, 503);
+    assert_eq!(json, serde_json::json!({ "error": "webhook_unavailable" }));
+
+    let (status, json) = post_webhook(&base, b"not json", None).await;
+    assert_eq!(status, 503);
+    assert_eq!(json, serde_json::json!({ "error": "webhook_unavailable" }));
+
+    assert!(
+        ui.ledger
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty()
+    );
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_transient_apply_failure_is_503() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dumps/dump_01T"))
+        .and(header("authorization", format!("Bearer {ANALYZER_TOKEN}")))
+        .respond_with(ResponseTemplate::new(500).set_body_json(ledger_error("internal")))
+        .expect(1)
+        .mount(&ui.ledger)
+        .await;
+
+    // Intake-family action: apply_event re-reads the catalog entry.
+    let body = event_body("SealUpload", Some("dump_01T"));
+    let (status, json) = post_signed(&ui, &body).await;
+    assert_eq!(status, 503);
+    assert_eq!(json, serde_json::json!({ "error": "transient" }));
+
+    let recorded = ui.ledger.received_requests().await.expect("requests");
+    assert_eq!(recorded.len(), 1, "one catalog lookup");
+    assert_eq!(recorded[0].method.as_str(), "GET");
+    stop_webhook_ui(ui).await;
+}
+
+#[tokio::test]
+async fn http_webhook_permanent_apply_failure_is_500() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_webhook(store).await;
+    ui.store
+        .secrets()
+        .set("webhook.secret", WEBHOOK_SECRET)
+        .expect("store secret");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dumps/dump_01P"))
+        .and(header("authorization", format!("Bearer {ANALYZER_TOKEN}")))
+        .respond_with(ResponseTemplate::new(403).set_body_json(ledger_error("forbidden")))
+        .expect(1)
+        .mount(&ui.ledger)
+        .await;
+
+    let body = event_body("SealUpload", Some("dump_01P"));
+    let (status, json) = post_signed(&ui, &body).await;
+    assert_eq!(status, 500);
+    assert!(
+        json["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("403")),
+        "a permanent apply failure is never acknowledged and surfaces the ledger status: {json}"
+    );
+    stop_webhook_ui(ui).await;
 }

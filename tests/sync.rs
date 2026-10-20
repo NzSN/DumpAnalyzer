@@ -57,6 +57,10 @@ fn test_config(server: &MockServer) -> Config {
         claude_bin: "claude".to_string(),
         claude_model: None,
         tls_ca_cert: None,
+        webhook_enabled: false,
+        webhook_admin_token: None,
+        webhook_url: None,
+        webhook_actions: Vec::new(),
         scheduler_enabled: true,
         writeback_enabled: true,
     }

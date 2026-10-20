@@ -57,6 +57,10 @@ fn test_config_with_token(base_url: Url, token: &str) -> Config {
         claude_bin: "claude".to_string(),
         claude_model: None,
         tls_ca_cert: None,
+        webhook_enabled: false,
+        webhook_admin_token: None,
+        webhook_url: None,
+        webhook_actions: Vec::new(),
         scheduler_enabled: true,
         writeback_enabled: true,
     }
@@ -1259,4 +1263,191 @@ fn client_tls_ca_cert_missing_file_and_garbage_pem_fail_fast() {
         err.to_string().contains("DUMP_ANALYZER_TLS_CA_CERT"),
         "{err}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Webhook-admin client (WH2)
+// ---------------------------------------------------------------------------
+
+/// Webhook-admin bearer token; deliberately distinct from the analyzer
+/// [`TOKEN`] so a mix-up fails the mock's exact header matcher.
+const ADMIN_TOKEN: &str = "webhook-admin-token-0123456789abcdef";
+
+const WEBHOOK_URL: &str = "https://da.example:4180/webhooks";
+
+fn webhook_config(server: &MockServer) -> Config {
+    let mut config = config_for(server);
+    config.webhook_enabled = true;
+    config.webhook_admin_token = Some(SecretToken::new(ADMIN_TOKEN));
+    config.webhook_url = Some(WEBHOOK_URL.to_owned());
+    config.webhook_actions = vec!["AcceptDump".to_owned(), "SealUpload".to_owned()];
+    config
+}
+
+/// One strict subscription row (`WebhookSubscription` is `deny_unknown_fields`).
+fn webhook_subscription(id: &str, url: &str) -> Value {
+    json!({
+        "id": id,
+        "url": url,
+        "actions": ["AcceptDump", "SealUpload"],
+        "caseId": null,
+        "cursor": "0000000000000001",
+        "createdAt": "2026-10-20T02:00:00.000Z"
+    })
+}
+
+/// Asserts the exact admin bearer header, that it is not the analyzer token,
+/// and that neither token rides in the URL.
+fn assert_admin_authorized(request: &Request) {
+    let authorization = request
+        .headers
+        .get("authorization")
+        .expect("Authorization header");
+    let authorization = authorization.to_str().expect("ASCII header value");
+    assert_eq!(authorization, format!("Bearer {ADMIN_TOKEN}"));
+    assert_ne!(
+        authorization,
+        format!("Bearer {TOKEN}"),
+        "the webhook-admin calls must never use the analyzer token"
+    );
+    assert!(
+        !request.url.as_str().contains(ADMIN_TOKEN),
+        "the admin token must never appear in request URLs: {}",
+        request.url
+    );
+}
+
+fn assert_webhook_401(err: AnalyzerError) {
+    match &err {
+        AnalyzerError::Server { status, code } => {
+            assert_eq!(*status, 401);
+            assert_eq!(code.as_deref(), Some("unauthenticated"));
+        }
+        other => panic!("expected Server, got {other:?}"),
+    }
+    assert!(!err.is_transient(), "401 must never be retried");
+}
+
+#[tokio::test]
+async fn client_list_webhooks_uses_the_admin_token_and_decodes_rows() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/webhooks"))
+        .and(header("authorization", format!("Bearer {ADMIN_TOKEN}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "subscriptions": [webhook_subscription("wh_01", WEBHOOK_URL)],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = LedgerClient::new(&webhook_config(&server)).expect("client");
+    let response = client
+        .list_webhooks(&SecretToken::new(ADMIN_TOKEN))
+        .await
+        .expect("list webhooks");
+
+    assert_eq!(response.subscriptions.len(), 1);
+    let subscription = &response.subscriptions[0];
+    assert_eq!(subscription.id, "wh_01");
+    assert_eq!(subscription.url, WEBHOOK_URL);
+    assert_eq!(
+        subscription.actions,
+        Some(vec!["AcceptDump".to_owned(), "SealUpload".to_owned()])
+    );
+    assert_eq!(subscription.case_id, None);
+    assert_eq!(subscription.cursor, "0000000000000001");
+    assert_eq!(subscription.created_at, "2026-10-20T02:00:00.000Z");
+
+    assert_admin_authorized(&single_request(&server).await);
+}
+
+#[tokio::test]
+async fn client_create_webhook_posts_url_and_actions_and_returns_the_secret() {
+    let server = MockServer::start().await;
+    let actions = vec!["AcceptDump".to_owned(), "SealUpload".to_owned()];
+    Mock::given(method("POST"))
+        .and(path("/api/v1/webhooks"))
+        .and(header("authorization", format!("Bearer {ADMIN_TOKEN}")))
+        .and(body_json(
+            json!({ "url": WEBHOOK_URL, "actions": &actions }),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "subscription": webhook_subscription("wh_02", WEBHOOK_URL),
+            "secret": "whsec_created_0123456789abcdef",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = LedgerClient::new(&webhook_config(&server)).expect("client");
+    let created = client
+        .create_webhook(&SecretToken::new(ADMIN_TOKEN), WEBHOOK_URL, &actions)
+        .await
+        .expect("create webhook");
+
+    assert_eq!(created.subscription.id, "wh_02");
+    assert_eq!(created.subscription.url, WEBHOOK_URL);
+    assert_eq!(created.secret, "whsec_created_0123456789abcdef");
+
+    assert_admin_authorized(&single_request(&server).await);
+}
+
+#[tokio::test]
+async fn client_delete_webhook_expects_204_with_the_admin_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/webhooks/wh_03"))
+        .and(header("authorization", format!("Bearer {ADMIN_TOKEN}")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = LedgerClient::new(&webhook_config(&server)).expect("client");
+    client
+        .delete_webhook(&SecretToken::new(ADMIN_TOKEN), "wh_03")
+        .await
+        .expect("delete webhook");
+
+    assert_admin_authorized(&single_request(&server).await);
+}
+
+#[tokio::test]
+async fn client_webhook_admin_401_is_a_terminal_server_error() {
+    let server = MockServer::start().await;
+    for (method_name, path_name) in [
+        ("GET", "/api/v1/webhooks"),
+        ("POST", "/api/v1/webhooks"),
+        ("DELETE", "/api/v1/webhooks/wh_04"),
+    ] {
+        Mock::given(method(method_name))
+            .and(path(path_name))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(error_envelope("unauthenticated")),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let client = LedgerClient::new(&webhook_config(&server)).expect("client");
+    let admin = SecretToken::new(ADMIN_TOKEN);
+
+    let err = client
+        .list_webhooks(&admin)
+        .await
+        .expect_err("list must fail on 401");
+    assert_webhook_401(err);
+
+    let err = client
+        .create_webhook(&admin, WEBHOOK_URL, &[])
+        .await
+        .expect_err("create must fail on 401");
+    assert_webhook_401(err);
+
+    let err = client
+        .delete_webhook(&admin, "wh_04")
+        .await
+        .expect_err("delete must fail on 401");
+    assert_webhook_401(err);
 }

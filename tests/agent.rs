@@ -277,6 +277,10 @@ fn test_config(server: &MockServer, state_dir: &Path, byte_cache_max_bytes: u64)
         claude_bin: "claude".to_string(),
         claude_model: None,
         tls_ca_cert: None,
+        webhook_enabled: false,
+        webhook_admin_token: None,
+        webhook_url: None,
+        webhook_actions: Vec::new(),
         scheduler_enabled: true,
         writeback_enabled: true,
     }

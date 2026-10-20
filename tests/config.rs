@@ -454,3 +454,162 @@ fn config_writeback_flag() {
 fn legacy_version_cannot_be_reused_for_new_capture_profile() {
     assert!(parse_err(&[("DUMP_ANALYZER_VERSION", "0.1.0")]).contains("reserved for legacy"));
 }
+
+// ---------------------------------------------------------------------------
+// Webhook receiver knobs (WH receiver)
+// ---------------------------------------------------------------------------
+
+/// The default action filter is the feed follower's pinned set, in order.
+#[test]
+fn config_webhook_defaults_to_off_with_the_feed_action_set() {
+    let config = parse(&[]);
+
+    assert!(!config.webhook_enabled, "webhook defaults off");
+    assert_eq!(config.webhook_admin_token, None);
+    assert_eq!(config.webhook_url, None);
+    let expected: Vec<String> = dump_analyzer::sync::FEED_ACTIONS
+        .iter()
+        .map(|action| (*action).to_owned())
+        .collect();
+    assert_eq!(
+        config.webhook_actions, expected,
+        "default filter is the feed follower's set in wire order"
+    );
+
+    assert!(!parse(&[("DUMP_ANALYZER_WEBHOOK", "off")]).webhook_enabled);
+}
+
+#[test]
+fn config_webhook_on_requires_the_admin_token_and_url() {
+    let err = parse_err(&[("DUMP_ANALYZER_WEBHOOK", "on")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN"),
+        "missing admin token is named: {err}"
+    );
+
+    let err = parse_err(&[
+        ("DUMP_ANALYZER_WEBHOOK", "on"),
+        (
+            "DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN",
+            "admin-token-abcdef0123456789",
+        ),
+    ]);
+    assert!(
+        err.contains("DUMP_ANALYZER_WEBHOOK_URL"),
+        "missing URL is named: {err}"
+    );
+}
+
+#[test]
+fn config_webhook_on_accepts_a_full_configuration() {
+    let config = parse(&[
+        ("DUMP_ANALYZER_WEBHOOK", "on"),
+        (
+            "DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN",
+            "webhook-admin-abcdef0123456789",
+        ),
+        (
+            "DUMP_ANALYZER_WEBHOOK_URL",
+            " https://da.example:4180/webhooks ",
+        ),
+    ]);
+
+    assert!(config.webhook_enabled);
+    assert_eq!(
+        config
+            .webhook_admin_token
+            .as_ref()
+            .expect("admin token")
+            .expose(),
+        "webhook-admin-abcdef0123456789"
+    );
+    assert_eq!(
+        config.webhook_url.as_deref(),
+        Some("https://da.example:4180/webhooks"),
+        "surrounding whitespace is trimmed like every non-secret value"
+    );
+    let debug = format!("{config:?}");
+    assert!(
+        !debug.contains("webhook-admin-abcdef0123456789"),
+        "the admin token is redacted in Debug: {debug}"
+    );
+}
+
+#[test]
+fn config_webhook_rejects_unknown_switch_values() {
+    let err = parse_err(&[("DUMP_ANALYZER_WEBHOOK", "yes")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_WEBHOOK"),
+        "names the switch: {err}"
+    );
+    assert!(err.contains("on or off"), "lists the valid values: {err}");
+}
+
+#[test]
+fn config_webhook_url_must_be_http_s_without_whitespace() {
+    // http and https are both accepted (LAN callback URLs are plain http).
+    for url in [
+        "http://192.168.150.219:4180/webhooks",
+        "https://da.example/webhooks",
+    ] {
+        let config = parse(&[
+            ("DUMP_ANALYZER_WEBHOOK", "on"),
+            ("DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN", "admin-token"),
+            ("DUMP_ANALYZER_WEBHOOK_URL", url),
+        ]);
+        assert_eq!(config.webhook_url.as_deref(), Some(url));
+    }
+
+    for url in [
+        "da.example/webhooks",
+        "ftp://da.example/webhooks",
+        "https://da.example/web hooks",
+    ] {
+        let err = parse_err(&[
+            ("DUMP_ANALYZER_WEBHOOK", "on"),
+            ("DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN", "admin-token"),
+            ("DUMP_ANALYZER_WEBHOOK_URL", url),
+        ]);
+        assert!(
+            err.contains("DUMP_ANALYZER_WEBHOOK_URL"),
+            "rejected URL {url:?} names the variable: {err}"
+        );
+    }
+}
+
+#[test]
+fn config_webhook_actions_override_is_a_trimmed_comma_list() {
+    let config = parse(&[(
+        "DUMP_ANALYZER_WEBHOOK_ACTIONS",
+        " AcceptDump , SealUpload,,FinishPurge ",
+    )]);
+    assert_eq!(
+        config.webhook_actions,
+        ["AcceptDump", "SealUpload", "FinishPurge"]
+    );
+}
+
+#[test]
+fn config_webhook_actions_bounds_match_the_ledger_limits() {
+    // Boundary: 32 entries of 64 chars each parse.
+    let entry = "a".repeat(64);
+    let at_limit = vec![entry.as_str(); 32].join(",");
+    let config = parse(&[("DUMP_ANALYZER_WEBHOOK_ACTIONS", at_limit.as_str())]);
+    assert_eq!(config.webhook_actions.len(), 32);
+
+    // 33 entries are rejected.
+    let over_count = vec![entry.as_str(); 33].join(",");
+    let err = parse_err(&[("DUMP_ANALYZER_WEBHOOK_ACTIONS", over_count.as_str())]);
+    assert!(
+        err.contains("DUMP_ANALYZER_WEBHOOK_ACTIONS"),
+        "over-count names the variable: {err}"
+    );
+
+    // A 65-char entry is rejected.
+    let over_length = "a".repeat(65);
+    let err = parse_err(&[("DUMP_ANALYZER_WEBHOOK_ACTIONS", over_length.as_str())]);
+    assert!(
+        err.contains("DUMP_ANALYZER_WEBHOOK_ACTIONS"),
+        "over-length names the variable: {err}"
+    );
+}

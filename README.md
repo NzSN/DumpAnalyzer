@@ -72,7 +72,18 @@ manual operation continue), `DUMP_ANALYZER_TLS_CA_CERT` (additional PEM trust),
 source: verdicts record locally and jobs settle without `POST …/analyses`),
 `DUMP_ANALYZER_POLL_INTERVAL_MS` (5–30 s feed cadence),
 `DUMP_ANALYZER_RUN_WALL_TIMEOUT_MS`, `DUMP_ANALYZER_MAX_OUTPUT_BYTES`,
-`DUMP_ANALYZER_MAX_WORKSPACE_BYTES`, `DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES`.
+`DUMP_ANALYZER_MAX_WORKSPACE_BYTES`, `DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES`,
+`DUMP_ANALYZER_WEBHOOK` (`on` arms the ledger webhook tap: boot-time
+self-registration plus signed `POST /webhooks` deliveries),
+`DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN` (WH2 webhook-admin bearer used for that
+registration; required when the webhook is on), `DUMP_ANALYZER_WEBHOOK_URL`
+(this daemon's externally reachable webhook URL, e.g.
+`http://<lan-ip>:4180/webhooks`; required when the webhook is on),
+`DUMP_ANALYZER_WEBHOOK_ACTIONS` (comma-separated audit actions to subscribe;
+defaults to the feed follower's action set). The webhook tap needs
+`DUMP_ANALYZER_HTTP_ADDR` to be reachable from the ledger host; the feed
+follower remains the resumable truth and the webhook never advances its
+cursor.
 
 `SecretToken` formatting redacts the credential. The stored token is plaintext
 inside SQLite: restrict access to the state directory and its backups.

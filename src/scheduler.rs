@@ -224,11 +224,51 @@ pub async fn run(
                 store.clone(),
                 config.clone(),
             ));
+        // The webhook tap is attached only when enabled; otherwise the
+        // chain above is unchanged and `POST /webhooks` stays 404.
+        let context = if config.webhook_enabled {
+            context.with_webhook(crate::http::WebhookDeps::new(
+                Arc::clone(&client),
+                store.clone(),
+                config.clone(),
+                shutdown.clone(),
+            ))
+        } else {
+            context
+        };
         let ui_shutdown = shutdown.clone();
         tokio::spawn(async move {
             if let Err(err) = crate::http::serve(addr, context, ui_shutdown).await {
                 tracing::error!(%err, addr = %addr, "status UI stopped with an error");
             }
+        });
+    }
+
+    // Webhook tap: with DUMP_ANALYZER_WEBHOOK=on, register (or reuse) this
+    // daemon's subscription at the ledger once, then let signed deliveries
+    // ride the feed's idempotent apply path. Registration retries on a slow
+    // cadence and never fails the daemon; the feed follower remains the
+    // resumable truth meanwhile.
+    // Pointless without a listener: the ledger would only accrue exhausted
+    // deliveries against a URL nothing serves.
+    if config.webhook_enabled && config.http_addr.is_none() {
+        tracing::warn!(
+            "DUMP_ANALYZER_WEBHOOK=on but DUMP_ANALYZER_HTTP_ADDR is unset;              the listener is disabled, so self-registration is skipped"
+        );
+    }
+    if config.webhook_enabled && config.http_addr.is_some() {
+        let webhook_client = LedgerClient::new(&config)?;
+        let webhook_store = store.clone();
+        let webhook_config = config.clone();
+        let webhook_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            crate::webhook::registration_loop(
+                webhook_client,
+                webhook_store,
+                webhook_config,
+                webhook_shutdown,
+            )
+            .await;
         });
     }
 

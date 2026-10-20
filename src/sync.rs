@@ -284,7 +284,7 @@ pub async fn follow_feed(
 
 /// Applies one feed event. Returns `false` when shutdown arrived while the
 /// event was being resolved (the caller must then not persist the cursor).
-async fn apply_event(
+pub(crate) async fn apply_event(
     client: &LedgerClient,
     store: &Store,
     config: &Config,

@@ -40,6 +40,33 @@ pub struct RescanDeps {
     config: Config,
 }
 
+/// Dependencies of the webhook receiver route (`POST /webhooks`): the
+/// shared client/store/config plus the daemon shutdown token that
+/// [`crate::sync::apply_event`] observes.
+pub struct WebhookDeps {
+    client: Arc<LedgerClient>,
+    store: Store,
+    config: Config,
+    shutdown: CancellationToken,
+}
+
+impl WebhookDeps {
+    /// Bundles the four handles a webhook delivery needs.
+    pub fn new(
+        client: Arc<LedgerClient>,
+        store: Store,
+        config: Config,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            client,
+            store,
+            config,
+            shutdown,
+        }
+    }
+}
+
 impl RescanDeps {
     /// Bundles the three handles a manual catalog scan needs.
     pub fn new(client: Arc<LedgerClient>, store: Store, config: Config) -> Self {
@@ -68,6 +95,8 @@ pub struct UiContext {
     explorer: Option<Arc<crate::explorer::DumpsExplorer>>,
     /// Manual catalog re-scan (`POST /-/rescan`); `None` when unwired.
     rescan: Option<RescanDeps>,
+    /// Ledger webhook receiver (`POST /webhooks`); `None` when disabled.
+    webhook: Option<WebhookDeps>,
     /// sha256 of the analyzer token the mutation routes accept; compared in
     /// constant time. Interior mutability: storing a new token via
     /// `POST /-/store-token` updates it live. `None` when no token is
@@ -91,6 +120,7 @@ impl UiContext {
             analyzer: None,
             explorer: None,
             rescan: None,
+            webhook: None,
             token_sha256: std::sync::RwLock::new(
                 config
                     .token
@@ -110,6 +140,13 @@ impl UiContext {
     /// Attaches the customer/case catalog backing `GET /api/dumps`.
     pub fn with_explorer(mut self, explorer: Arc<crate::explorer::DumpsExplorer>) -> Self {
         self.explorer = Some(explorer);
+        self
+    }
+
+    /// Attaches the webhook receiver dependencies (`POST /webhooks`).
+    /// Without them the route answers 404.
+    pub fn with_webhook(mut self, deps: WebhookDeps) -> Self {
+        self.webhook = Some(deps);
         self
     }
 
@@ -177,6 +214,8 @@ struct Request {
     method: String,
     path: String,
     authorization: Option<String>,
+    /// `X-DumpLedger-Signature-256` (webhook deliveries only).
+    signature: Option<String>,
     body: Vec<u8>,
 }
 
@@ -212,6 +251,7 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
     let request_line: Vec<u8> = lines.next().unwrap_or(&[]).to_vec();
     let mut content_length = 0usize;
     let mut authorization = None;
+    let mut signature = None;
     for line in lines {
         let Ok(line) = std::str::from_utf8(line) else {
             continue;
@@ -224,6 +264,11 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
             content_length = value.trim().parse().unwrap_or(0);
         } else if name.trim().eq_ignore_ascii_case("authorization") {
             authorization = Some(value.trim().to_string());
+        } else if name
+            .trim()
+            .eq_ignore_ascii_case("x-dumpledger-signature-256")
+        {
+            signature = Some(value.trim().to_string());
         }
     }
     if content_length > MAX_BODY_BYTES {
@@ -260,6 +305,7 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
         method: method.unwrap_or_default(),
         path: path.unwrap_or_default(),
         authorization,
+        signature,
         body,
     };
     let response = route(&request, context).await;
@@ -561,6 +607,49 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                     }),
                 ),
                 Err(err) => json_response(500, json!({ "error": format!("state: {err}") })),
+            }
+        }
+        ("POST", "/webhooks") => {
+            let Some(deps) = &context.webhook else {
+                return json_response(404, json!({ "error": "not_found" }));
+            };
+            let secret = match crate::webhook::stored_secret(&deps.store) {
+                Ok(secret) => secret,
+                Err(err) => return json_response(500, json!({ "error": err.to_string() })),
+            };
+            let Some(secret) = secret else {
+                // Registration outstanding: the ledger retries with backoff.
+                return json_response(503, json!({ "error": "webhook_unavailable" }));
+            };
+            let Some(signature) = request.signature.as_deref() else {
+                return json_response(401, json!({ "error": "invalid_signature" }));
+            };
+            if !crate::webhook::verify_signature(&secret, &request.body, signature) {
+                return json_response(401, json!({ "error": "invalid_signature" }));
+            }
+            let event: crate::wire::EventFeedEntry = match serde_json::from_slice(&request.body) {
+                Ok(event) => event,
+                Err(_) => return json_response(400, json!({ "error": "invalid_request" })),
+            };
+            if event.validate().is_err() {
+                return json_response(400, json!({ "error": "invalid_request" }));
+            }
+            match crate::sync::apply_event(
+                &deps.client,
+                &deps.store,
+                &deps.config,
+                &event,
+                &deps.shutdown,
+            )
+            .await
+            {
+                Ok(true) => json_response(200, json!({ "accepted": true })),
+                // Shutdown mid-apply: not acknowledged, so the ledger retries.
+                Ok(false) => json_response(503, json!({ "error": "shutting_down" })),
+                Err(err) if err.is_transient() => {
+                    json_response(503, json!({ "error": "transient" }))
+                }
+                Err(err) => json_response(500, json!({ "error": err.to_string() })),
             }
         }
         ("POST", "/-/analyze") => {

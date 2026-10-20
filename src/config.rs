@@ -64,6 +64,22 @@ const TLS_CA_CERT_VAR: &str = "DUMP_ANALYZER_TLS_CA_CERT";
 const SSH_TARGET_VAR: &str = "DUMP_ANALYZER_SSH_TARGET";
 /// `DUMP_ANALYZER_SYMBOL_CACHE_DIR`: symbol cache dir on the analysis box.
 const SYMBOL_CACHE_DIR_VAR: &str = "DUMP_ANALYZER_SYMBOL_CACHE_DIR";
+/// `DUMP_ANALYZER_WEBHOOK`: `on` enables the ledger webhook receiver and
+/// boot-time self-registration; unset/off keeps feed-polling alone.
+const WEBHOOK_VAR: &str = "DUMP_ANALYZER_WEBHOOK";
+/// `DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN`: WH2 webhook-admin bearer token used
+/// for idempotent self-registration; required when the webhook is on.
+const WEBHOOK_ADMIN_TOKEN_VAR: &str = "DUMP_ANALYZER_WEBHOOK_ADMIN_TOKEN";
+/// `DUMP_ANALYZER_WEBHOOK_URL`: this daemon's externally reachable webhook
+/// URL registered at the ledger; required when the webhook is on.
+const WEBHOOK_URL_VAR: &str = "DUMP_ANALYZER_WEBHOOK_URL";
+/// `DUMP_ANALYZER_WEBHOOK_ACTIONS`: comma-separated audit actions to
+/// subscribe; defaults to the feed follower's action set.
+const WEBHOOK_ACTIONS_VAR: &str = "DUMP_ANALYZER_WEBHOOK_ACTIONS";
+/// Bound on the webhook action filter (mirrors the ledger's limit).
+const MAX_WEBHOOK_ACTIONS: usize = 32;
+/// Bound on one action name (mirrors the ledger's limit).
+const MAX_WEBHOOK_ACTION_CHARS: usize = 64;
 
 /// Default state directory.
 const DEFAULT_STATE_DIR: &str = "./data";
@@ -169,6 +185,14 @@ pub struct Config {
     /// Optional path to a PEM certificate (or chain) to trust in addition to
     /// the system roots — pins a self-signed DumpLedger TLS endpoint.
     pub tls_ca_cert: Option<PathBuf>,
+    /// Whether the webhook receiver and boot-time registration run.
+    pub webhook_enabled: bool,
+    /// WH2 webhook-admin bearer token for self-registration.
+    pub webhook_admin_token: Option<SecretToken>,
+    /// This daemon's externally reachable webhook URL.
+    pub webhook_url: Option<String>,
+    /// Subscription action filter (defaults to the feed follower's set).
+    pub webhook_actions: Vec<String>,
     /// Whether the scheduler claims jobs; default on. Off = manual operation:
     /// feed, status UI, and on-demand analysis run, nothing auto-executes.
     pub scheduler_enabled: bool,
@@ -243,6 +267,61 @@ impl Config {
         };
         let claude_model = Self::optional_value(&vars, CLAUDE_MODEL_VAR);
         let tls_ca_cert = Self::optional_value(&vars, TLS_CA_CERT_VAR).map(PathBuf::from);
+        let webhook_enabled = match Self::optional_value(&vars, WEBHOOK_VAR).as_deref() {
+            None => false,
+            Some("on") => true,
+            Some("off") => false,
+            Some(other) => {
+                return Err(AnalyzerError::Config(format!(
+                    "{WEBHOOK_VAR} must be on or off (got {other:?})"
+                )));
+            }
+        };
+        let webhook_admin_token =
+            Self::optional_value(&vars, WEBHOOK_ADMIN_TOKEN_VAR).map(SecretToken::new);
+        let webhook_url = Self::optional_value(&vars, WEBHOOK_URL_VAR);
+        if webhook_enabled {
+            if webhook_admin_token.is_none() {
+                return Err(AnalyzerError::Config(format!(
+                    "{WEBHOOK_VAR}=on requires {WEBHOOK_ADMIN_TOKEN_VAR}"
+                )));
+            }
+            match &webhook_url {
+                None => {
+                    return Err(AnalyzerError::Config(format!(
+                        "{WEBHOOK_VAR}=on requires {WEBHOOK_URL_VAR}"
+                    )));
+                }
+                Some(url)
+                    if !(url.starts_with("http://") || url.starts_with("https://"))
+                        || url.chars().any(char::is_whitespace) =>
+                {
+                    return Err(AnalyzerError::Config(format!(
+                        "{WEBHOOK_URL_VAR} must be an http(s) URL without whitespace"
+                    )));
+                }
+                _ => {}
+            }
+        }
+        let webhook_actions = match Self::optional_value(&vars, WEBHOOK_ACTIONS_VAR) {
+            None => crate::sync::FEED_ACTIONS.map(str::to_owned).to_vec(),
+            Some(raw) => {
+                let actions: Vec<String> = raw
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if actions.len() > MAX_WEBHOOK_ACTIONS
+                    || actions.iter().any(|a| a.len() > MAX_WEBHOOK_ACTION_CHARS)
+                {
+                    return Err(AnalyzerError::Config(format!(
+                        "{WEBHOOK_ACTIONS_VAR} allows at most {MAX_WEBHOOK_ACTIONS} entries of {MAX_WEBHOOK_ACTION_CHARS} chars"
+                    )));
+                }
+                actions
+            }
+        };
         let writeback_enabled = match Self::optional_value(&vars, WRITE_BACK_VAR).as_deref() {
             None => true,
             Some("on") => true,
@@ -282,6 +361,10 @@ impl Config {
             claude_bin,
             claude_model,
             tls_ca_cert,
+            webhook_enabled,
+            webhook_admin_token,
+            webhook_url,
+            webhook_actions,
             scheduler_enabled,
             writeback_enabled,
         })
