@@ -1,0 +1,56 @@
+{
+  "sourceCommit": "7c2a51b51d2638c462778c17fe9421632297b236",
+  "trackedFileCount": 361,
+  "changedTrackedFiles": [],
+  "missingTrackedFiles": [],
+  "sourceUnchanged": true,
+  "nodeVersion": "v24.19.0",
+  "pnpmVersion": "11.5.1",
+  "lockfileSha256": "37e7b032e793c7faf65cadc61e7c8967c16e0669836c6e40ef8396bb8cc555d1",
+  "compiler": {
+    "path": "/home/nzsn/Repos/Mirrors/.lake/build/bin/model_interface_gen",
+    "sha256": "143fbe36a1143771d8ee15b76eb0ae6e661f70a7d4c04e58eba1af67ade05c35",
+    "repoHead": "d1c5e7482c4adf02fd94820e239c1e39c240b1d2",
+    "note": "Used check/check-bundle/preflight only; no generation performed"
+  },
+  "mirrorEcma": {
+    "symlink": "/tmp/dump-ledger-p6-build-koffiriq/MirrorECMA",
+    "target": "/home/nzsn/Repos/MirrorECMA",
+    "repoHead": "13847be5d63d93437c551fad8c5e98f2afd884b0",
+    "status": "?? .work/"
+  },
+  "nativeSqlite": [
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linuxmusl-x64.node",
+      "sha256": "d661495d2dd4a026ccda893dd8ea1e2c245c3a681bd28224064953c8a9cc0a72"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linuxmusl-arm64.node",
+      "sha256": "09d5927246024b6d93c079ae1079554cbdd85790792342bf24636987dce7a786"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linux-arm64.node",
+      "sha256": "8ba771f284dfd9430e3ef8e2ffc373ed7cc5a92fc7c4c0c7baf39dd672863485"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/darwin-arm64.node",
+      "sha256": "98e0e8acd01c632fe5615243e1296af0372826f8783b18fc31c506f73c47459c"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/darwin-x64.node",
+      "sha256": "e6db154afe9d250e242e2ea3d45d273718ab80a0751d08873637553031752d21"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/win32-arm64.node",
+      "sha256": "a47870d114b98baecaff0baa51cfb93d6280d43f064280adaadefafb6949f1bf"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linux-x64.node",
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/win32-x64.node",
+      "sha256": "e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a"
+    }
+  ]
+}

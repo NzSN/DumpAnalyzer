@@ -1,0 +1,32 @@
+{
+  "apiBaseUrl": "https://api.anthropic.com",
+  "argv": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-prompt-tool",
+    "stdio",
+    "--permission-mode",
+    "default",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--settings",
+    "{\"disableAllHooks\":true}",
+    "--setting-sources",
+    "",
+    "--no-session-persistence"
+  ],
+  "errorReportingDisabled": "1",
+  "nonessentialTrafficDisabled": "1",
+  "note": "Transparent exec-only recorder; stdin/stdout/stderr are unmodified and PID is retained.",
+  "pid": 479626,
+  "resolvedBinary": "/home/nzsn/.local/share/claude/versions/2.1.300",
+  "telemetryDisabled": "1",
+  "utc": "2026-10-20T07:31:28.835561+00:00"
+}

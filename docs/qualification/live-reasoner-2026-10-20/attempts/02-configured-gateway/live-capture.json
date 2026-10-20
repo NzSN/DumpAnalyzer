@@ -1,0 +1,296 @@
+{
+  "capture": {
+    "completeness": {
+      "omissions": [],
+      "truncated": false
+    },
+    "context": {
+      "evidenceRefs": [
+        "context"
+      ],
+      "faultInstruction": {
+        "address": "0x00007ff6e2d02a41",
+        "bytes": "488b01",
+        "disassembly": "mov     rax,qword ptr [rcx]",
+        "effectiveAddress": "0x0000000000000000",
+        "evidenceRefs": [
+          "instruction"
+        ]
+      },
+      "registers": {
+        "rax": "0x0000000000000000",
+        "rbp": "0x000000d1f27fe730",
+        "rbx": "0x000000d1f27fe9b0",
+        "rcx": "0x0000000000000000",
+        "rip": "0x00007ff6e2d02a41",
+        "rsp": "0x000000d1f27fe6b8"
+      },
+      "source": "exception",
+      "threadId": "0x5f18"
+    },
+    "evidence": [
+      {
+        "command": "version; vertarget; ~; |",
+        "error": null,
+        "id": "target",
+        "status": "present",
+        "text": "Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64\nWindows 10 Version 26200 MP (32 procs) Free x64\n.  0  Id: 2bc4.5f18 Suspend: 0 Teb: 00000000`00000000 Unfrozen\n.  0  id: 2bc4 create Thu Sep 11 08:02:11.000 2025\n",
+        "truncated": false
+      },
+      {
+        "command": ".exr -1",
+        "error": null,
+        "id": "exception",
+        "status": "present",
+        "text": "ExceptionAddress: 00007ff6e2d02a41 (electron!CrashHandler+0x0000000000000041)\n   ExceptionCode: c0000005 (Access violation)\n  ExceptionFlags: 00000000\nExceptionRecord: 0000000000000000\nNumberParameters: 2\n   Parameter[0]: 0000000000000000\n   Parameter[1]: 0000000000000000\nAttempt to read from address 0000000000000000\n",
+        "truncated": false
+      },
+      {
+        "command": ".ecxr; ~.; r",
+        "error": null,
+        "id": "context",
+        "status": "present",
+        "text": "rax=0000000000000000 rbx=000000d1f27fe9b0 rcx=0000000000000000\nrip=00007ff6e2d02a41 rsp=000000d1f27fe6b8 rbp=000000d1f27fe730\nelectron!CrashHandler+0x41:\n00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx]\n",
+        "truncated": false
+      },
+      {
+        "command": "u @$ip L0n16",
+        "error": null,
+        "id": "instruction",
+        "status": "present",
+        "text": "electron!CrashHandler+0x41:\n00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx]\n00007ff6`e2d02a44 4885c0          test    rax,rax\n",
+        "truncated": false
+      },
+      {
+        "command": "kn 0n128",
+        "error": null,
+        "id": "stack-before-symbols",
+        "status": "present",
+        "text": " # Child-SP          RetAddr               Call Site\n00 000000d1`f27fe6b8 00007ff6`e2d02b99 electron+0x1f2a41\n01 000000d1`f27fe730 00007ffb`c1e12345 KERNEL32+0x12345\n",
+        "truncated": false
+      },
+      {
+        "command": ".lines -e; .reload /f",
+        "error": null,
+        "id": "symbols-load",
+        "status": "present",
+        "text": "Reloading current modules\n",
+        "truncated": false
+      },
+      {
+        "command": "lmv",
+        "error": null,
+        "id": "modules",
+        "status": "present",
+        "text": "start             end                 module name\n00007ff6`e2b10000 00007ff6`ecc00000 electron (private pdb symbols) C:\\symcache\\electron.pdb\n    Timestamp: Thu Sep 11 08:02:11 2025 (68C24DDB)\n    ImageSize: 0A0F0000\n00007ffb`c1e00000 00007ffb`c1f40000 KERNEL32 (export symbols) C:\\Windows\\System32\\kernel32.dll\n",
+        "truncated": false
+      },
+      {
+        "command": ".lines -e; .ecxr; ~.; kn 0n128",
+        "error": null,
+        "id": "stack",
+        "status": "present",
+        "text": " # Child-SP          RetAddr               Call Site\n00 000000d1`f27fe6b8 00007ff6`e2d02b99 electron!CrashHandler+0x41 [C:\\src\\crash.cc @ 42]\n01 000000d1`f27fe730 00007ffb`c1e12345 KERNEL32!BaseThreadInitThunk+0x17\n",
+        "truncated": false
+      },
+      {
+        "command": "Read minidump ModuleList and RSDS CodeView identities",
+        "error": "not a minidump",
+        "id": "dump-module-identities",
+        "status": "failed",
+        "text": "",
+        "truncated": false
+      },
+      {
+        "command": "bounded evidence-only Claude host assessment (all tools denied)",
+        "error": null,
+        "id": "assessment-model",
+        "status": "present",
+        "text": "{\"status\":\"unknown\",\"mechanism\":{\"status\":\"confirmed\",\"description\":\"The saved exception instruction reads through rcx at 0x0000000000000000, matching the access-violation target 0x0000000000000000. This establishes the immediate faulting read; the origin of the pointer is not established.\",\"evidenceRefs\":[\"context\",\"exception\",\"instruction\"]},\"conclusion\":\"The underlying cause is unknown. The captured evidence establishes only a null-pointer read at the reported electron!CrashHandler+0x41 location ([context], [exception], [instruction]). The symbol name and source line 42 are unverified ([stack], [modules]), and the only reported outer frame is KERNEL32!BaseThreadInitThunk with no intervening frames ([stack]). No captured causal link connects a defect to rcx becoming null.\",\"evidenceRefs\":[\"context\",\"exception\",\"instruction\",\"stack\",\"modules\",\"dump-module-identities\"],\"hypotheses\":[{\"explanation\":\"A null pointer or null state was supplied to the crash-handling code before it executed mov rax,qword ptr [rcx]. The captured rcx value is zero ([context]), the instruction reads [rcx] ([instruction]), and the access violation reports a read from 0x0 ([exception]). The missing causal link is how rcx became null and which caller or arguments set it; the CrashHandler label and crash.cc line 42 are unverified ([stack], [modules]), and the reported outer frame is KERNEL32!BaseThreadInitThunk only ([stack]).\",\"evidenceRefs\":[\"context\",\"exception\",\"instruction\",\"stack\",\"modules\"],\"missingEvidence\":[\"Verified electron PDB identity matching the loaded image, and verified source for crash.cc line 42\",\"Full call stack and unwind beyond the reported KERNEL32!BaseThreadInitThunk frame\",\"Caller arguments, register history, and memory-write history showing how rcx became 0x0\"],\"nextChecks\":[\"Load and validate the matching electron PDB (RSDS identity or image timestamp/size), then re-resolve electron+0x1f2a41 and inspect crash.cc line 42\",\"Capture a full stack with unwind information (knv or equivalent) and dump stack memory around rsp to locate the actual caller frames\",\"Set a breakpoint at the crash-handler entry or the faulting instruction during a controlled reproduction and log rcx plus incoming arguments and return address\"]},{\"explanation\":\"The reported stack may be incomplete or misattributed because execution is inside crash-handling code. The stack shows only frame 0 at electron+0x1f2a41 and frame 1 reported as KERNEL32!BaseThreadInitThunk ([stack], [stack-before-symbols]); the symbol resolution for frame 1 is exports-only and the module-RVA field is null ([modules]). The missing causal link is whether the fault is the original failure or a secondary failure while the handler dereferences unavailable state; no intervening frames or thread-entry path are captured.\",\"evidenceRefs\":[\"stack\",\"stack-before-symbols\",\"modules\",\"context\"],\"missingEvidence\":[\"A complete unwind showing the thread entry path and any intermediate frames\",\"Evidence identifying whether the process was already handling another exception, such as exception-record or handler state\",\"Module identity validation for electron; the minidump module-list/RSDS capture failed with 'not a minidump' ([dump-module-identities])\"],\"nextChecks\":[\"Re-run the capture using a minidump so module and PDB identities can be validated\",\"Inspect exception-record and crash-handler state (for example .exr -1 plus handler-thread context) during a controlled reproduction\",\"Use time-travel or instrumented logging to determine whether the null read occurs on the first fault or during secondary handling\"]}],\"missingEvidence\":[\"Verified electron PDB identity and verified source for the reported crash line\",\"Full unwind and caller frames beyond the reported KERNEL32!BaseThreadInitThunk frame\",\"Register and memory-write provenance for rcx leading to 0x0\",\"A reproducible execution trace showing the first fault and any preceding handler state\"],\"nextChecks\":[\"Validate PDB identity, then inspect electron+0x1f2a41 and crash.cc line 42 with verified symbols and lines\",\"Obtain a full stack unwind and stack-memory dump around rsp to identify genuine caller frames\",\"Run a controlled reproduction with a breakpoint at the crash-handler entry and at the faulting instruction to capture arguments and pointer provenance\",\"Re-capture evidence as a minidump to enable module/RSDS identity checks\"],\"ruleId\":null}",
+        "truncated": false
+      }
+    ],
+    "exception": {
+      "access": {
+        "address": "0x0000000000000000",
+        "operation": "read",
+        "underlyingStatus": null
+      },
+      "address": "0x00007ff6e2d02a41",
+      "code": "0xc0000005",
+      "evidenceRefs": [
+        "exception"
+      ],
+      "flags": "0x00000000",
+      "parameterCount": 2,
+      "parameters": [
+        "0x0000000000000000",
+        "0x0000000000000000"
+      ],
+      "recordPointer": "0x0000000000000000",
+      "status": "present"
+    },
+    "provenance": {
+      "analysisRevision": "deterministic-cdb-v2.1;reasoner=claude-host-v2.1",
+      "architecture": "amd64",
+      "debuggerVersion": "Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64",
+      "model": "deepseek-flash",
+      "pointerWidth": 64,
+      "processId": "0x2bc4",
+      "provider": "claude-cdb"
+    },
+    "rootCause": {
+      "conclusion": "The underlying cause is unknown. The captured evidence establishes only a null-pointer read at the reported electron!CrashHandler+0x41 location ([context], [exception], [instruction]). The symbol name and source line 42 are unverified ([stack], [modules]), and the only reported outer frame is KERNEL32!BaseThreadInitThunk with no intervening frames ([stack]). No captured causal link connects a defect to rcx becoming null.",
+      "evidenceRefs": [
+        "context",
+        "exception",
+        "instruction",
+        "stack",
+        "modules",
+        "dump-module-identities"
+      ],
+      "hypotheses": [
+        {
+          "evidenceRefs": [
+            "context",
+            "exception",
+            "instruction",
+            "stack",
+            "modules"
+          ],
+          "explanation": "A null pointer or null state was supplied to the crash-handling code before it executed mov rax,qword ptr [rcx]. The captured rcx value is zero ([context]), the instruction reads [rcx] ([instruction]), and the access violation reports a read from 0x0 ([exception]). The missing causal link is how rcx became null and which caller or arguments set it; the CrashHandler label and crash.cc line 42 are unverified ([stack], [modules]), and the reported outer frame is KERNEL32!BaseThreadInitThunk only ([stack]).",
+          "missingEvidence": [
+            "Verified electron PDB identity matching the loaded image, and verified source for crash.cc line 42",
+            "Full call stack and unwind beyond the reported KERNEL32!BaseThreadInitThunk frame",
+            "Caller arguments, register history, and memory-write history showing how rcx became 0x0"
+          ],
+          "nextChecks": [
+            "Load and validate the matching electron PDB (RSDS identity or image timestamp/size), then re-resolve electron+0x1f2a41 and inspect crash.cc line 42",
+            "Capture a full stack with unwind information (knv or equivalent) and dump stack memory around rsp to locate the actual caller frames",
+            "Set a breakpoint at the crash-handler entry or the faulting instruction during a controlled reproduction and log rcx plus incoming arguments and return address"
+          ]
+        },
+        {
+          "evidenceRefs": [
+            "stack",
+            "stack-before-symbols",
+            "modules",
+            "context"
+          ],
+          "explanation": "The reported stack may be incomplete or misattributed because execution is inside crash-handling code. The stack shows only frame 0 at electron+0x1f2a41 and frame 1 reported as KERNEL32!BaseThreadInitThunk ([stack], [stack-before-symbols]); the symbol resolution for frame 1 is exports-only and the module-RVA field is null ([modules]). The missing causal link is whether the fault is the original failure or a secondary failure while the handler dereferences unavailable state; no intervening frames or thread-entry path are captured.",
+          "missingEvidence": [
+            "A complete unwind showing the thread entry path and any intermediate frames",
+            "Evidence identifying whether the process was already handling another exception, such as exception-record or handler state",
+            "Module identity validation for electron; the minidump module-list/RSDS capture failed with 'not a minidump' ([dump-module-identities])"
+          ],
+          "nextChecks": [
+            "Re-run the capture using a minidump so module and PDB identities can be validated",
+            "Inspect exception-record and crash-handler state (for example .exr -1 plus handler-thread context) during a controlled reproduction",
+            "Use time-travel or instrumented logging to determine whether the null read occurs on the first fault or during secondary handling"
+          ]
+        }
+      ],
+      "mechanism": {
+        "description": "The saved exception instruction reads through rcx at 0x0000000000000000, matching the access-violation target 0x0000000000000000. This establishes the immediate faulting read; the origin of the pointer is not established.",
+        "evidenceRefs": [
+          "context",
+          "exception",
+          "instruction"
+        ],
+        "status": "confirmed"
+      },
+      "missingEvidence": [
+        "Verified electron PDB identity and verified source for the reported crash line",
+        "Full unwind and caller frames beyond the reported KERNEL32!BaseThreadInitThunk frame",
+        "Register and memory-write provenance for rcx leading to 0x0",
+        "A reproducible execution trace showing the first fault and any preceding handler state"
+      ],
+      "nextChecks": [
+        "Validate PDB identity, then inspect electron+0x1f2a41 and crash.cc line 42 with verified symbols and lines",
+        "Obtain a full stack unwind and stack-memory dump around rsp to identify genuine caller frames",
+        "Run a controlled reproduction with a breakpoint at the crash-handler entry and at the faulting instruction to capture arguments and pointer provenance",
+        "Re-capture evidence as a minidump to enable module/RSDS identity checks"
+      ],
+      "ruleId": null,
+      "status": "unknown"
+    },
+    "stack": {
+      "frames": [
+        {
+          "displacement": "0x41",
+          "evidenceRefs": [
+            "stack"
+          ],
+          "framePointer": null,
+          "function": "CrashHandler",
+          "index": 0,
+          "instructionPointer": "0x00007ff6e2d02a41",
+          "module": "electron",
+          "moduleRva": "0x1f2a41",
+          "resolution": "unverified",
+          "returnAddress": "0x00007ff6e2d02b99",
+          "sourceFile": "C:\\src\\crash.cc",
+          "sourceLine": 42,
+          "stackPointer": "0x000000d1f27fe6b8",
+          "unwind": "reported"
+        },
+        {
+          "displacement": "0x17",
+          "evidenceRefs": [
+            "stack"
+          ],
+          "framePointer": null,
+          "function": "BaseThreadInitThunk",
+          "index": 1,
+          "instructionPointer": null,
+          "module": "KERNEL32",
+          "moduleRva": null,
+          "resolution": "exportsOnly",
+          "returnAddress": "0x00007ffbc1e12345",
+          "sourceFile": null,
+          "sourceLine": null,
+          "stackPointer": "0x000000d1f27fe730",
+          "unwind": "reported"
+        }
+      ],
+      "limitations": [],
+      "status": "present",
+      "threadId": "0x5f18"
+    },
+    "symbols": {
+      "limitations": [
+        "Debugger PDB labels alone are unverified; matching requires the dump RSDS identity and the loaded PDB Info stream identity",
+        "Expected PDB identity unavailable: not a minidump"
+      ],
+      "modules": [
+        {
+          "evidenceRefs": [
+            "modules"
+          ],
+          "expectedPdb": null,
+          "imageBase": "0x7ff6e2b10000",
+          "imageSize": "0x0a0f0000",
+          "loadedPdb": null,
+          "module": "electron",
+          "pdbPath": "C:\\symcache\\electron.pdb",
+          "quality": "unverified",
+          "timestamp": "0x68c24ddb"
+        },
+        {
+          "evidenceRefs": [
+            "modules"
+          ],
+          "expectedPdb": null,
+          "imageBase": "0x7ffbc1e00000",
+          "imageSize": "0x140000",
+          "loadedPdb": null,
+          "module": "KERNEL32",
+          "pdbPath": null,
+          "quality": "exportsOnly",
+          "timestamp": null
+        }
+      ]
+    }
+  },
+  "qualification": "Authored synthetic debugger fixture with actual deny-all Claude host; no SSH or dump transfer"
+}

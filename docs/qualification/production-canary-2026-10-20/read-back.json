@@ -1,0 +1,14 @@
+{
+  "utc": "2026-10-20T08:33:38.730348+00:00",
+  "analysisId": "analysis_06F9B90BAB5F449199FA9C9C93",
+  "reportId": "r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8",
+  "digest": "d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb",
+  "canonicalBytes": 63438,
+  "identicalRemoteDetail": true,
+  "authenticatedStatus": 200,
+  "unauthenticatedStatus": 401,
+  "compactOnlyV1List": true,
+  "previousAnalysesPreserved": true,
+  "oneAddedAnalysis": true,
+  "afterCompanionRestart": false
+}

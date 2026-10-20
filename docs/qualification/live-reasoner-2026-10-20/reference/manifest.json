@@ -1,0 +1,92 @@
+{
+  "createdUtc": "2026-10-20T07:25:04.918429+00:00",
+  "sourceCommit": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "scope": "Offline synthetic deterministic baseline; no Claude or external service invocation",
+  "build": {
+    "command": "cargo run --offline --locked",
+    "exitCode": 0,
+    "cargoTargetDir": "/tmp/dumpanalyzer-p6-live-20261020/reference-target",
+    "registryPackagesAllMatchRootLock": true
+  },
+  "sourceFiles": {
+    "/home/nzsn/Repos/DumpAnalyzer/Cargo.toml": {
+      "sha256": "1fb1f24f7f041179364f921d7e04920474815cbc45c57657a87ee57d4f5e4c6b",
+      "bytes": 1052
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/Cargo.lock": {
+      "sha256": "97195ab5d6eeb372a80cbb57454b8470ccf894ed8955d53795d085903cc294cc",
+      "bytes": 48350
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/src/claude_runner.rs": {
+      "sha256": "740fdc3a684c556bee9503fcd0adee42d3b3ae65b27798f6bb848fe3ee0d1077",
+      "bytes": 18007
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/src/runner.rs": {
+      "sha256": "5aa3b64d58e093c5f35e024d6796d61d0013c3dca64829b659c87f483af6ca59",
+      "bytes": 114256
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/src/report.rs": {
+      "sha256": "b4c56bb33ab1275f404e8efc709ca147c94d7ee9aa3d22496e20f3c4d733edde",
+      "bytes": 18704
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/src/assessment.rs": {
+      "sha256": "cbc3d2c47ecfed883fa7ffc470bd187c900344e0da49d774e93a30a9963c400d",
+      "bytes": 6438
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/src/symbols.rs": {
+      "sha256": "1d9c7dbf641372f8f850f021d492927a9018c928b5881690b3e4ad088db0c943",
+      "bytes": 11281
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/tests/claude_runner.rs": {
+      "sha256": "50034ae540f921da861e6f9b52386431a96e3e6e5dec476be2813462fbe27c08",
+      "bytes": 21331
+    },
+    "/home/nzsn/Repos/DumpAnalyzer/tests/fixtures/report-v2/marked-av.log": {
+      "sha256": "b08775464856b39c30c38e879e6418d07dfcc982475b23d4d9b1fa91e944795c",
+      "bytes": 2122
+    }
+  },
+  "artifacts": {
+    "baseline.json": {
+      "sha256": "f02ff9023129f6bab27d2462c3fa40695200f195fecba3fba269a2ffc3f0d876",
+      "bytes": 10454
+    },
+    "prepared-capture.json": {
+      "sha256": "7365cb3338a2b643d367bb096843710a0bd991b63e8004908690ed00b197514b",
+      "bytes": 6054
+    },
+    "Cargo.toml": {
+      "sha256": "82e20604a560a029b1fa1f838b17636e76c69a28a0e0e22035bd5112ab4cc22b",
+      "bytes": 322
+    },
+    "Cargo.lock": {
+      "sha256": "ee03bc09d993093a79783d05b2e526d3ee664f24bd9214a0cf10a6e6d1bf3e21",
+      "bytes": 42744
+    },
+    "main.rs": {
+      "sha256": "52e12eb6fb15548d53ec8c726feb7dd629264c4791504352a1e716eb8ea6dde7",
+      "bytes": 5521
+    },
+    "lock-verification.json": {
+      "sha256": "8205acfccf6fe6941b808b72a003b128e74e7652db8e728463fbb63e4d2a4afa",
+      "bytes": 248
+    },
+    "comparison-contract.json": {
+      "sha256": "6e4193701b340d3267e5b14205fffadbdbcd57cabf61953f2e9a637a84c31ad3",
+      "bytes": 1165
+    },
+    "compare.py": {
+      "sha256": "b1abf5767bff5934ea190e782ec3d3590843c0287cdb3dcf592530570471c18a",
+      "bytes": 2262
+    }
+  },
+  "dummyDump": {
+    "utf8": "authored dummy dump; no RSDS module identity",
+    "sha256": "edf4b3158dfd5ac03471367ad3582992715b5f414599411c14a78cac46efdb59"
+  },
+  "preparedCapture": "Exact serde_json::to_string of typed production collector capture after production pre-reasoner provenance mutations; no newline",
+  "comparisonContract": "comparison-contract.json",
+  "modelCalls": 0,
+  "subprocessTransportCalls": 0,
+  "liveQualification": false
+}

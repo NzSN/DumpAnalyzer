@@ -1,0 +1,28 @@
+{
+  "allPassed": true,
+  "checks": {
+    "exception": true,
+    "context": true,
+    "stack": true,
+    "symbols": true,
+    "completeness": true,
+    "mechanism": true,
+    "originalEvidencePreserved": true,
+    "provenance.debuggerVersion": true,
+    "provenance.architecture": true,
+    "provenance.pointerWidth": true,
+    "provenance.processId": true,
+    "provider": true,
+    "observedModel": true,
+    "analysisRevision": true,
+    "singlePresentModelAssessment": true,
+    "modelEvidenceEqualsAcceptedCause": true,
+    "unconfirmedOrigin": true,
+    "actualEvidenceRefs": true,
+    "everyHypothesisQualified": true,
+    "causeNextChecks": true,
+    "causeMissingEvidence": true
+  },
+  "scope": "Synthetic receipt preservation comparison; no live tool-denial observation implied",
+  "outcomeComparison": "Not available: existing live-test receipt omits outcome"
+}

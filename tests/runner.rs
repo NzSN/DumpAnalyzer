@@ -937,7 +937,11 @@ impl ExecTransport for RefiningTransport {
     ) -> Result<TransportOutput, AnalyzerError> {
         if program == "cdb" {
             let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let body = if call == 0 { authored_essential_log() } else { RICH.to_owned() };
+            let body = if call == 0 {
+                authored_essential_log()
+            } else {
+                RICH.to_owned()
+            };
             return Ok(TransportOutput {
                 status: Some(0),
                 stdout: body.into_bytes(),

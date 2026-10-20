@@ -1,0 +1,17 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.90s
+     Running tests/claude_runner.rs (target/debug/deps/claude_runner-238fc6b3024e5b95)
+
+running 10 tests
+test missing_model_binary_keeps_evidence_but_collection_failure_is_still_runner_error ... ok
+test host_denies_control_requests_while_stdin_remains_open ... ok
+test unexpected_tool_result_is_rejected_under_deny_all_policy ... ok
+test deterministic_capture_precedes_host_and_model_cannot_replace_evidence ... ok
+test provider_error_results_keep_bounded_actionable_diagnostics ... ok
+test concurrent_stderr_drain_prevents_pipe_deadlock_and_enforces_output_budget ... ok
+test eof_before_process_exit_is_bounded_and_keeps_collected_report ... ok
+test collection_and_reasoning_share_one_deadline ... ok
+test malformed_unavailable_and_invalid_causal_results_preserve_capture ... ok
+test resolved_model_and_reasoner_revision_survive_optional_reasoning_failure ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.35s
+

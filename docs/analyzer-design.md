@@ -231,7 +231,9 @@ The repository's tests include wiremock HTTP contracts, state migrations and
 transaction integrity, fetch/hash/cache paths, runner parsing and containment,
 reasoning fallback, manual lifecycle, report delivery compatibility and UI
 escaping/pagination. Test presence is static evidence of intended coverage;
-this documentation refresh ran no Rust tests, remote commands or live probes.
+the initial source-only documentation review ran no Rust tests, remote commands
+or live probes. The later authorized reasoner qualification below is a separate
+dated execution record.
 
 The historical 2026-10-13 lifecycle check recorded 1,621,239 TLC-generated
 states, 428,704 distinct states and depth 33 without invariant violation, and
@@ -251,6 +253,96 @@ explicit MBT and corpus-freshness commands in [README](../README.md).
 Dated qualification reports in [rich reports](rich-reports.md),
 [field run](../Plans/field-run.md) and [readiness](../Plans/phase2-live-readiness.md)
 retain their historical counts, fixtures and live gates. Runtime TLS trust,
-Windows CDB/PDB availability, corrected live Claude qualification and companion
-v2 availability require their own environment checks. Do not infer those passes
-from a documentation-only review.
+Windows CDB/PDB availability, service deployment and companion v2 availability
+require their own environment checks. Do not infer those passes from source
+review or the narrower reasoner qualification below.
+
+### Configured reasoner subgate (2026-10-20)
+
+The explicitly authorized [2026-10-20 receipt](qualification/live-reasoner-2026-10-20/README.md)
+records the ignored live reasoner test passing 1/1 in 16.45 seconds at source/test
+checkout `f269ce82d2ac28e9ba77f7f393ffc231e639a164`. Only user connection/model
+settings were imported from `~/.claude`. The configured gateway was
+`https://claude.jlcops.com/api/`; Claude CLI `2.1.300` used alias `opus` and
+reported model **`deepseek-flash`**. An earlier official Anthropic endpoint attempt
+failed with `Not logged in` and produced no accepted assessment. This qualifies
+the configured CLI/gateway evidence-only reasoner path, not an Anthropic Claude
+model or the complete P6/deployment/delivery path.
+
+Offline fake-host controls passed 10/10, preservation comparison 21/21 and
+independent review 20/20. All nine original evidence entries and the captured
+exception/context/stack/symbols, deterministic mechanism and completeness stayed
+unchanged; one accepted model assessment was added. Origin remained `unknown`
+and the deterministic mechanism `confirmed`. Tool/MCP/hook/settings isolation
+flags remained in force and the local CLI child was reaped, but there was no
+observed live tool-denial challenge or instrumented request counter. The separate
+fake-host denial control does not establish either live measurement. No program
+source or tests changed, and no new CDB/SSH, service or DumpLedger delivery
+qualification was performed.
+
+### Production deployment checkpoint (2026-10-20)
+
+The [production rollout receipt](qualification/production-rollout-2026-10-20/README.md)
+records completed deployment of the rebuilt local analyzer from application
+source `f269ce8` (PID `495042`, binary SHA-256
+`cc284ecacd1f03d5ed4e5ae8b9659e082139d7b94e2135eb78ccc4088d5541ff`)
+and the Windows companion revision `7c2a51b51d2638c462778c17fe9421632297b236`
+from `69eb3d3`, excluding later WH1 changes. Local reports (including five rich
+reports), secrets, cache and settled identities were preserved. The local
+configuration stayed `cdb-ssh`, scheduler off and write-back off.
+
+Analyzer checks recorded 356 passing Rust tests, two ignored tests, and passing
+Clippy/rustfmt after a format-only `tests/runner.rs` adjustment. The companion
+candidate recorded 153 unit, 156 integration, 28 MBT and 173 contract tests
+passing, with all 501 build-file hashes verified. Node `24.21.0` ran backend
+PID `42476` on ports `4081`/`4082`; proxy PID `63648` on `4080` was unchanged.
+Migration 9 added the rich-detail table after migration 10 was already present.
+Dry-run and live comparisons preserved the eight prior table hashes and counts;
+database integrity passed with 128 dumps, 33 analyses, 20 customers and 18 cases.
+TLS-validated authenticated v2 capabilities returned schema 2 and the expected
+524,288-byte report / 1,048,576-byte request bounds; unauthenticated access
+returned 401. These observations qualify the deployment/capability substep,
+not full-report delivery.
+
+At this deployment checkpoint, automatic approval review had rejected the single
+real crash-report publication: the broad rollout request did not explicitly
+authorize that exact payload and destination. Explicit approval was then pending.
+The rejected action did not execute; `analysis_details` remained empty and
+`analyses` remained 33. Production publication, readback/restart canary and full P6
+were open at that checkpoint. The subsequent authorized canary is separate.
+No new CDB/SSH acquisition or model run occurred, and the configured gateway's
+CLI-reported `deepseek-flash` qualification remains unchanged. The receipt
+records durable local/Windows backups and the matching rollback checkpoint;
+all earlier evidence bundles retain their original bytes and scope.
+
+### Completed production canary (2026-10-20)
+
+The user subsequently explicitly approved the exact selected real report and
+destination. The [new canary receipt](qualification/production-canary-2026-10-20/README.md)
+records accepted analysis `analysis_06F9B90BAB5F449199FA9C9C93` for report
+`r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8`:
+63,438 canonical bytes with SHA-256
+`d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb`.
+The Rust publisher's idempotent replay returned the same analysis ID; exact
+readback and local publisher-store reopen passed. Authenticated detail GET
+returned 200, unauthenticated access 401, the v1 list stayed compact and prior
+analysis content was preserved with only the approved analysis added.
+
+The exact report and analysis ID survived the reviewed native backend restart.
+The restarted backend PID `51868` owned ports `4081`/`4082`; proxy PID `63648`
+was unchanged. All ten post-canary table hashes matched before/after restart,
+with prior rows unchanged. The only additions were one row each in
+`dump_analyses` (33 → 34), `analysis_details` (0 → 1) and `audit_events`
+(941 → 942); 128 dumps, 20 customers and 18 cases were unchanged. Post-restart
+HTTP checks again passed authenticated 200, unauthenticated 401, exact report/ID
+and compact v1/prior-analysis preservation. Post-canary online and stopped
+backups were saved; no database restore was performed.
+
+**P6 production rollout and the bounded selected-report canary are complete at
+this checkpoint.** The standalone publisher store recorded `fullyDelivered`.
+This did not change the live analyzer's five canonical reports or `localOnly`
+policy: global write-back and scheduling remain off, using `cdb-ssh`. No new CDB
+acquisition or model assessment ran, and the earlier CLI-reported
+`deepseek-flash` qualification is unchanged. This selected storage round-trip
+does not prove additional causal claims or authorize broad automatic
+publication. Earlier receipt bundles retain their dated observations and bytes.

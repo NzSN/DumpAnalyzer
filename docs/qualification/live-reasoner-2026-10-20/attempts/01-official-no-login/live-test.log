@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running tests/claude_runner.rs (target/debug/deps/claude_runner-238fc6b3024e5b95)
+
+running 1 test
+
+thread 'live_reasoner_over_synthetic_fixture_without_remote_dump_transfer' (479624) panicked at tests/claude_runner.rs:571:5:
+Actual reasoning did not complete: ["Optional causal reasoning unavailable; deterministic evidence and assessment retained: runner: reasoner error result: subtype=success; errors=unavailable; result=Not logged in · Please run /login"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test live_reasoner_over_synthetic_fixture_without_remote_dump_transfer ... FAILED
+
+failures:
+
+failures:
+    live_reasoner_over_synthetic_fixture_without_remote_dump_transfer
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.75s
+
+error: test failed, to rerun pass `--test claude_runner`

@@ -1,0 +1,119 @@
+{
+  "schema": "dumpanalyzer.p6.approved-production-canary/v1",
+  "recordedUtc": "2026-10-20T08:41:54.704550+00:00",
+  "status": "passed",
+  "scope": "P6 production rollout and the explicitly selected single-report publication/replay/read-back/restart canary.",
+  "productionRolloutComplete": true,
+  "boundedProductionCanaryComplete": true,
+  "gates": {
+    "explicitPayloadDestinationApproval": true,
+    "selectedSingleReportPublication": true,
+    "sameAnalysisIdIdempotentReplay": true,
+    "exactCanonicalReadBack": true,
+    "localPublisherReopen": true,
+    "postPublicationBackups": true,
+    "nativeCompanionRestart": true,
+    "sameCanonicalAfterRestart": true,
+    "allPostCanaryTableHashesMatch": true,
+    "previousRowsPreserved": true,
+    "authenticatedGet200": true,
+    "unauthenticatedGet401": true,
+    "compactOnlyV1List": true,
+    "launcherConnectionClosedAndHttpStillPasses": true,
+    "analyzerFiveReportsAndConfigurationPreserved": true
+  },
+  "report": {
+    "reportId": "r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8",
+    "analysisId": "analysis_06F9B90BAB5F449199FA9C9C93",
+    "dumpId": "dump_4142A5B57E5A4C01A1C47C883E",
+    "canonicalBytes": 63438,
+    "sha256": "d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb"
+  },
+  "destination": "https://192.168.150.219:4080",
+  "source": {
+    "analyzerApplicationHead": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+    "companionHead": "7c2a51b51d2638c462778c17fe9421632297b236",
+    "deployedBuildFilesVerified": 501,
+    "newApplicationOrTestEditsInThisApprovalWave": false
+  },
+  "companion": {
+    "beforeRestartPid": 42476,
+    "afterRestartPid": 51868,
+    "proxyPid": 63648,
+    "migrations": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "tables": {
+      "analysis_details": 1,
+      "audit_events": 942,
+      "cases": 18,
+      "customers": 20,
+      "dump_analyses": 34,
+      "dumps": 128,
+      "modules": 13,
+      "schema_migrations": 10,
+      "symbol_artifacts": 13,
+      "upload_grants": 30
+    },
+    "allowedAdditions": {
+      "dump_analyses": 1,
+      "analysis_details": 1,
+      "audit_events": 1
+    },
+    "allTenTableHashesPreservedAcrossRestart": true,
+    "databaseRestorePerformed": false,
+    "configurationUnchanged": true,
+    "postCanaryOnlineBackup": "D:/Services/dump-ledger-runtime/backups/p6-production-20261020-verified/post-canary-online.sqlite",
+    "postCanaryStoppedBackup": "D:/Services/dump-ledger-runtime/backups/p6-production-20261020-verified/post-canary-stopped.sqlite"
+  },
+  "analyzer": {
+    "pid": 495042,
+    "scheduler": "off",
+    "writeBack": "off",
+    "runner": "cdb-ssh",
+    "mainCanonicalReportCount": 5,
+    "mainDeliveryPolicy": "localOnly",
+    "isolatedSelectedPublisherDelivery": "fullyDelivered",
+    "preservedCoreTables": {
+      "local_reports": {
+        "rows": 5,
+        "sha256": "cff90fa02d61aaa3da36daec98e620d935b7c1da0948d4e5c038b6ac80f65af1"
+      },
+      "report_details": {
+        "rows": 5,
+        "sha256": "a656d07bee7d4e045abe93e811b24cc5764f5513cfda462dc281adb62fda1ffe"
+      },
+      "secrets": {
+        "rows": 1,
+        "sha256": "ddd5a2a1078e836e60b870971587791aa0186e08e8ec7c3e5a2d208a02b753ff"
+      },
+      "settled_jobs": {
+        "rows": 6,
+        "sha256": "da5b9cfc3935feef6dec656a86f8c12f3afa96ea8f10b586e685e7c49639c096"
+      },
+      "byte_cache": {
+        "rows": 4,
+        "sha256": "1dd469629ae7d2ddd1c137505c16bd3cc18a8200204dd8de4833510c60563658"
+      }
+    },
+    "configurationUnchanged": true
+  },
+  "limits": [
+    "No global scheduling, catalog-wide reanalysis or global write-back enabled.",
+    "Existing captured report used; no new CDB acquisition, dump transfer or model call.",
+    "Preserved assessment remains unknown; delivery does not establish causal truth.",
+    "Configured gateway reasoner qualification remains scoped to its CLI-reported deepseek-flash; no new Anthropic model qualification.",
+    "Earlier blocked checkpoint is retained unchanged as history; user approval and successful canary are recorded here."
+  ],
+  "credentialValuesIncluded": false,
+  "rawCustomerReportIncluded": false
+}

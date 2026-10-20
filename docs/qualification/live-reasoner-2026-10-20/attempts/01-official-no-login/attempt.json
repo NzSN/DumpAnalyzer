@@ -1,0 +1,42 @@
+{
+  "acceptedLiveAssessment": false,
+  "attempt": 1,
+  "cliArguments": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-prompt-tool",
+    "stdio",
+    "--permission-mode",
+    "default",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--settings",
+    "{\"disableAllHooks\":true}",
+    "--setting-sources",
+    "",
+    "--no-session-persistence"
+  ],
+  "destination": "https://api.anthropic.com",
+  "explicitlyAuthorized": true,
+  "files": {
+    "approval-status.json": "93bb4d99e0784210b921a0ade4f2b8c77f18514cd77a2602eb8f6b0dc514839f",
+    "claude-launch-canonical.json": "9d5a5725ee9f8f8d00812285f0040294b11667a7d0729b3fee1f506a4ed69f69",
+    "claude-launch.json": "9d5a5725ee9f8f8d00812285f0040294b11667a7d0729b3fee1f506a4ed69f69",
+    "live-test.log": "d8092302b5468d3a3b18e7fb0312085a49e93645d619c2ef1d3e109bc63c0296",
+    "preflight.json": "0e14efceb2287dff5bba5f7de7030bc2c7d6e4b25b6713d5442af43de6acbaa3"
+  },
+  "liveCaptureCreated": false,
+  "rawLaunchMetadataWasValidJson": true,
+  "reason": "Production-isolated CLI reported Not logged in. Normal auth status used a gateway credential from disabled user settings; no official credential is configured.",
+  "schema": "dumpanalyzer.p6.attempt/v1",
+  "status": "failed-authentication",
+  "testExitCode": 101,
+  "utc": "2026-10-20T07:34:38.976488+00:00"
+}

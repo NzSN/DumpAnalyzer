@@ -1,0 +1,39 @@
+{
+  "schema": "dumpanalyzer.p6.canary-local-preservation/v1",
+  "utc": "2026-10-20T08:41:00.447250+00:00",
+  "pid": 495042,
+  "active": true,
+  "binarySha256": "cc284ecacd1f03d5ed4e5ae8b9659e082139d7b94e2135eb78ccc4088d5541ff",
+  "configurationUnchanged": true,
+  "scheduler": "off",
+  "writeBack": "off",
+  "runner": "cdb-ssh",
+  "preservedCoreTables": {
+    "local_reports": {
+      "rows": 5,
+      "sha256": "cff90fa02d61aaa3da36daec98e620d935b7c1da0948d4e5c038b6ac80f65af1"
+    },
+    "report_details": {
+      "rows": 5,
+      "sha256": "a656d07bee7d4e045abe93e811b24cc5764f5513cfda462dc281adb62fda1ffe"
+    },
+    "secrets": {
+      "rows": 1,
+      "sha256": "ddd5a2a1078e836e60b870971587791aa0186e08e8ec7c3e5a2d208a02b753ff"
+    },
+    "settled_jobs": {
+      "rows": 6,
+      "sha256": "da5b9cfc3935feef6dec656a86f8c12f3afa96ea8f10b586e685e7c49639c096"
+    },
+    "byte_cache": {
+      "rows": 4,
+      "sha256": "1dd469629ae7d2ddd1c137505c16bd3cc18a8200204dd8de4833510c60563658"
+    }
+  },
+  "mainCanonicalReportCount": 5,
+  "mainDeliveryPolicy": "localOnly",
+  "selectedPublisherReports": 1,
+  "selectedPublisherDelivery": "fullyDelivered",
+  "localDetailUnchanged": true,
+  "integrity": "ok"
+}

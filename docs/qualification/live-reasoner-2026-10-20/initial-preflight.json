@@ -1,0 +1,44 @@
+{
+  "cliBinary": "/home/nzsn/.local/share/claude/versions/2.1.300",
+  "cliBinarySha256": "674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453",
+  "cliVersion": "2.1.300 (Claude Code)",
+  "configuredDestination": "https://api.anthropic.com",
+  "createdUtc": "2026-10-20T07:18:28.643261+00:00",
+  "credentialValuesRecorded": false,
+  "fixtureOnly": true,
+  "head": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "launchRecorder": "/tmp/dumpanalyzer-p6-live-20261020/bridge/claude",
+  "launchRecorderMode": "exec-only; no stream/data changes",
+  "launchRecorderSha256": "f94af93e7d8ffa4398961ddb267ddd5c1a25db3ffe5b3f5de616ae9b3b080f28",
+  "offlineControls": {
+    "failed": 0,
+    "filteredLiveTest": 1,
+    "logSha256": "85d3e4f4258f8dbca81c57bf83439fb3aa073be57d08f3c88cca0194dd4035c4",
+    "passed": 10
+  },
+  "realSshOrDumpTransfer": false,
+  "repositorySettingsLoaded": false,
+  "reviewedDataBoundary": {
+    "FakeTransport": "records calls and returns committed fixture bytes; starts no SSH/SCP/CDB/HTTP process",
+    "committedFixture": "tests/fixtures/report-v2/marked-av.log",
+    "dummyDumpText": "authored dummy dump; no RSDS module identity",
+    "liveDenialObserved": false,
+    "liveRequestsExecuted": 0,
+    "policy": "empty tools, strict empty MCP, hooks disabled, empty settings sources, no session persistence, every tool control request denied",
+    "prompt": "Fixed instructions/schema plus serde JSON of the typed capture"
+  },
+  "schema": "dumpanalyzer.p6.preflight/v1",
+  "sourceSha256": {
+    "Cargo.lock": "97195ab5d6eeb372a80cbb57454b8470ccf894ed8955d53795d085903cc294cc",
+    "Cargo.toml": "1fb1f24f7f041179364f921d7e04920474815cbc45c57657a87ee57d4f5e4c6b",
+    "src/assessment.rs": "cbc3d2c47ecfed883fa7ffc470bd187c900344e0da49d774e93a30a9963c400d",
+    "src/claude_runner.rs": "740fdc3a684c556bee9503fcd0adee42d3b3ae65b27798f6bb848fe3ee0d1077",
+    "src/report.rs": "b4c56bb33ab1275f404e8efc709ca147c94d7ee9aa3d22496e20f3c4d733edde",
+    "src/runner.rs": "5aa3b64d58e093c5f35e024d6796d61d0013c3dca64829b659c87f483af6ca59",
+    "src/types.rs": "fd2cc64273fcc6f50eda6ab3075afee1bc15c177429758c8f23cee0549b5c077",
+    "tests/claude_runner.rs": "50034ae540f921da861e6f9b52386431a96e3e6e5dec476be2813462fbe27c08",
+    "tests/fixtures/report-v2/marked-av.log": "b08775464856b39c30c38e879e6418d07dfcc982475b23d4d9b1fa91e944795c"
+  },
+  "status": "awaiting explicit payload/destination consent after automatic approval rejection",
+  "userSettingsLoaded": false
+}

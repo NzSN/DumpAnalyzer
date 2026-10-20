@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DumpAnalyzer rich reports · source behavior and historical qualification</title>
-<!-- Generated from docs/rich-reports.md with markdown-it-py 3.0.0 (CommonMark + tables); source links pinned to 6a19ea297bb219509c994780c96bdd6ce6c4bfab. Existing page CSS retained. -->
-<style>body{font:16px/1.65 system-ui,sans-serif;color:#202e40;background:#f5f7fa;margin:0}header{background:#182b42;color:white;padding:24px max(20px,calc((100vw - 1100px)/2))}header strong{display:block;font-size:24px}header p{color:#d4dfed;margin:6px 0}nav{display:flex;flex-wrap:wrap;gap:14px;margin-top:16px}nav a{color:#dceaff;font-size:14px}main{max-width:1140px;margin:auto;padding:35px 20px 80px}h1{font-size:34px;line-height:1.3}h2{margin-top:55px;line-height:1.4;border-top:1px solid #d5dde7;padding-top:20px;scroll-margin-top:15px}h3{margin-top:30px}a{color:#1857a4}p,li{max-width:105ch}table{display:block;overflow:auto;border-collapse:collapse;background:white;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border:1px solid #d5dde7;padding:10px 13px}th{background:#e9eef5}code{font:0.87em ui-monospace,Consolas,monospace;overflow-wrap:anywhere}pre{overflow:auto;background:#e9eef5;border-radius:5px;padding:17px;line-height:1.5}p code,li code{background:#e9eef5;padding:1px 4px}a:focus-visible{outline:3px solid #367ac6;outline-offset:3px}@media(max-width:700px){main{padding:20px 16px}h1{font-size:28px}body{font-size:15px}nav{gap:10px}}</style></head><body><header><strong>DumpAnalyzer rich reports</strong><p>Source behavior · 6a19ea2 · inspected 2026-10-20<br>Qualification and deployment receipts dated 2026-10-15</p><nav aria-label="Report sections"><a href="#report-path">Report path</a><a href="#identity-and-preservation">Identity and preservation</a><a href="#local-interfaces-and-ui">Local interfaces and UI</a><a href="#full-delivery-and-compatibility">Full delivery and compatibility</a><a href="#historical-qualification-and-rollout">Historical qualification and rollout</a><a href="#source-map">Source map</a><a href="trigger-paths.html">Trigger paths</a><a href="architecture.html">Architecture</a></nav></header><main><h1>Rich reports and operator workflow</h1>
-<p>Source revision: <code>6a19ea297bb219509c994780c96bdd6ce6c4bfab</code>, inspected 2026-10-20. The implementation sections describe this checkout. The qualification and deployment sections preserve dated 2026-10-15 receipts from earlier source baselines; their results do not establish the current deployed binary, service state or live Claude qualification. This documentation refresh made no live debugger, model or service calls.</p>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DumpAnalyzer rich reports · source behavior and dated qualification</title>
+<!-- Generated from docs/rich-reports.md with markdown-it-py 3.0.0 (CommonMark + tables); inspected implementation source links pinned to 6a19ea297bb219509c994780c96bdd6ce6c4bfab. Existing page CSS retained. -->
+<style>body{font:16px/1.65 system-ui,sans-serif;color:#202e40;background:#f5f7fa;margin:0}header{background:#182b42;color:white;padding:24px max(20px,calc((100vw - 1100px)/2))}header strong{display:block;font-size:24px}header p{color:#d4dfed;margin:6px 0}nav{display:flex;flex-wrap:wrap;gap:14px;margin-top:16px}nav a{color:#dceaff;font-size:14px}main{max-width:1140px;margin:auto;padding:35px 20px 80px}h1{font-size:34px;line-height:1.3}h2{margin-top:55px;line-height:1.4;border-top:1px solid #d5dde7;padding-top:20px;scroll-margin-top:15px}h3{margin-top:30px}a{color:#1857a4}p,li{max-width:105ch}table{display:block;overflow:auto;border-collapse:collapse;background:white;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border:1px solid #d5dde7;padding:10px 13px}th{background:#e9eef5}code{font:0.87em ui-monospace,Consolas,monospace;overflow-wrap:anywhere}pre{overflow:auto;background:#e9eef5;border-radius:5px;padding:17px;line-height:1.5}p code,li code{background:#e9eef5;padding:1px 4px}a:focus-visible{outline:3px solid #367ac6;outline-offset:3px}@media(max-width:700px){main{padding:20px 16px}h1{font-size:28px}body{font-size:15px}nav{gap:10px}}</style></head><body><header><strong>DumpAnalyzer rich reports</strong><p>Source review · 6a19ea2 · 2026-10-20<br>Configured reasoner qualification · f269ce8 · 2026-10-20<br>Production rollout and approved delivery canary passed · 2026-10-20<br>Historical native/delivery and deployment receipts · 2026-10-15</p><nav aria-label="Report sections"><a href="#report-path">Report path</a><a href="#identity-and-preservation">Identity and preservation</a><a href="#local-interfaces-and-ui">Local interfaces and UI</a><a href="#full-delivery-and-compatibility">Full delivery and compatibility</a><a href="#configured-gateway-reasoner-qualification-2026-10-20">Configured gateway reasoner qualification (2026-10-20)</a><a href="#production-deployment-checkpoint-2026-10-20">Production deployment checkpoint (2026-10-20)</a><a href="#completed-production-canary-2026-10-20">Completed production canary (2026-10-20)</a><a href="#historical-qualification-and-rollout">Historical qualification and rollout</a><a href="#source-map">Source map</a><a href="trigger-paths.html">Trigger paths</a><a href="architecture.html">Architecture</a></nav></header><main><h1>Rich reports and operator workflow</h1>
+<p>Source revision: <code>6a19ea297bb219509c994780c96bdd6ce6c4bfab</code>, inspected 2026-10-20. The implementation sections describe that source review, which made no live debugger, model or service calls. A later, explicitly authorized <a href="qualification/live-reasoner-2026-10-20/README.md">2026-10-20 qualification</a> at checkout <code>f269ce82d2ac28e9ba77f7f393ffc231e639a164</code> passed the configured CLI/gateway reasoner subgate. Its CLI-reported model was <code>deepseek-flash</code>; this is not an Anthropic Claude model qualification. The separate 2026-10-15 qualification and deployment receipts remain historical evidence and do not establish the current deployed binary or service state.</p>
+<p>The <a href="qualification/production-rollout-2026-10-20/README.md">2026-10-20 production rollout checkpoint</a> records completed analyzer/companion deployment and preserved databases. After the user explicitly approved the exact selected report and destination, the <a href="qualification/production-canary-2026-10-20/README.md">production canary</a> passed publication, idempotent replay, exact readback, publisher-store reopen and native backend restart durability. <strong>P6 production rollout and the bounded selected-report canary are complete at this checkpoint.</strong> Global scheduling and write-back remain off. The earlier rejected action did not publish a report, and its dated receipt remains unchanged.</p>
 <h2 id="report-path">Report path</h2>
 <pre><code class="language-text">verified dump bytes → offline essential CDB pass → optional symbol CDB pass
                                                ↓
@@ -120,6 +121,131 @@
 <p>The legacy <code>posted</code> flag continues to support old reports; it is not proof of full delivery. The independent full outbox scans identity metadata and loads one document at a time. With write-back enabled, boot reconciliation and a separate 60-second delivery loop visit durable pending reports even when automatic analysis is disabled or busy. With write-back disabled, reporting jobs settle locally and the delivery loop makes no publication attempts. Summary acceptance never suppresses later full delivery. Queue settlement remains separate from delivery completeness, so old-server compatibility does not leave a phantom running analysis.</p>
 <p>The rich-report companion protocol uses authenticated <code>GET /api/v2/capabilities</code>, <code>POST /api/v2/dumps/:dumpId/analyses</code> and lazy <code>GET /api/v2/dumps/:dumpId/analyses/:analysisId</code>. A v2 submission adds <code>reportJson</code> and <code>reportDigest</code> to the existing compact submission. A response echoes the compact stored analysis and both full-detail fields. The analyzer validates that acknowledgement before marking full delivery.</p>
 <p>Equal identity/content replays. Conflicting content rejects with 409. A v1 summary may be promoted atomically under its existing analysis ID only if its metadata and reserved digest/ID binding match; an unbound legacy summary cannot be promoted by assumption. The companion's old transfer format cannot preserve rich details, so affected exports/imports are explicitly blocked instead of silently discarding them. See the companion's <code>docs/rich-reports.md</code> for its contract and transfer restriction.</p>
+<h2 id="configured-gateway-reasoner-qualification-2026-10-20">Configured gateway reasoner qualification (2026-10-20)</h2>
+<p>The <a href="qualification/live-reasoner-2026-10-20/README.md">separate dated receipt</a> records successful evidence-only assessment through the configured Claude CLI/gateway path at source/test checkout <code>f269ce82d2ac28e9ba77f7f393ffc231e639a164</code>. The user explicitly authorized importing only connection/model settings from <code>~/.claude</code>; this did not enable the user's tools, hooks or other host policy. Program source and tests were unchanged for this qualification.</p>
+<table>
+<thead>
+<tr>
+<th>Recorded check</th>
+<th>Result and scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Configured execution</td>
+<td>Gateway <code>https://claude.jlcops.com/api/</code>; Claude CLI <code>2.1.300</code>; configured alias <code>opus</code>; <strong>CLI-reported model <code>deepseek-flash</code></strong>. The alias is not proof of an Anthropic backend.</td>
+</tr>
+<tr>
+<td>Ignored live reasoner test</td>
+<td><strong>1/1 passed</strong>, 16.45 seconds, over authored synthetic debugger evidence. No live CDB or SSH acquisition was part of this test.</td>
+</tr>
+<tr>
+<td>Offline fake-host controls</td>
+<td><strong>10/10 passed</strong>, including the separate tool-denial control. These are offline controls, not an observed live denial challenge.</td>
+</tr>
+<tr>
+<td>Preservation comparison</td>
+<td><strong>21/21 passed</strong>; independent review <strong>20/20 passed</strong>. All nine original evidence entries, exception, context, stack, symbols, deterministic mechanism and completeness were unchanged; one accepted model assessment was added.</td>
+</tr>
+<tr>
+<td>Causal boundary</td>
+<td>Underlying cause remained <code>unknown</code>; the deterministic immediate mechanism remained <code>confirmed</code>. Acceptance of a validated assessment does not prove every narrative statement or establish incident origin.</td>
+</tr>
+<tr>
+<td>Host lifecycle</td>
+<td>CLI child PID <code>482105</code> exited and was reaped. This observation is for that local test process, not remote debugger containment.</td>
+</tr>
+</tbody>
+</table>
+<p>The host retained <code>--tools ''</code>, strict empty MCP configuration, disabled hooks, empty settings sources and no session persistence. No live tool-denial challenge or instrumented request counter was recorded; the deny policy and passing fake-host denial control must not be represented as such a live measurement.</p>
+<p>An initial attempt against <code>https://api.anthropic.com</code> failed with <code>Not logged in</code> and produced no accepted assessment. The subsequent configured gateway pass therefore closes <strong>only the configured CLI/gateway evidence-only reasoner subgate</strong>. It does not qualify an Anthropic Claude model, complete all P6 acceptance/rollout work, deploy a daemon or companion service, or establish current CDB/SSH acquisition, TLS/service health, or DumpLedger delivery. Historical native acquisition, migration, browser and delivery receipts retain their original dates and scope.</p>
+<h2 id="production-deployment-checkpoint-2026-10-20">Production deployment checkpoint (2026-10-20)</h2>
+<p>The <a href="qualification/production-rollout-2026-10-20/README.md">separate production rollout receipt</a> records the following completed deployment substeps. These identities, process IDs, counts and endpoints are observations at that checkpoint, rather than ongoing health guarantees.</p>
+<table>
+<thead>
+<tr>
+<th>Substep</th>
+<th>Recorded result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Local analyzer</td>
+<td>Rebuilt from application source <code>f269ce8</code> and deployed as PID <code>495042</code>; binary SHA-256 <code>cc284ecacd1f03d5ed4e5ae8b9659e082139d7b94e2135eb78ccc4088d5541ff</code>. Five rich reports and the existing reports, secrets, byte cache and settled identities were preserved.</td>
+</tr>
+<tr>
+<td>Local settings</td>
+<td><code>cdb-ssh</code>, scheduler off and write-back off, with the prior configuration retained. The deployment did not enable automatic acquisition or publication.</td>
+</tr>
+<tr>
+<td>Analyzer checks</td>
+<td>Full Rust suite: <strong>356 passed, 2 ignored</strong>; Clippy and rustfmt passed. A format-only change was made in <code>tests/runner.rs</code>; this was not a new live debugger or model qualification.</td>
+</tr>
+<tr>
+<td>Windows companion</td>
+<td>Rolled from <code>69eb3d3</code> to <code>7c2a51b51d2638c462778c17fe9421632297b236</code>, excluding the later WH1 work. Node <code>24.21.0</code>; backend PID <code>42476</code>, ports <code>4081</code>/<code>4082</code>; existing proxy PID <code>63648</code>, port <code>4080</code>, unchanged. All <strong>501</strong> candidate build-file hashes were verified.</td>
+</tr>
+<tr>
+<td>Companion migration</td>
+<td>Additive migration 9 was applied after the database already contained migration 10. Dry-run and live comparisons preserved hashes of all eight prior tables; database integrity passed. Counts remained <strong>128 dumps, 33 analyses, 20 customers and 18 cases</strong>. The new <code>analysis_details</code> table contained <strong>0 rows</strong>.</td>
+</tr>
+<tr>
+<td>Companion checks</td>
+<td>Candidate suites passed: <strong>153 unit</strong>, <strong>156 integration</strong>, <strong>28 MBT</strong> and <strong>173 contract</strong> tests.</td>
+</tr>
+<tr>
+<td>Capability/authentication</td>
+<td>TLS was validated. Authenticated v2 capabilities returned <strong>200</strong>, schema version <strong>2</strong>, maximum report <strong>524,288 bytes</strong> and request <strong>1,048,576 bytes</strong>; the unauthenticated request returned <strong>401</strong>. This establishes capability/authentication behavior, not report delivery.</td>
+</tr>
+<tr>
+<td>Backups</td>
+<td>Local: <code>~/.local/state/dump-analyzer/backups/p6-production-20261020T075807Z</code>. Windows companion: <code>D:/Services/dump-ledger-runtime/backups/p6-production-20261020-verified</code>. Use the receipt's matching binary/config/database checkpoint when evaluating rollback.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>At this deployment checkpoint, the publication gate remained open.</strong> Automatic approval review had rejected the single real crash-report publication because the broad rollout request did not explicitly authorize that exact payload and destination; explicit approval was then pending. The rejected action did not execute, add a remote report or change analysis counts: <code>analysis_details</code> remained empty and <code>analyses</code> remained 33. That receipt therefore did not establish a production full-detail publication/readback/restart canary or full P6 completion. The subsequent authorized publication result is recorded separately below.</p>
+<p>The earlier configured gateway reasoner qualification remains separate and unchanged, including its CLI-reported <code>deepseek-flash</code> model boundary. This deployment checkpoint performed no new CDB, SSH acquisition or model run. The historical 2026-10-15 and 2026-10-20 reasoner evidence bundles retain their original bytes and scope.</p>
+<h2 id="completed-production-canary-2026-10-20">Completed production canary (2026-10-20)</h2>
+<p>After the user explicitly approved the exact selected real report and destination, the <a href="qualification/production-canary-2026-10-20/README.md">new canary receipt</a> recorded successful production publication and restart durability. The earlier rollout receipt, including its then-pending publication status and zero detail rows, remains an unchanged historical checkpoint.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Recorded result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Immutable report</td>
+<td><code>r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8</code>; <strong>63,438 bytes</strong>; SHA-256 <code>d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb</code>.</td>
+</tr>
+<tr>
+<td>Production publication</td>
+<td>The Rust publisher obtained accepted analysis <code>analysis_06F9B90BAB5F449199FA9C9C93</code>. Idempotent replay returned the same ID; exact full-report readback and local publisher-store reopen passed.</td>
+</tr>
+<tr>
+<td>Authentication/compatibility</td>
+<td>Before and after restart, authenticated detail GET returned <strong>200</strong>, unauthenticated access <strong>401</strong>, and the same analysis ID/exact report was returned. The v1 list remained compact, prior analysis content was preserved, and only the one approved analysis was added.</td>
+</tr>
+<tr>
+<td>Delivery policy</td>
+<td>The standalone publisher store recorded <code>fullyDelivered</code>. The main live analyzer retained its five canonical reports and existing <code>localOnly</code> policy with scheduler and global write-back <strong>off</strong>, using <code>cdb-ssh</code>.</td>
+</tr>
+<tr>
+<td>Restart durability</td>
+<td>The exact approved report survived a native backend restart. Backend PID <code>51868</code> owned ports <code>4081</code>/<code>4082</code>; proxy PID <code>63648</code> remained unchanged. All <strong>10 post-canary table hashes</strong> matched before/after restart, with all old rows preserved.</td>
+</tr>
+<tr>
+<td>Bounded data change</td>
+<td>Exactly one row was added to each of <code>dump_analyses</code> (<strong>33 → 34</strong>), <code>analysis_details</code> (<strong>0 → 1</strong>) and <code>audit_events</code> (<strong>941 → 942</strong>). Counts of <strong>128 dumps, 20 customers and 18 cases</strong> were unchanged.</td>
+</tr>
+<tr>
+<td>Recovery checkpoint</td>
+<td>Post-canary online and stopped backups were saved. No database restore was performed; a saved backup is not a tested restore claim.</td>
+</tr>
+</tbody>
+</table>
+<p>The completed deployment and selected-report publication/readback/restart checks close the bounded P6 production rollout and canary at this dated checkpoint. This canary published an existing immutable report; it ran no new CDB acquisition or model assessment. The earlier configured gateway's CLI-reported <code>deepseek-flash</code> qualification remains unchanged. Successful transport/storage is not new proof of incident origin, and one selected publication does not enable broad scheduling, global write-back or catalog-wide reanalysis.</p>
 <h2 id="historical-qualification-and-rollout">Historical qualification and rollout</h2>
 <p>The following results are recorded in the <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/integration-receipt.json">2026-10-15 integrated receipt</a>. Its source scope is the then-uncommitted rich-report implementation on DumpAnalyzer <code>0bb92ae</code> and DumpLedger <code>80fb95a</code>. These are preserved measurements, not a fresh qualification of revision <code>6a19ea2</code>.</p>
 <p>The fixture inventory is in <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/README.md">tests/fixtures/report-v2/qualification</a>. Binary dump, EXE and PDB artifacts remain outside Git. The fixture has a known null read and independently checked matching/mismatched GUID/age; it is separate from customer dumps.</p>
@@ -135,8 +261,8 @@
 <p>The native matching canary qualified <code>ReadNull -&gt; CanaryEntry -&gt; main</code> at source lines 12/14/15. The wrong PDB retained raw addresses without qualified source. The exact 24,259-byte report survived Rust publication, idempotent replay, local reopen and an isolated DumpLedger restart under one analysis ID and digest. The historical local database migration was checked on private copies: all old table data, including 34 reports, 79 inventory/queue rows and secrets, remained unchanged. Both isolated test services stopped cleanly.</p>
 <p>Receipts and controlled reports: <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/manifest.json">qualification manifest</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/integration-receipt.json">integrated results</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/local-migration-receipt.json">migration receipt</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/actual-matching-report.json">matching report</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/ledger-roundtrip-provenance.json">restart/delivery provenance</a>.</p>
 <h3 id="historical-claude-qualification-gate-2026-10-15">Historical Claude qualification gate (2026-10-15)</h3>
-<p>The receipt records that the initial actual Claude host started and recorded its model, but its structured-output path returned an error while preserving deterministic evidence. The corrected adapter requests plain JSON and validates it locally, avoiding a formatting tool under the deny-all policy. Fake-host tests cover this path. <strong>The receipt did not verify successful live reasoning after that correction.</strong> This refresh does not establish a newer live qualification result. Automatic approval review rejected the authored-fixture live test because it would transmit evidence to an external Claude destination without explicit user authorization. No blocked command was executed or bypassed.</p>
-<p>The historical check was designed to send only authored synthetic debugger evidence, without SSH or dump transfer, while denying every model tool. A future live qualification would need its own explicitly authorized external destination and a new dated receipt; no live check was performed for this guide.</p>
+<p>The receipt records that the initial actual Claude host started and recorded its model, but its structured-output path returned an error while preserving deterministic evidence. The corrected adapter requests plain JSON and validates it locally, avoiding a formatting tool under the deny-all policy. Fake-host tests cover this path. <strong>The receipt did not verify successful live reasoning after that correction.</strong> The source-only documentation review initially left that dated result unchanged; the later configured gateway result is recorded separately above. Automatic approval review rejected the authored-fixture live test because it would transmit evidence to an external Claude destination without explicit user authorization. No blocked command was executed or bypassed.</p>
+<p>The historical check was designed to send only authored synthetic debugger evidence, without SSH or dump transfer, while denying every model tool. At that checkpoint, a future live qualification needed its own explicitly authorized external destination and a new dated receipt. The authorized 2026-10-20 configured gateway run above is a separate, narrower qualification; it does not rewrite this historical record.</p>
 <p>On 2026-10-15, the <a href="local-deployment-2026-10-15.md">local deployment receipt</a> recorded DumpAnalyzer 0.2.0 in manual mode with write-back off and 34 historical legacy reports. It also recorded that the remote companion had not been upgraded and that full publication and catalog-wide reanalysis had not been performed. Read that receipt as an event at that date, not as the present service state.</p>
 <h2 id="source-map">Source map</h2>
 <table>

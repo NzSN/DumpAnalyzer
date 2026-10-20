@@ -1,0 +1,14 @@
+{
+  "utc": "2026-10-20T08:18:03.752354+00:00",
+  "capabilitiesStatus": 200,
+  "capabilities": {
+    "richReports": {
+      "schemaVersion": 2,
+      "maxReportBytes": 524288,
+      "maxRequestBytes": 1048576
+    }
+  },
+  "unauthenticatedCapabilitiesStatus": 401,
+  "existingCanaryAnalysesUnchanged": true,
+  "writesPerformed": 0
+}

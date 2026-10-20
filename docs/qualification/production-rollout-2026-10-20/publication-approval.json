@@ -1,0 +1,26 @@
+{
+  "schema": "dumpanalyzer.p6.publication-approval/v1",
+  "recordedUtc": "2026-10-20T08:19:37.145999+00:00",
+  "status": "blocked-auto-review-awaiting-user-approval",
+  "commandExecuted": false,
+  "productionReportPublications": 0,
+  "destination": "https://192.168.150.219:4080/api/v2/dumps/dump_4142A5B57E5A4C01A1C47C883E/analyses",
+  "payload": {
+    "reportId": "r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8",
+    "bytes": 63438,
+    "sha256": "d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb",
+    "privatePath": "/home/nzsn/.local/state/dump-analyzer/backups/p6-production-20261020T075807Z/canary-report.json",
+    "sections": [
+      "exception",
+      "register context",
+      "stack",
+      "symbols",
+      "assessment",
+      "debugger evidence"
+    ]
+  },
+  "action": "Existing Rust single-report publisher, idempotent replay, full-detail read-back and restart verification; global write-back remains off.",
+  "automaticReviewReason": "This publishes a real customer crash report and its sensitive canonical contents to a production companion; the broad rollout request does not explicitly authorize that exact payload and destination, despite the local safeguards.",
+  "userQuestionPresented": true,
+  "userApprovalReceived": false
+}

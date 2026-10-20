@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "nativePid": 40308,
+  "creationIdentityCaptured": true,
+  "wrongIdentityRefused": true,
+  "nonListeningChildExitConfirmed": true,
+  "scope": "Isolated Windows timer child with no sockets; completed before production service change."
+}

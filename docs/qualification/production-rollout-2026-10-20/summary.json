@@ -1,0 +1,104 @@
+{
+  "schema": "dumpanalyzer.p6.production-rollout/v1",
+  "recordedUtc": "2026-10-20T08:19:37.146175+00:00",
+  "status": "services-deployed-production-canary-awaiting-approval",
+  "gates": {
+    "analyzerBuildAndTests": "passed",
+    "analyzerProductionRestart": "passed",
+    "companionBuildAndTests": "passed",
+    "migrationOnCopy": "passed",
+    "companionProductionUpgrade": "passed",
+    "existingDataPreservation": "passed",
+    "authenticatedProductionCapabilitiesAndTls": "passed",
+    "selectedProductionPublication": "blocked-auto-review-awaiting-explicit-approval",
+    "productionDetailReplayAndReadback": "not-executed",
+    "productionDetailSurvivesCompanionRestart": "not-executed",
+    "fullP6Complete": false
+  },
+  "analyzer": {
+    "utc": "2026-10-20T08:10:55.883605+00:00",
+    "beforePid": 434463,
+    "beforeBinarySha256": "6ca8ed3f4edf9efc8ff87d394de211faff2c389ded0243d2376827cb4bb1defe",
+    "binarySha256": "cc284ecacd1f03d5ed4e5ae8b9659e082139d7b94e2135eb78ccc4088d5541ff",
+    "stoppedBackup": "/home/nzsn/.local/state/dump-analyzer/backups/p6-production-20261020T075807Z/stopped-before.sqlite",
+    "status": "deployed",
+    "pid": 495042,
+    "httpStatus": 200,
+    "version": "0.2.0",
+    "preservedTables": [
+      "local_reports",
+      "report_details",
+      "secrets",
+      "settled_jobs",
+      "byte_cache"
+    ],
+    "reportCount": 5,
+    "richReportCount": 5,
+    "scheduler": "off",
+    "writeBack": "off",
+    "runner": "cdb-ssh",
+    "integrity": "ok",
+    "configurationUnchanged": true
+  },
+  "companion": {
+    "beforeHead": "69eb3d3ad177421f8b28697ca5e9a95254c68530",
+    "afterHead": "7c2a51b51d2638c462778c17fe9421632297b236",
+    "backendPid": 42476,
+    "proxyPid": 63648,
+    "migrations": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "buildFilesVerified": 501,
+    "oldRowsPreserved": true,
+    "analysisDetails": 0,
+    "analysisCount": 33,
+    "dumpCount": 128,
+    "customerCount": 20,
+    "caseCount": 18,
+    "backup": "D:/Services/dump-ledger-runtime/backups/p6-production-20261020-verified",
+    "configurationUnchanged": true,
+    "deployedWithoutLaterWh1": true
+  },
+  "tests": {
+    "analyzerPassed": 356,
+    "analyzerIgnored": 2,
+    "analyzerClippy": "passed with warnings denied",
+    "analyzerRustfmt": "passed after formatting-only existing test fix",
+    "companionUnitPassed": 153,
+    "companionIntegrationPassed": 156,
+    "companionMbtPassed": 28,
+    "httpContractPassed": 173
+  },
+  "source": {
+    "analyzerHead": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+    "applicationChanges": false,
+    "testFormattingOnly": "tests/runner.rs",
+    "companionLocalHead": "acb4f87c3020d96bb2d8f0eb0453b3b3aec9b9f4",
+    "companionDirtyWorkPreserved": true
+  },
+  "mode": {
+    "scheduler": "off",
+    "writeBack": "off",
+    "runner": "cdb-ssh",
+    "globalReanalysis": false
+  },
+  "noNewCdbOrModelCalls": true,
+  "publicationsAttemptedByProcess": 0,
+  "credentialValuesRecorded": false,
+  "rawCustomerReportIncluded": false,
+  "initialPrepNotes": [
+    "Initial backup script expected frontend/dist; corrected to actual dist/web; partial backup retained without service changes.",
+    "GNU tar treated D: as a remote archive; corrected with --force-local before any service changes.",
+    "Review found a pre-listen cleanup gap in temporary deployment tooling; native creation identity and confirmed cleanup were added and isolated child check passed before rollout.",
+    "A single preexisting rustfmt error in tests/runner.rs was corrected; application code unchanged."
+  ]
+}

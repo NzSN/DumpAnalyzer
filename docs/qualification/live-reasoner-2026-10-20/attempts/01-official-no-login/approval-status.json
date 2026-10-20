@@ -1,0 +1,38 @@
+{
+  "approvalText": "approve",
+  "approvedScope": "Prepared 6054-byte authored synthetic capture plus fixed instructions/schema to https://api.anthropic.com for P6 live Claude test; no customer data, SSH, model tools or Ledger publication.",
+  "approvedUtc": "2026-10-20T07:30:41.755740+00:00",
+  "commandExecuted": false,
+  "destination": "https://api.anthropic.com",
+  "offlineBaseline": {
+    "path": "/tmp/dumpanalyzer-p6-live-20261020/reference/baseline.json",
+    "sha256": "f02ff9023129f6bab27d2462c3fa40695200f195fecba3fba269a2ffc3f0d876"
+  },
+  "offlineControls": {
+    "failed": 0,
+    "log": "offline-controls.log",
+    "passed": 10
+  },
+  "payload": "Fixed instructions/schema and parsed capture from committed authored marked-av.log fixture; no customer dump, SSH, tools or Ledger publication.",
+  "pendingUserQuestion": true,
+  "preparedPayload": {
+    "bytes": 6054,
+    "groups": [
+      "provenance",
+      "exception",
+      "context",
+      "stack",
+      "symbols",
+      "rootCause",
+      "evidence",
+      "completeness"
+    ],
+    "note": "Typed capture only; live host adds fixed instructions/schema from reviewed src/claude_runner.rs.",
+    "path": "/tmp/dumpanalyzer-p6-live-20261020/reference/prepared-capture.json",
+    "sha256": "7365cb3338a2b643d367bb096843710a0bd991b63e8004908690ed00b197514b"
+  },
+  "reviewReason": "Automatic approval review rejected the live action because the user had not explicitly authorized that specific payload and external destination.",
+  "schema": "dumpanalyzer.p6.live-attempt/v1",
+  "status": "user-approved-ready-to-run",
+  "utc": "2026-10-20T07:22:36.290898+00:00"
+}

@@ -1,0 +1,327 @@
+{
+  "bounds": {
+    "maxOutputBytes": 1048576,
+    "maxWorkspaceBytes": 2097152,
+    "wallTimeoutSeconds": 120
+  },
+  "capture": {
+    "completeness": {
+      "omissions": [],
+      "truncated": false
+    },
+    "context": {
+      "evidenceRefs": [
+        "context"
+      ],
+      "faultInstruction": {
+        "address": "0x00007ff6e2d02a41",
+        "bytes": "488b01",
+        "disassembly": "mov     rax,qword ptr [rcx]",
+        "effectiveAddress": "0x0000000000000000",
+        "evidenceRefs": [
+          "instruction"
+        ]
+      },
+      "registers": {
+        "rax": "0x0000000000000000",
+        "rbp": "0x000000d1f27fe730",
+        "rbx": "0x000000d1f27fe9b0",
+        "rcx": "0x0000000000000000",
+        "rip": "0x00007ff6e2d02a41",
+        "rsp": "0x000000d1f27fe6b8"
+      },
+      "source": "exception",
+      "threadId": "0x5f18"
+    },
+    "evidence": [
+      {
+        "command": "version; vertarget; ~; |",
+        "error": null,
+        "id": "target",
+        "status": "present",
+        "text": "Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64\nWindows 10 Version 26200 MP (32 procs) Free x64\n.  0  Id: 2bc4.5f18 Suspend: 0 Teb: 00000000`00000000 Unfrozen\n.  0  id: 2bc4 create Thu Sep 11 08:02:11.000 2025\n",
+        "truncated": false
+      },
+      {
+        "command": ".exr -1",
+        "error": null,
+        "id": "exception",
+        "status": "present",
+        "text": "ExceptionAddress: 00007ff6e2d02a41 (electron!CrashHandler+0x0000000000000041)\n   ExceptionCode: c0000005 (Access violation)\n  ExceptionFlags: 00000000\nExceptionRecord: 0000000000000000\nNumberParameters: 2\n   Parameter[0]: 0000000000000000\n   Parameter[1]: 0000000000000000\nAttempt to read from address 0000000000000000\n",
+        "truncated": false
+      },
+      {
+        "command": ".ecxr; ~.; r",
+        "error": null,
+        "id": "context",
+        "status": "present",
+        "text": "rax=0000000000000000 rbx=000000d1f27fe9b0 rcx=0000000000000000\nrip=00007ff6e2d02a41 rsp=000000d1f27fe6b8 rbp=000000d1f27fe730\nelectron!CrashHandler+0x41:\n00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx]\n",
+        "truncated": false
+      },
+      {
+        "command": "u @$ip L0n16",
+        "error": null,
+        "id": "instruction",
+        "status": "present",
+        "text": "electron!CrashHandler+0x41:\n00007ff6`e2d02a41 488b01          mov     rax,qword ptr [rcx]\n00007ff6`e2d02a44 4885c0          test    rax,rax\n",
+        "truncated": false
+      },
+      {
+        "command": "kn 0n128",
+        "error": null,
+        "id": "stack-before-symbols",
+        "status": "present",
+        "text": " # Child-SP          RetAddr               Call Site\n00 000000d1`f27fe6b8 00007ff6`e2d02b99 electron+0x1f2a41\n01 000000d1`f27fe730 00007ffb`c1e12345 KERNEL32+0x12345\n",
+        "truncated": false
+      },
+      {
+        "command": ".lines -e; .reload /f",
+        "error": null,
+        "id": "symbols-load",
+        "status": "present",
+        "text": "Reloading current modules\n",
+        "truncated": false
+      },
+      {
+        "command": "lmv",
+        "error": null,
+        "id": "modules",
+        "status": "present",
+        "text": "start             end                 module name\n00007ff6`e2b10000 00007ff6`ecc00000 electron (private pdb symbols) C:\\symcache\\electron.pdb\n    Timestamp: Thu Sep 11 08:02:11 2025 (68C24DDB)\n    ImageSize: 0A0F0000\n00007ffb`c1e00000 00007ffb`c1f40000 KERNEL32 (export symbols) C:\\Windows\\System32\\kernel32.dll\n",
+        "truncated": false
+      },
+      {
+        "command": ".lines -e; .ecxr; ~.; kn 0n128",
+        "error": null,
+        "id": "stack",
+        "status": "present",
+        "text": " # Child-SP          RetAddr               Call Site\n00 000000d1`f27fe6b8 00007ff6`e2d02b99 electron!CrashHandler+0x41 [C:\\src\\crash.cc @ 42]\n01 000000d1`f27fe730 00007ffb`c1e12345 KERNEL32!BaseThreadInitThunk+0x17\n",
+        "truncated": false
+      },
+      {
+        "command": "Read minidump ModuleList and RSDS CodeView identities",
+        "error": "not a minidump",
+        "id": "dump-module-identities",
+        "status": "failed",
+        "text": "",
+        "truncated": false
+      }
+    ],
+    "exception": {
+      "access": {
+        "address": "0x0000000000000000",
+        "operation": "read",
+        "underlyingStatus": null
+      },
+      "address": "0x00007ff6e2d02a41",
+      "code": "0xc0000005",
+      "evidenceRefs": [
+        "exception"
+      ],
+      "flags": "0x00000000",
+      "parameterCount": 2,
+      "parameters": [
+        "0x0000000000000000",
+        "0x0000000000000000"
+      ],
+      "recordPointer": "0x0000000000000000",
+      "status": "present"
+    },
+    "provenance": {
+      "analysisRevision": "deterministic-cdb-v2.1",
+      "architecture": "amd64",
+      "debuggerVersion": "Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64",
+      "model": null,
+      "pointerWidth": 64,
+      "processId": "0x2bc4",
+      "provider": "cdb-ssh"
+    },
+    "rootCause": {
+      "conclusion": "The underlying root cause is unknown. A faulting frame or invalid address alone does not establish the defect that produced it.",
+      "evidenceRefs": [],
+      "hypotheses": [],
+      "mechanism": {
+        "description": "The saved exception instruction reads through rcx at 0x0000000000000000, matching the access-violation target 0x0000000000000000. This establishes the immediate faulting read; the origin of the pointer is not established.",
+        "evidenceRefs": [
+          "context",
+          "exception",
+          "instruction"
+        ],
+        "status": "confirmed"
+      },
+      "missingEvidence": [
+        "Source/runtime evidence tracing the faulting state back to its origin"
+      ],
+      "nextChecks": [
+        "Validate matching application PDB identities and inspect the faulting source location",
+        "Trace the relevant pointer or state lifetime using a controlled reproduction, instrumentation, or a time-travel recording"
+      ],
+      "ruleId": null,
+      "status": "unknown"
+    },
+    "stack": {
+      "frames": [
+        {
+          "displacement": "0x41",
+          "evidenceRefs": [
+            "stack"
+          ],
+          "framePointer": null,
+          "function": "CrashHandler",
+          "index": 0,
+          "instructionPointer": "0x00007ff6e2d02a41",
+          "module": "electron",
+          "moduleRva": "0x1f2a41",
+          "resolution": "unverified",
+          "returnAddress": "0x00007ff6e2d02b99",
+          "sourceFile": "C:\\src\\crash.cc",
+          "sourceLine": 42,
+          "stackPointer": "0x000000d1f27fe6b8",
+          "unwind": "reported"
+        },
+        {
+          "displacement": "0x17",
+          "evidenceRefs": [
+            "stack"
+          ],
+          "framePointer": null,
+          "function": "BaseThreadInitThunk",
+          "index": 1,
+          "instructionPointer": null,
+          "module": "KERNEL32",
+          "moduleRva": null,
+          "resolution": "exportsOnly",
+          "returnAddress": "0x00007ffbc1e12345",
+          "sourceFile": null,
+          "sourceLine": null,
+          "stackPointer": "0x000000d1f27fe730",
+          "unwind": "reported"
+        }
+      ],
+      "limitations": [],
+      "status": "present",
+      "threadId": "0x5f18"
+    },
+    "symbols": {
+      "limitations": [
+        "Debugger PDB labels alone are unverified; matching requires the dump RSDS identity and the loaded PDB Info stream identity",
+        "Expected PDB identity unavailable: not a minidump"
+      ],
+      "modules": [
+        {
+          "evidenceRefs": [
+            "modules"
+          ],
+          "expectedPdb": null,
+          "imageBase": "0x7ff6e2b10000",
+          "imageSize": "0x0a0f0000",
+          "loadedPdb": null,
+          "module": "electron",
+          "pdbPath": "C:\\symcache\\electron.pdb",
+          "quality": "unverified",
+          "timestamp": "0x68c24ddb"
+        },
+        {
+          "evidenceRefs": [
+            "modules"
+          ],
+          "expectedPdb": null,
+          "imageBase": "0x7ffbc1e00000",
+          "imageSize": "0x140000",
+          "loadedPdb": null,
+          "module": "KERNEL32",
+          "pdbPath": null,
+          "quality": "exportsOnly",
+          "timestamp": null
+        }
+      ]
+    }
+  },
+  "facts": {
+    "exception": {
+      "address": "0x00007ff6e2d02a41",
+      "code": "0xc0000005",
+      "name": "Access violation"
+    },
+    "faulting_module": "electron",
+    "frames": [
+      "electron+0x1f2a41",
+      "KERNEL32+0x12345",
+      "KERNEL32!BaseThreadInitThunk+0x17"
+    ],
+    "frames_total": 3,
+    "log": {
+      "bytes": 2122,
+      "cap": 1046454,
+      "truncated": false
+    },
+    "process": {
+      "id": "2bc4"
+    },
+    "symbols": {
+      "deferred": 0,
+      "export_only": 1,
+      "missing": [
+        "KERNEL32"
+      ],
+      "modules": {
+        "KERNEL32": "export",
+        "electron": "pdb"
+      },
+      "modules_truncated": false,
+      "no_symbols": 0,
+      "pdb": 1,
+      "unknown": 0
+    }
+  },
+  "fakeTransport": {
+    "execs": [
+      [
+        "mkdir",
+        "-p",
+        "/c/da/work/work"
+      ],
+      [
+        "cdb",
+        "-z",
+        "C:/da/work/work/dump.dmp",
+        "-cf",
+        "C:/da/work/work/triage.cdb",
+        "-y",
+        "C:/da/work/work"
+      ],
+      [
+        "cdb",
+        "-z",
+        "C:/da/work/work/dump.dmp",
+        "-cf",
+        "C:/da/work/work/symbols.cdb",
+        "-y",
+        "C:/da/work/work"
+      ],
+      [
+        "rm",
+        "-rf",
+        "/c/da/work/work"
+      ]
+    ],
+    "puts": [
+      [
+        "/tmp/dumpanalyzer-p6-live-20261020/reference/baseline-KWOVnY/work/triage.cdb",
+        "C:/da/work/work/triage.cdb"
+      ],
+      [
+        "/tmp/dumpanalyzer-p6-live-20261020/reference/baseline-KWOVnY/dump.dmp",
+        "C:/da/work/work/dump.dmp"
+      ],
+      [
+        "/tmp/dumpanalyzer-p6-live-20261020/reference/baseline-KWOVnY/work/symbols.cdb",
+        "C:/da/work/work/symbols.cdb"
+      ]
+    ]
+  },
+  "outcome": "completed",
+  "qualification": "Offline deterministic baseline using production SshCdbRunner with exact authored fixture and FakeTransport; no Claude, SSH, CDB process or network",
+  "sourceCommit": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "summary": "Access violation (0xc0000005) at 0x00007ff6e2d02a41 in electron; 3 frame(s); 2 module(s): 1 with pdb, missing symbols for KERNEL32"
+}

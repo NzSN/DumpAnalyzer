@@ -1,0 +1,126 @@
+{
+  "backendIdentityAttestation": "CLI-reported init model only; this run does not qualify an Anthropic Claude model or attest gateway backend implementation.",
+  "capture": {
+    "bytes": 17257,
+    "deterministicMechanismStatus": "confirmed",
+    "exceptionCode": "0xc0000005",
+    "modelAssessmentEntries": 1,
+    "originalEvidenceEntries": 9,
+    "sha256": "d20cd31562099ceeb74e912fe971fda1bc0779033977b32a879cba20c2ad0110",
+    "statement": "Structural acceptance and preserved evidence do not establish semantic truth of every model hypothesis.",
+    "underlyingCauseStatus": "unknown"
+  },
+  "cliBinary": "/home/nzsn/.local/share/claude/versions/2.1.300",
+  "cliBinarySha256": "674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453",
+  "cliReportedModel": "deepseek-flash",
+  "cliVersion": "2.1.300 (Claude Code)",
+  "configuredModelSelection": "opus",
+  "destination": "https://claude.jlcops.com/api/",
+  "files": {
+    "authorization.json": "d677bbbcdd6d1ae94382515161e02b799e3f009e6b86cc7be281781199c52357",
+    "claude-launch.json": "d56f386da67934308585724f50682179f12f7106a129a82fe43375b77c4dd9dd",
+    "comparison.json": "c34c7bb3f3b7f0f817dccaae3546add93ae2cfbb76bc1094b348e2eec903b7b1",
+    "execution.json": "8f3d846ec74fd1539df127d0342667d49f7c06963cad8a55604ced20a50d0e26",
+    "live-capture.json": "d20cd31562099ceeb74e912fe971fda1bc0779033977b32a879cba20c2ad0110",
+    "live-test.log": "6cd116ccc50b92219b2ece2dfb6126f3d3f8bca8e93fbf838bd413ff1168171d"
+  },
+  "isolation": {
+    "cliPid": 482105,
+    "cliProcessGone": true,
+    "connectionOnlySettingsImported": [
+      "ANTHROPIC_BASE_URL",
+      "ANTHROPIC_AUTH_TOKEN",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+    ],
+    "credentialValuesRecorded": false,
+    "liveDenialChallengePerformed": false,
+    "liveToolRequestCount": "not instrumented; deny-all behavior independently tested with fake host",
+    "reviewedArgv": [
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--permission-prompt-tool",
+      "stdio",
+      "--permission-mode",
+      "default",
+      "--tools",
+      "",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--settings",
+      "{\"disableAllHooks\":true}",
+      "--setting-sources",
+      "",
+      "--no-session-persistence"
+    ],
+    "samePidExecRecorder": true
+  },
+  "limits": [
+    "No customer dump or real SSH/SCP/CDB acquisition",
+    "No Ledger publication, persistence/restart campaign or deployment",
+    "Official api.anthropic.com attempt failed authentication; it remains unqualified",
+    "Existing live receipt omits outcome; direct cross-receipt outcome equality is not asserted",
+    "No observed live denial challenge; fake-host denial control passed"
+  ],
+  "liveTest": {
+    "elapsedSeconds": 16.45,
+    "exitCode": 0,
+    "failed": 0,
+    "name": "live_reasoner_over_synthetic_fixture_without_remote_dump_transfer",
+    "passed": 1
+  },
+  "offlineControls": {
+    "failed": 0,
+    "passed": 10,
+    "scope": "Fake-host denial, evidence preservation, malformed results, deadlines, stream bounds and tool-result rejection."
+  },
+  "preservation": {
+    "checks": {
+      "actualEvidenceRefs": true,
+      "analysisRevision": true,
+      "causeMissingEvidence": true,
+      "causeNextChecks": true,
+      "completeness": true,
+      "context": true,
+      "everyHypothesisQualified": true,
+      "exception": true,
+      "mechanism": true,
+      "modelEvidenceEqualsAcceptedCause": true,
+      "observedModel": true,
+      "originalEvidencePreserved": true,
+      "provenance.architecture": true,
+      "provenance.debuggerVersion": true,
+      "provenance.pointerWidth": true,
+      "provenance.processId": true,
+      "provider": true,
+      "singlePresentModelAssessment": true,
+      "stack": true,
+      "symbols": true,
+      "unconfirmedOrigin": true
+    },
+    "failed": 0,
+    "passed": 21
+  },
+  "qualifiedUtc": "2026-10-20T07:40:41.560465+00:00",
+  "schema": "dumpanalyzer.p6.configured-live-reasoner/v1",
+  "scope": "Production Claude CLI host and configured gateway reasoner path using authored synthetic debugger fixture only.",
+  "sourceHead": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "sourceSha256": {
+    "Cargo.lock": "97195ab5d6eeb372a80cbb57454b8470ccf894ed8955d53795d085903cc294cc",
+    "Cargo.toml": "1fb1f24f7f041179364f921d7e04920474815cbc45c57657a87ee57d4f5e4c6b",
+    "src/assessment.rs": "cbc3d2c47ecfed883fa7ffc470bd187c900344e0da49d774e93a30a9963c400d",
+    "src/claude_runner.rs": "740fdc3a684c556bee9503fcd0adee42d3b3ae65b27798f6bb848fe3ee0d1077",
+    "src/report.rs": "b4c56bb33ab1275f404e8efc709ca147c94d7ee9aa3d22496e20f3c4d733edde",
+    "src/runner.rs": "5aa3b64d58e093c5f35e024d6796d61d0013c3dca64829b659c87f483af6ca59",
+    "src/types.rs": "fd2cc64273fcc6f50eda6ab3075afee1bc15c177429758c8f23cee0549b5c077",
+    "tests/claude_runner.rs": "50034ae540f921da861e6f9b52386431a96e3e6e5dec476be2813462fbe27c08",
+    "tests/fixtures/report-v2/marked-av.log": "b08775464856b39c30c38e879e6418d07dfcc982475b23d4d9b1fa91e944795c"
+  },
+  "status": "passed"
+}

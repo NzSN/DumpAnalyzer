@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import os,json,datetime
+real='/home/nzsn/.local/bin/claude'
+base=Path('/tmp/dumpanalyzer-p6-live-20261020/attempts/02-configured-gateway')
+record={"utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"pid":os.getpid(),"resolvedBinary":str(Path(real).resolve()),"argv":os.sys.argv[1:],"apiBaseUrl":os.environ.get("ANTHROPIC_BASE_URL"),"modelSelection":os.environ.get("ANTHROPIC_MODEL"),"telemetryDisabled":os.environ.get("DISABLE_TELEMETRY"),"errorReportingDisabled":os.environ.get("DISABLE_ERROR_REPORTING"),"nonessentialTrafficDisabled":os.environ.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),"note":"Exec-only recorder. Streams are unmodified and PID is retained; credential values are never recorded."}
+fd=os.open(base/'claude-launch.json',os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+with os.fdopen(fd,'w') as f:json.dump(record,f,indent=2,sort_keys=True)
+os.execve(real,[real,*os.sys.argv[1:]],os.environ)

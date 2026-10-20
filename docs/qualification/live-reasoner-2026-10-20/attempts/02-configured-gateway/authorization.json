@@ -1,0 +1,11 @@
+{
+  "connectionSettingsSource": "~/.claude/settings.json",
+  "context": "Direct reply to approval question naming https://claude.jlcops.com/api/ and the same authored synthetic capture plus fixed instructions/schema.",
+  "destination": "https://claude.jlcops.com/api/",
+  "isolationFlagsPreserved": true,
+  "payloadSha256": "7365cb3338a2b643d367bb096843710a0bd991b63e8004908690ed00b197514b",
+  "schema": "dumpanalyzer.p6.authorization/v1",
+  "scope": "Synthetic live Claude qualification only; no customer dumps, SSH/SCP, model tools, Ledger publication or deployment.",
+  "userInstruction": "with settings at ~/.claude",
+  "utc": "2026-10-20T07:38:50.857661+00:00"
+}

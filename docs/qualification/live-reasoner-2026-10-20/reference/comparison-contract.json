@@ -1,0 +1,26 @@
+{
+  "stableCaptureFields": [
+    "exception",
+    "context",
+    "stack",
+    "symbols",
+    "completeness",
+    "rootCause.mechanism"
+  ],
+  "stableProvenanceFields": [
+    "debuggerVersion",
+    "architecture",
+    "pointerWidth",
+    "processId"
+  ],
+  "stableEvidence": "All entries other than assessment-model must equal deterministic baseline evidence in original order",
+  "requiredLiveProvenance": {
+    "provider": "claude-cdb",
+    "model": "Nonempty observed init model",
+    "analysisRevision": "deterministic-cdb-v2.1;reasoner=claude-host-v2.1"
+  },
+  "requiredModelEvidence": "Exactly one present, untruncated assessment-model entry; its JSON text equals accepted rootCause",
+  "requiredCause": "status hypothesis or unknown; null ruleId; all root/mechanism/hypothesis refs resolve to baseline evidence; every proposed hypothesis has evidenceRefs, missingEvidence, nextChecks",
+  "outcome": "Baseline records production collector outcome; existing live-test receipt does not contain outcome, so cross-receipt outcome equality cannot be asserted",
+  "scope": "Offline baseline only; no live model, denial challenge, network or service qualification"
+}

@@ -1,0 +1,12 @@
+[package]
+name = "dumpanalyzer-p6-reference"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+dump-analyzer = { path = "/home/nzsn/Repos/DumpAnalyzer" }
+async-trait = "=0.1.92"
+tokio = { version = "=1.53.2", features = ["macros", "rt-multi-thread", "time"] }
+serde_json = "=1.0.154"
+tempfile = "=3.27.0"

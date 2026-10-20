@@ -227,3 +227,112 @@ At this 2026-10-15 receipt, P0–P5 were implemented in the working trees; no co
 Resolved implementation detail: the compatibility projection is a pure calculation over an immutable full document. Full detail, compact row and reporting handoff commit together; a crash before commit leaves recoverable execution state, and a crash after commit cannot lose the canonical document. This avoids a partially committed summary/detail pair while preserving full evidence through projection.
 
 See [the operator and qualification guide](../docs/rich-reports.md) and [integrated receipt](../tests/fixtures/report-v2/qualification/integration-receipt.json). A local SSH timeout does not prove remote process-tree termination; a Windows Job Object supervisor remains outside this release's guarantees.
+
+## 10. Configured reasoner qualification addendum (2026-10-20)
+
+The [dated qualification receipt](../docs/qualification/live-reasoner-2026-10-20/README.md)
+records a separately authorized evidence-only reasoner run at source/test
+revision `f269ce82d2ac28e9ba77f7f393ffc231e639a164`. It closes the configured
+CLI/gateway reasoner subgate only. The 2026-10-15 receipt above remains
+unchanged; this addendum does not mark full P6, production deployment,
+SSH/CDB acquisition or DumpLedger delivery passed.
+
+The user authorized importing only connection/model settings from
+`~/.claude`. Claude Code CLI 2.1.300 used the configured gateway
+`https://claude.jlcops.com/api/` with selection alias `opus`; the CLI init
+event reported model `deepseek-flash`. That reported identity is not an
+independent attestation of the backend, and the result does not qualify an
+Anthropic Claude model. The earlier `api.anthropic.com` attempt failed with
+`Not logged in` and produced no accepted assessment.
+
+The explicitly selected ignored live test passed **1/1 in 16.45 seconds**.
+Fake-host controls passed **10/10**, preservation checks **21/21**, and the
+independent review **20/20**. All nine original evidence entries and the
+exception, context, stack, symbols, deterministic mechanism and completeness
+sections were unchanged. One accepted assessment was added; the underlying
+cause stayed `unknown` and the deterministic immediate mechanism stayed
+`confirmed`. Structural acceptance does not prove every model hypothesis.
+
+The existing isolation settings were retained: no enabled tools, strict empty
+MCP configuration, hooks disabled, empty setting sources and no session
+persistence. CLI child PID `482105` was reaped. There was no observed live
+denial challenge or instrumented tool-request counter; denial behavior was
+tested separately with fake hosts.
+
+Companion verification/rollout and a selected production full-detail canary
+remain separate gates before wider reanalysis or write-back under §8. This
+synthetic run establishes no new real-dump, PDB, service, persistence/restart
+or remote-publication qualification. The original controlled-canary
+qualification README, manifest and payload bytes are preserved.
+
+## 11. Production rollout checkpoint (2026-10-20)
+
+The [production rollout receipt](../docs/qualification/production-rollout-2026-10-20/README.md)
+records a passed deployment substep, separate from the earlier qualification
+receipts and the production report canary. The analyzer application at
+`f269ce82d2ac28e9ba77f7f393ffc231e639a164` was rebuilt and deployed with
+manual operation, write-back off and `cdb-ssh` retained. Existing secrets,
+cache, settled identities and reports were preserved; five rich reports
+remained present. The receipt records the binary/process identities and
+private rollback checkpoints.
+
+The remote companion advanced from `69eb3d3` to
+`7c2a51b51d2638c462778c17fe9421632297b236` for rich reports, excluding later
+WH1 work. Migration 9 was added to the ledger that already contained version
+10. Dry-run and live comparisons preserved all eight old table hashes, with
+integrity `ok`: 128 dumps, 33 analyses, 20 customers and 18 cases.
+Authenticated v2 capabilities returned 200 with schema version 2, a 524,288-byte
+report limit and a 1,048,576-byte request limit; unauthenticated access returned
+401, with TLS verified. This checks deployed protocol availability, not a
+full-report write/read-back round-trip.
+
+Recorded validation passed **356 Rust tests, 2 ignored**, Clippy and rustfmt
+after a formatting-only correction in `tests/runner.rs`. Companion candidate
+gates passed **153 unit, 156 integration, 28 MBT and 173 contract tests**.
+The original 2026-10-15 and configured-reasoner evidence bundles are unchanged;
+the earlier CLI-reported `deepseek-flash` result retains its original scope.
+
+**Production canary and full P6 remain open.** Automatic approval review
+rejected publication of the selected real report because the broader rollout
+request did not explicitly authorize that crash payload and destination.
+Explicit approval is pending. No canary publication or new remote analysis
+was performed: `analysis_details` remained empty and the analyses count stayed
+33. This gate initiated no new CDB or model calls. The production full-detail
+publication, read-back and restart canary still needs its own completed
+receipt before wider reanalysis or write-back under §8.
+
+## 12. Approved production canary closeout (2026-10-20)
+
+The [production canary receipt](../docs/qualification/production-canary-2026-10-20/README.md)
+records the user's later explicit approval of the selected real-report
+payload and destination. The blocked checkpoint in §11 remains historical
+evidence; it was followed by this authorized publication and durability proof.
+
+The actual Rust publisher accepted the **63,438-byte** canonical report as
+`analysis_06F9B90BAB5F449199FA9C9C93`. Idempotent replay returned the same
+analysis ID, with exact remote JSON/digest and local reopen verified. Its
+SHA-256 was
+`d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb`.
+Authenticated HTTP detail reads returned 200 and unauthenticated reads 401;
+compact v1 access and the prior analysis were preserved.
+
+The reviewed companion restart and subsequent HTTP verification passed.
+All ten table hashes matched across restart. The only approved additions
+were one analysis (**33 → 34**), one detail (**0 → 1**) and one audit event
+(**941 → 942**); all pre-existing rows, including 128 dumps, 20 customers
+and 18 cases, were preserved. The companion restarted as PID `51868` on
+ports 4081/4082; proxy PID `63648` on 4080 was unchanged. Post-canary online
+and stopped-state backups were saved; no database restore was performed.
+The same report ID, exact canonical bytes and digest remained readable
+through authenticated HTTP after restart.
+
+**The P6 production rollout and bounded publication/read-back/restart canary
+gates are complete.** This result publishes an existing report; it does not
+claim a new CDB acquisition or model run. The isolated publisher reached
+`fullyDelivered`; the main daemon's five rich reports remained `localOnly`.
+Manual operation, automatic scheduling off, write-back off and `cdb-ssh`
+were retained. Wider automatic reanalysis/publication was not enabled.
+Causality and provider qualification limits remain unchanged, including the
+earlier configured gateway's CLI-reported `deepseek-flash` scope. The
+2026-10-15 qualification and both earlier 2026-10-20 evidence bundles remain
+byte-for-byte unchanged.

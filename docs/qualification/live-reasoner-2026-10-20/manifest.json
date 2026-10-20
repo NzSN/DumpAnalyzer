@@ -1,0 +1,161 @@
+{
+  "anthropicClaudeModelQualified": false,
+  "assembledUtc": "2026-10-20T07:47:42.505197+00:00",
+  "backendIdentityAttestation": "CLI-reported init model only; this run does not qualify an Anthropic Claude model or attest gateway backend implementation.",
+  "cliReportedModel": "deepseek-flash",
+  "configuredModelSelection": "opus",
+  "counts": {
+    "independentChecksPassed": 20,
+    "liveTestPassed": 1,
+    "offlineControlsPassed": 10,
+    "preservationChecksPassed": 21
+  },
+  "credentialValuesRecorded": false,
+  "destination": "https://claude.jlcops.com/api/",
+  "files": {
+    "README.md": {
+      "bytes": 6858,
+      "sha256": "096b6a4500bd39b070aaf87e66ef4bfcbc790dd0a4c7e7fe868e70e052415215"
+    },
+    "attempts/01-official-no-login/approval-status.json": {
+      "bytes": 1633,
+      "sha256": "93bb4d99e0784210b921a0ade4f2b8c77f18514cd77a2602eb8f6b0dc514839f"
+    },
+    "attempts/01-official-no-login/attempt.json": {
+      "bytes": 1449,
+      "sha256": "a564ccc5e670d8d781498a2f8bb089b77a442aa351ed7dd7c17fbdefa70294bc"
+    },
+    "attempts/01-official-no-login/claude-launch-canonical.json": {
+      "bytes": 806,
+      "sha256": "9d5a5725ee9f8f8d00812285f0040294b11667a7d0729b3fee1f506a4ed69f69"
+    },
+    "attempts/01-official-no-login/claude-launch.json": {
+      "bytes": 806,
+      "sha256": "9d5a5725ee9f8f8d00812285f0040294b11667a7d0729b3fee1f506a4ed69f69"
+    },
+    "attempts/01-official-no-login/live-test.log": {
+      "bytes": 949,
+      "sha256": "d8092302b5468d3a3b18e7fb0312085a49e93645d619c2ef1d3e109bc63c0296"
+    },
+    "attempts/01-official-no-login/preflight.json": {
+      "bytes": 2494,
+      "sha256": "0e14efceb2287dff5bba5f7de7030bc2c7d6e4b25b6713d5442af43de6acbaa3"
+    },
+    "attempts/02-configured-gateway/authorization.json": {
+      "bytes": 668,
+      "sha256": "d677bbbcdd6d1ae94382515161e02b799e3f009e6b86cc7be281781199c52357"
+    },
+    "attempts/02-configured-gateway/bridge/claude": {
+      "bytes": 967,
+      "sha256": "cd136e61dbcc67420a7e4dc5da53eb5b102d8e95255d9f210880c7d5935b56c2"
+    },
+    "attempts/02-configured-gateway/claude-launch.json": {
+      "bytes": 852,
+      "sha256": "d56f386da67934308585724f50682179f12f7106a129a82fe43375b77c4dd9dd"
+    },
+    "attempts/02-configured-gateway/comparison.json": {
+      "bytes": 872,
+      "sha256": "c34c7bb3f3b7f0f817dccaae3546add93ae2cfbb76bc1094b348e2eec903b7b1"
+    },
+    "attempts/02-configured-gateway/execution.json": {
+      "bytes": 913,
+      "sha256": "8f3d846ec74fd1539df127d0342667d49f7c06963cad8a55604ced20a50d0e26"
+    },
+    "attempts/02-configured-gateway/independent-review.json": {
+      "bytes": 4928,
+      "sha256": "32c2f1118cd96a90b4e707b50c7d86f6a8607d7e329caf496e83a403fed8c060"
+    },
+    "attempts/02-configured-gateway/live-capture.json": {
+      "bytes": 17257,
+      "sha256": "d20cd31562099ceeb74e912fe971fda1bc0779033977b32a879cba20c2ad0110"
+    },
+    "attempts/02-configured-gateway/live-test.log": {
+      "bytes": 352,
+      "sha256": "6cd116ccc50b92219b2ece2dfb6126f3d3f8bca8e93fbf838bd413ff1168171d"
+    },
+    "attempts/02-configured-gateway/qualification.json": {
+      "bytes": 5216,
+      "sha256": "518327579c89f7c13b867efacf706977219ab46c9f700fcbd931845c4fd8337b"
+    },
+    "initial-preflight.json": {
+      "bytes": 2494,
+      "sha256": "0e14efceb2287dff5bba5f7de7030bc2c7d6e4b25b6713d5442af43de6acbaa3"
+    },
+    "offline-controls.log": {
+      "bytes": 1034,
+      "sha256": "85d3e4f4258f8dbca81c57bf83439fb3aa073be57d08f3c88cca0194dd4035c4"
+    },
+    "reference/Cargo.lock": {
+      "bytes": 42744,
+      "sha256": "ee03bc09d993093a79783d05b2e526d3ee664f24bd9214a0cf10a6e6d1bf3e21"
+    },
+    "reference/Cargo.toml": {
+      "bytes": 322,
+      "sha256": "82e20604a560a029b1fa1f838b17636e76c69a28a0e0e22035bd5112ab4cc22b"
+    },
+    "reference/baseline.json": {
+      "bytes": 10454,
+      "sha256": "f02ff9023129f6bab27d2462c3fa40695200f195fecba3fba269a2ffc3f0d876"
+    },
+    "reference/compare.py": {
+      "bytes": 2262,
+      "sha256": "b1abf5767bff5934ea190e782ec3d3590843c0287cdb3dcf592530570471c18a"
+    },
+    "reference/comparison-contract.json": {
+      "bytes": 1165,
+      "sha256": "6e4193701b340d3267e5b14205fffadbdbcd57cabf61953f2e9a637a84c31ad3"
+    },
+    "reference/lock-verification.json": {
+      "bytes": 248,
+      "sha256": "8205acfccf6fe6941b808b72a003b128e74e7652db8e728463fbb63e4d2a4afa"
+    },
+    "reference/main.rs": {
+      "bytes": 5521,
+      "sha256": "52e12eb6fb15548d53ec8c726feb7dd629264c4791504352a1e716eb8ea6dde7"
+    },
+    "reference/manifest.json": {
+      "bytes": 3522,
+      "sha256": "85c82427ba0d2a4b8c8ed65eeb808fbba6c185eada42930d4dbc912043e36bb4"
+    },
+    "reference/prepared-capture.json": {
+      "bytes": 6054,
+      "sha256": "7365cb3338a2b643d367bb096843710a0bd991b63e8004908690ed00b197514b"
+    },
+    "reference/root-Cargo.lock": {
+      "bytes": 48350,
+      "sha256": "97195ab5d6eeb372a80cbb57454b8470ccf894ed8955d53795d085903cc294cc"
+    },
+    "reference/src/main.rs": {
+      "bytes": 5521,
+      "sha256": "52e12eb6fb15548d53ec8c726feb7dd629264c4791504352a1e716eb8ea6dde7"
+    },
+    "run-configured-qualification.py": {
+      "bytes": 3130,
+      "sha256": "928e7362052894d2f4e7bd56630a8c299f788f804b3c20e218276ebc0dd730a2"
+    }
+  },
+  "fullP6QualifiedByThisRun": false,
+  "officialEndpointQualified": false,
+  "publicationNotes": [
+    "All attempt and reference files retain their original bytes.",
+    "reference/main.rs duplicates reference/src/main.rs to preserve the original manifest artifact name and Cargo layout.",
+    "The qualification summary predates the separately exported independent-review.json; this bundle pins both.",
+    "Machine-specific absolute paths in original evidence identify execution inputs; they are not required for offline comparison.",
+    "This manifest hashes all other bundle files; it does not hash itself."
+  ],
+  "schema": "dumpanalyzer.p6.receipt-bundle/v1",
+  "scope": "Production Claude CLI host and configured gateway reasoner path using authored synthetic debugger fixture only.",
+  "sourceHead": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "sourceSha256": {
+    "Cargo.lock": "97195ab5d6eeb372a80cbb57454b8470ccf894ed8955d53795d085903cc294cc",
+    "Cargo.toml": "1fb1f24f7f041179364f921d7e04920474815cbc45c57657a87ee57d4f5e4c6b",
+    "src/assessment.rs": "cbc3d2c47ecfed883fa7ffc470bd187c900344e0da49d774e93a30a9963c400d",
+    "src/claude_runner.rs": "740fdc3a684c556bee9503fcd0adee42d3b3ae65b27798f6bb848fe3ee0d1077",
+    "src/report.rs": "b4c56bb33ab1275f404e8efc709ca147c94d7ee9aa3d22496e20f3c4d733edde",
+    "src/runner.rs": "5aa3b64d58e093c5f35e024d6796d61d0013c3dca64829b659c87f483af6ca59",
+    "src/types.rs": "fd2cc64273fcc6f50eda6ab3075afee1bc15c177429758c8f23cee0549b5c077",
+    "tests/claude_runner.rs": "50034ae540f921da861e6f9b52386431a96e3e6e5dec476be2813462fbe27c08",
+    "tests/fixtures/report-v2/marked-av.log": "b08775464856b39c30c38e879e6418d07dfcc982475b23d4d9b1fa91e944795c"
+  },
+  "status": "passed-configured-gateway-cli-subgate"
+}

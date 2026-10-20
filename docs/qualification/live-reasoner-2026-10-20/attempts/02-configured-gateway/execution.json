@@ -1,0 +1,33 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "--test",
+    "claude_runner",
+    "live_reasoner_over_synthetic_fixture_without_remote_dump_transfer",
+    "--",
+    "--ignored",
+    "--exact",
+    "--nocapture"
+  ],
+  "configurationSource": "~/.claude/settings.json",
+  "credentialValuesRecorded": false,
+  "destination": "https://claude.jlcops.com/api/",
+  "exitCode": 0,
+  "finishedUtc": "2026-10-20T07:39:10.600766+00:00",
+  "liveCaptureCreated": true,
+  "loadedSettingNames": [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+  ],
+  "modelSelection": "opus",
+  "productionIsolationFlagsUnchanged": true,
+  "schema": "dumpanalyzer.p6.execution/v1",
+  "sourceHead": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "startedUtc": "2026-10-20T07:38:53.897440+00:00"
+}

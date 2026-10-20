@@ -1,0 +1,20 @@
+{
+  "analysisId": "analysis_06F9B90BAB5F449199FA9C9C93",
+  "digest": "d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb",
+  "fullDelivery": "fullyDelivered",
+  "idempotentReplay": true,
+  "identicalRemoteDetail": true,
+  "localReopen": true,
+  "reportId": "r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8",
+  "utc": "2026-10-20T08:32:41.270481+00:00",
+  "capabilities": {
+    "richReports": {
+      "schemaVersion": 2,
+      "maxReportBytes": 524288,
+      "maxRequestBytes": 1048576
+    }
+  },
+  "exitCode": 0,
+  "publisherBinarySha256": "de7f6f3ad9884ac015c525250fa3e91975757f35b305c99325c1c00419027c7e",
+  "singleSelectedReport": true
+}

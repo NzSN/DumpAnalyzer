@@ -1,0 +1,33 @@
+{
+  "apiBaseUrl": "https://claude.jlcops.com/api/",
+  "argv": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-prompt-tool",
+    "stdio",
+    "--permission-mode",
+    "default",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--settings",
+    "{\"disableAllHooks\":true}",
+    "--setting-sources",
+    "",
+    "--no-session-persistence"
+  ],
+  "errorReportingDisabled": "1",
+  "modelSelection": "opus",
+  "nonessentialTrafficDisabled": "1",
+  "note": "Exec-only recorder. Streams are unmodified and PID is retained; credential values are never recorded.",
+  "pid": 482105,
+  "resolvedBinary": "/home/nzsn/.local/share/claude/versions/2.1.300",
+  "telemetryDisabled": "1",
+  "utc": "2026-10-20T07:38:54.208183+00:00"
+}

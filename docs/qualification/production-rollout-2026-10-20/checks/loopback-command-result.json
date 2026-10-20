@@ -1,0 +1,18 @@
+{
+  "label": "pnpm-test-loopback-allowed",
+  "command": [
+    "pnpm",
+    "test"
+  ],
+  "environmentOverrides": {
+    "pnpm_config_verify_deps_before_run": "",
+    "npm_config_offline": "true",
+    "npm_config_update_notifier": "false",
+    "CI": "true"
+  },
+  "startUtc": "2026-10-20T07:59:03.660769+00:00",
+  "exitCode": 0,
+  "durationSeconds": 136.441,
+  "log": "/tmp/dump-ledger-p6-build-koffiriq/pnpm-test-loopback-allowed.log",
+  "sandbox": "require_escalated for isolated test loopback sockets"
+}

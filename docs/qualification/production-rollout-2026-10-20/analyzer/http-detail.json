@@ -1,0 +1,12 @@
+{
+  "utc": "2026-10-20T08:17:14.060777+00:00",
+  "httpStatus": 200,
+  "selectedReportId": "r2_1e11b6bae3ee7e131c472a6b8b87e07328bc8375177ed11bcc3009a736cc07d8",
+  "digest": "d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb",
+  "detailUnchanged": true,
+  "fullDelivery": "localOnly",
+  "frames": 23,
+  "evidence": 11,
+  "causeStatus": "unknown",
+  "version": "0.2.0"
+}

@@ -1,0 +1,10 @@
+{
+  "allRegistryPackagesMatchRootLockByNameVersionSourceChecksum": true,
+  "registryPackageCount": 175,
+  "pinnedDirectDependencies": {
+    "async-trait": "0.1.92",
+    "serde_json": "1.0.154",
+    "tempfile": "3.27.0",
+    "tokio": "1.53.2"
+  }
+}

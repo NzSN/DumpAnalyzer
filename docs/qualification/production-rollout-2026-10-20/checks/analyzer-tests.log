@@ -1,0 +1,491 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.35s
+     Running unittests src/lib.rs (target/debug/deps/dump_analyzer-839939716bc277a8)
+
+running 20 tests
+test http::tests::escaping_covers_html_metacharacters ... ok
+test http::tests::phase_names_match_spec_spellings ... ok
+test http::tests::request_line_parsing ... ok
+test scheduler::tests::backoff_doubles_to_the_cap_and_resets ... ok
+test state::tests::now_utc_has_canonical_shape ... ok
+test runner::process_tests::pdb_probe_accepts_local_drive_paths_and_rejects_remote_or_device_paths ... ok
+test state::tests::phase_and_outcome_spellings_match_serde ... ok
+test state::tests::utc_format_matches_known_instants ... ok
+test runner::process_tests::capped_stderr_does_not_wait_for_stdout_eof ... ok
+test sync::unit_tests::guide_vocabulary_lands_in_the_intended_families ... ok
+test sync::unit_tests::classifies_dump_lifecycle_actions ... ok
+test sync::unit_tests::identity_requires_available_phase_and_pinned_hash ... ok
+test sync::unit_tests::feed_actions_pin_the_guide_vocabulary_in_order ... ok
+test scheduler::tests::state_lock_is_exclusive_and_removed_on_drop ... ok
+test scheduler::tests::workspace_sweep_removes_only_orphaned_run_directories ... ok
+test runner::process_tests::request_cap_limits_production_transport_configuration_and_actual_read ... ok
+test runner::process_tests::capped_stdout_does_not_wait_for_stderr_eof ... ok
+test sync::unit_tests::cancellation_token_flags_and_resolves ... ok
+test runner::process_tests::child_wait_after_stdout_eof_stays_inside_caller_deadline ... ok
+test scheduler::tests::report_delivery_drains_manual_queue_with_scheduling_disabled ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/main.rs (target/debug/deps/dump_analyzer-cfba62d15dffd461)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/agent.rs (target/debug/deps/agent-4c3ac7114725e7c6)
+
+running 17 tests
+test budget_matches_the_spec_and_agent_is_send_sync ... ok
+test run_job_requires_a_claimed_job ... ok
+test content_404_drops_the_job_without_retry ... ok
+test agent_byte_cache_single_entry_over_cap_stays_alone ... ok
+test failed_verdict_is_reported_not_retried ... ok
+test runner_failure_retries_with_reverification_then_fails ... ok
+test runner_failure_then_success_retries_once_and_completes ... ok
+test recovery_resets_volatile_phases_and_leaves_reporting ... ok
+test happy_path_fetches_caches_and_reuses_via_etag ... ok
+test agent_byte_cache_fresh_entry_stays_when_over_cap ... ok
+test sha256_mismatch_refetches_bounded_then_fails ... ok
+test agent_byte_cache_cap_evicts_oldest_after_third_write ... ok
+test terminal_write_back_failure_settles_failed ... ok
+test transient_write_back_failure_keeps_the_job_reporting ... ok
+test write_back_404_drops_the_job ... ok
+test agent_byte_cache_evicted_entry_refetches_with_fresh_etag ... ok
+test agent_byte_cache_stays_consistent_across_evictions ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/analyzer.rs (target/debug/deps/analyzer-00f6070360709915)
+
+running 21 tests
+test analyze_purge_mid_run_is_not_found ... ok
+test analyze_rejects_unavailable_phases_and_unsealed ... ok
+test analyze_scope_ambiguous_customer_name_is_terminal ... ok
+test analyze_scope_empty_case_is_an_empty_batch ... ok
+test analyze_reflects_the_run_in_the_jobs_table ... ok
+test analyze_refuses_to_replace_legacy_report_under_same_identity ... ok
+test analyze_happy_path_returns_the_report ... ok
+test analyze_retries_once_and_succeeds ... ok
+test analyze_case_runs_every_available_dump ... ok
+test analyze_scope_unknown_customer_name_is_not_found ... ok
+test analyze_unknown_dump_is_not_found ... ok
+test analyze_scope_resolves_a_customer_display_name ... ok
+test analyze_transient_runner_failures_retry_then_exhaust ... ok
+test analyze_scope_isolates_a_per_dump_failure ... ok
+test concurrent_manual_analysis_of_the_same_identity_is_rejected ... ok
+test dropping_manual_analysis_removes_its_active_job ... ok
+test manual_execution_is_removed_after_a_terminal_error ... ok
+test manual_execution_is_visible_until_report_completion ... ok
+test analyze_local_only_settles_the_work_queue_immediately ... ok
+test analyze_reruns_settled_identities_without_reopening_the_queue ... ok
+test analyze_manual_completion_preserves_a_scheduled_jobs_execution_phase ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running tests/assessment.rs (target/debug/deps/assessment-14379a6d4f7f8778)
+
+running 4 tests
+test plausible_invalid_origin_with_real_evidence_ids_is_rejected ... ok
+test changed_register_or_false_mechanism_defeats_confirmation ... ok
+test nonexistent_assessment_reference_is_rejected ... ok
+test direct_mechanism_proof_keeps_underlying_cause_unknown ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/claude_runner.rs (target/debug/deps/claude_runner-238fc6b3024e5b95)
+
+running 11 tests
+test live_reasoner_over_synthetic_fixture_without_remote_dump_transfer ... ignored, requires authenticated Claude; sends only authored fixture evidence
+test missing_model_binary_keeps_evidence_but_collection_failure_is_still_runner_error ... ok
+test unexpected_tool_result_is_rejected_under_deny_all_policy ... ok
+test host_denies_control_requests_while_stdin_remains_open ... ok
+test deterministic_capture_precedes_host_and_model_cannot_replace_evidence ... ok
+test provider_error_results_keep_bounded_actionable_diagnostics ... ok
+test concurrent_stderr_drain_prevents_pipe_deadlock_and_enforces_output_budget ... ok
+test eof_before_process_exit_is_bounded_and_keeps_collected_report ... ok
+test collection_and_reasoning_share_one_deadline ... ok
+test malformed_unavailable_and_invalid_causal_results_preserve_capture ... ok
+test resolved_model_and_reasoner_revision_survive_optional_reasoning_failure ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running tests/client.rs (target/debug/deps/client-37f15ed31ac062dc)
+
+running 31 tests
+test client_default_api_timeout_is_thirty_seconds ... ok
+test client_argument_validation_rejects_before_sending ... ok
+test client_get_content_sends_if_none_match_and_maps_304 ... ok
+test client_get_events_sends_filtered_cursor_request ... ok
+test client_ledger_client_is_send_and_sync ... ok
+test client_get_content_returns_bytes_and_etag_without_validator ... ok
+test client_get_dumps_without_filters_sends_bare_request ... ok
+test client_base_url_path_prefix_is_preserved ... ok
+test client_get_analyses_returns_reports ... ok
+test client_get_dump_by_sha256_returns_matching_entries ... ok
+test client_get_dumps_cursor_argument_overrides_params_cursor ... ok
+test client_get_events_without_filters_sends_bare_request ... ok
+test client_new_rejects_header_hostile_token_without_echoing_it ... ok
+test client_malformed_success_body_maps_to_decode ... ok
+test client_get_dumps_sends_exact_authenticated_catalog_request ... ok
+test client_maps_401_envelope_to_terminal_server_error ... ok
+test client_maps_403_envelope_to_terminal_server_error ... ok
+test client_tls_ca_cert_missing_file_and_garbage_pem_fail_fast ... ok
+test client_maps_404_envelope_to_terminal_server_error ... ok
+test client_post_analysis_created_on_201 ... ok
+test client_post_analysis_replayed_on_200 ... ok
+test client_transport_failure_maps_to_transient_transport_error ... ok
+test client_non_envelope_error_bodies_keep_a_null_code ... ok
+test client_token_never_appears_in_debug_errors_or_urls ... ok
+test client_unexpected_success_status_maps_to_decode ... ok
+test rich_get_validates_analysis_locator_and_canonical_metadata ... ok
+test rich_post_requires_full_ack_echo_and_closed_metadata ... ok
+test client_get_dump_returns_detail_with_symbol_coverage ... ok
+test client_server_failure_maps_to_transient_server_error ... ok
+test client_api_timeout_fires_early_and_is_transient ... ok
+test client_content_route_is_exempt_from_the_api_total_deadline ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/config.rs (target/debug/deps/config-cb8c477e2cef65ac)
+
+running 29 tests
+test config_accepts_base_url_with_path_prefix ... ok
+test config_accepts_poll_interval_boundaries ... ok
+test config_base_url_http_allowed_only_on_loopback ... ok
+test config_defaults_when_only_required_vars_are_set ... ok
+test config_debug_output_never_exposes_the_token ... ok
+test config_ignores_unknown_variables ... ok
+test config_http_addr_empty_disables ... ok
+test config_http_addr_defaults_to_loopback_4180 ... ok
+test config_is_send_and_sync ... ok
+test config_http_addr_custom_and_malformed ... ok
+test config_normalizes_base_url_through_url_parsing ... ok
+test config_overrides_every_optional_variable ... ok
+test config_rejects_malformed_base_urls ... ok
+test config_rejects_base_url_credentials_query_and_fragment ... ok
+test config_rejects_empty_or_whitespace_bearing_tokens ... ok
+test config_rejects_malformed_numeric_values ... ok
+test config_requires_base_url_and_token ... ok
+test config_runner_defaults_to_cdb_ssh ... ok
+test config_trims_surrounding_whitespace_of_non_secret_values ... ok
+test config_run_bounds_match_the_configured_caps ... ok
+test config_tls_ca_cert_optional_path ... ok
+test config_rejects_poll_intervals_outside_the_allowed_range ... ok
+test config_token_errors_never_echo_the_value ... ok
+test config_runner_rejects_unknown_provider ... ok
+test config_writeback_flag ... ok
+test legacy_version_cannot_be_reused_for_new_capture_profile ... ok
+test config_takes_the_last_duplicate_value ... ok
+test config_treats_empty_optional_values_as_unset ... ok
+test config_runner_claude_cdb ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/daemon.rs (target/debug/deps/daemon-3ff83f8d1163d7f2)
+
+running 9 tests
+test sigterm_shuts_the_daemon_down_cleanly ... ok
+test second_daemon_fails_fast_while_the_lock_is_held ... ok
+test daemon_persists_the_env_token_and_boots_from_it_later ... ok
+test daemon_writeback_off_settles_done_without_any_post ... ok
+test daemon_survives_a_purge_of_the_executing_job ... ok
+test daemon_analyzes_two_dumps_end_to_end ... ok
+test daemon_scheduler_off_discovers_but_never_claims ... ok
+test purge_event_mid_run_drops_the_queued_job ... ok
+test daemon_resumes_interrupted_queue_entries_and_drains_them ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests/explorer.rs (target/debug/deps/explorer-8ab716f04db053d3)
+
+running 9 tests
+test browse_validates_queries_and_handles_empty_or_unknown_scopes ... ok
+test explorer_catalog_failures_remain_errors ... ok
+test explorer_caches_remote_catalog_but_reads_current_analysis_phase ... ok
+test explorer_repeated_cursor_is_an_error_instead_of_partial_results ... ok
+test explorer_empty_catalog_is_an_empty_explorer ... ok
+test browse_search_preserves_parent_matches_and_full_scope_counts ... ok
+test explorer_follows_pages_groups_by_ids_and_retains_completed_dumps ... ok
+test browse_phase_is_current_and_only_page_dumps_are_enriched ... ok
+test browse_large_catalog_returns_only_bounded_rows_at_each_level ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.49s
+
+     Running tests/http.rs (target/debug/deps/http-fa7d1c0e4fb3b07f)
+
+running 31 tests
+test analyze_form_renders_a_result_page ... ok
+test analyze_case_and_customer_json_routes ... ok
+test dashboard_without_analyzer_reports_no_capability ... ok
+test analyze_happy_path_returns_the_report_json ... ok
+test analyze_requires_the_token ... ok
+test dashboard_capabilities_reflect_wiring ... ok
+test http_catalog_failure_does_not_break_the_jobs_api ... ok
+test http_dashboard_shares_one_actions_card ... ok
+test discovered_dumps_do_not_appear_in_jobs_or_queue_counts ... ok
+test http_dashboard_and_json_api ... ok
+test http_empty_state_renders ... ok
+test http_dashboard_rescan_capability_follows_wiring ... ok
+test empty_token_uses_the_stored_token_and_none_configured_denies ... ok
+test http_rescan_empty_catalog_reports_zero_and_sends_exact_query ... ok
+test http_dump_browse_returns_one_level_and_one_page ... ok
+test http_rescan_form_runs_and_renders_count ... ok
+test http_rescan_get_is_method_not_allowed ... ok
+test http_explorer_groups_catalog_dumps_independently_of_jobs ... ok
+test http_rescan_maps_transient_failure_to_503 ... ok
+test http_rescan_inserts_one_available_dump_and_is_idempotent ... ok
+test analyze_error_mapping ... ok
+test http_rescan_requires_the_token ... ok
+test http_rescan_terminal_failure_is_500 ... ok
+test http_rescan_unwired_is_500 ... ok
+test store_token_ledger_rejection_stores_nothing ... ok
+test store_token_form_renders_a_result_page ... ok
+test store_token_probes_the_ledger_and_updates_live_auth ... ok
+test manual_execution_is_visible_in_jobs_and_explorer_until_completion ... ok
+test rich_report_is_lazy_and_legacy_detail_is_explicit ... ok
+test terminal_jobs_leave_the_work_queue_and_keep_reports ... ok
+test http_reports_are_bounded_and_status_counts_cover_the_complete_store ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.96s
+
+     Running tests/mbt.rs (target/debug/deps/mbt-88d83bee13cc036a)
+
+running 1 test
+test mbt_replay_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.88s
+
+     Running tests/report.rs (target/debug/deps/report-231cc1961b602453)
+
+running 6 tests
+test canonical_roundtrip_keeps_required_sections_and_64_bit_precision ... ok
+test identity_evidence_and_symbol_claims_are_checked ... ok
+test flattened_report_contract_rejects_unknown_root_and_nested_fields ... ok
+test compact_projection_is_bound_and_cannot_mutate_canonical_evidence ... ok
+test actual_windows_canary_documents_preserve_qualified_and_missing_evidence ... ok
+test canonical_budget_failure_is_explicit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/rich_state.rs (target/debug/deps/rich_state-3bacf02787c11525)
+
+running 8 tests
+test projection_binding_is_mandatory_and_cannot_mutate_canonical_detail ... ok
+test canonical_detail_exceeds_v1_budget_and_survives_reopen_exactly ... ok
+test scheduled_handoff_is_atomic_and_invalid_handoff_rolls_back_everything ... ok
+test immutable_replay_keeps_id_digest_delivery_and_rejects_conflicting_evidence ... ok
+test summary_acceptance_does_not_claim_full_delivery_or_retain_a_phantom_job ... ok
+test manual_save_preserves_another_active_run_and_purged_identity ... ok
+test migration_from_v3_preserves_history_and_assigns_legacy_locators ... ok
+test report_pages_do_not_load_or_deserialize_full_detail_or_legacy_facts ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/runner.rs (target/debug/deps/runner-c3ba84f4da94e278)
+
+running 36 tests
+test failed_saved_context_never_labels_fallback_stack_with_exception_ip ... ok
+test in_page_error_preserves_and_decodes_underlying_status ... ok
+test missing_exception_parameter_count_remains_partial ... ok
+test rich_script_records_exception_before_forcing_symbols_and_never_ignores_identity ... ok
+test rich_exception_context_stack_and_evidence_are_retained ... ok
+test rich_missing_exception_and_cut_section_are_explicit ... ok
+test module_limit_keeps_fault_and_stack_modules_and_reports_omissions ... ok
+test runner_corrupt_fixture_fails_as_dump_corrupt ... ok
+test runner_cdb_timeout_is_a_runner_error_never_a_verdict ... ok
+test runner_log_with_quit_marker_but_no_facts_is_a_failed_verdict ... ok
+test runner_clean_fixture_yields_completed_triage ... ok
+test runner_frames_are_capped_and_facts_stay_bounded ... ok
+test runner_dump_staging_failure_is_a_runner_error_and_cdb_never_runs ... ok
+test runner_kv_frames_with_argument_columns_are_understood ... ok
+test runner_clean_log_with_nonzero_exit_is_a_runner_error ... ok
+test runner_missing_caller_symbols_alone_stay_completed ... ok
+test runner_missing_staged_dump_is_rejected_before_staging ... ok
+test runner_output_cap_hit_before_any_facts_is_a_runner_error ... ok
+test runner_symbol_path_injection_is_rejected_before_staging ... ok
+test runner_corrupt_dump_is_a_failed_verdict_even_with_nonzero_exit ... ok
+test runner_and_box_forward_phase_caps_and_metadata_has_its_own_small_budget ... ok
+test runner_unparseable_logs_are_runner_errors ... ok
+test runner_truncated_log_without_quit_marker_is_a_runner_error ... ok
+test runner_tabular_frames_are_understood ... ok
+test runner_zero_wall_timeout_fails_before_any_transport_call ... ok
+test runner_unparsed_cdb_output_is_a_runner_error_not_a_verdict ... ok
+test runner_workspace_over_cap_fails_before_any_transport_call ... ok
+test top_frame_rva_uses_saved_ip_and_image_base ... ok
+test runner_symbols_fixture_fails_for_missing_critical_symbols ... ok
+test runner_run_stages_script_and_dump_then_parses_cdb ... ok
+test rich_excerpt_and_frame_limits_declare_truncation ... ok
+test runner_output_cap_truncates_and_marks_the_log ... ok
+test successful_symbol_refinement_upgrades_offline_baseline_verdict ... ok
+test runner_independently_qualifies_loaded_pdb_and_rejects_wrong_age ... ok
+test runner_shared_deadline_bounds_staging_even_if_transport_ignores_timeout ... ok
+test optional_symbol_timeout_preserves_essential_evidence_and_cleans_workspace ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/state.rs (target/debug/deps/state-3e59bf0ec77bdef9)
+
+running 25 tests
+test state_open_creates_missing_parent_directories ... ok
+test state_phase_of_reports_presence ... ok
+test state_open_applies_migrations_once_and_reopen_preserves_data ... ok
+test current_capture_profile_never_claims_old_discoveries ... ok
+test state_cache_index_upserts_looks_up_and_touches_by_sha256 ... ok
+test state_conditional_transition_does_not_settle_a_job_claimed_by_another_worker ... ok
+test state_local_reports_insert_or_ignore_pending_and_mark_posted ... ok
+test state_cursor_regression_is_rejected_and_equal_values_are_allowed ... ok
+test state_drop_job_marks_terminal_and_blocks_rediscovery ... ok
+test state_claims_are_unique_across_concurrent_claimers ... ok
+test state_claim_next_takes_oldest_discovered_and_persists_phase ... ok
+test state_migration_archives_legacy_terminal_rows_and_preserves_active_work ... ok
+test state_record_attempt_counts_up_and_unknown_jobs_are_state_errors ... ok
+test state_schema_matches_the_specified_migration ... ok
+test state_secrets_store_latest_values ... ok
+test state_settled_transitions_are_idempotent_and_cannot_implicitly_requeue ... ok
+test state_report_pages_search_literals_and_combine_outcome_and_delivery_filters ... ok
+test state_recovery_queries_reset_volatile_phases_and_keep_reporting ... ok
+test state_terminal_transition_rolls_back_archive_if_queue_removal_fails ... ok
+test state_set_phase_round_trips_every_phase_spelling ... ok
+test state_upsert_discovered_is_idempotent_and_keyed_by_identity ... ok
+test state_terminal_jobs_leave_the_queue_and_preserve_reports_and_dedup_on_restart ... ok
+test state_report_pages_normalize_bounds_and_clamp_out_of_range_pages ... ok
+test state_work_queue_selects_only_claimed_work_without_decoding_discovery_candidates ... ok
+test state_report_pages_traverse_every_report_in_stable_newest_order ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.29s
+
+     Running tests/symbols.rs (target/debug/deps/symbols-33546b96b8e16989)
+
+running 4 tests
+test corrupt_offsets_and_oversized_directories_fail_closed ... ok
+test independently_reads_rsds_and_info_stream_guid_age ... ok
+test wrong_guid_or_age_cannot_be_matched ... ok
+test file_inventory_reads_only_metadata_and_matches_slice_parser ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sync.rs (target/debug/deps/sync-a8a6c522869604ac)
+
+running 7 tests
+test sync_feed_requests_carry_the_pinned_action_filter ... ok
+test sync_cancellation_stops_an_idle_follower_promptly ... ok
+test sync_cursor_regression_from_the_server_is_rejected ... ok
+test sync_initial_scan_walks_every_page_and_schedules_available_dumps ... ok
+test sync_purge_event_drops_the_job_of_any_phase_and_ignores_unknown_dumps ... ok
+test sync_duplicate_event_replay_is_idempotent ... ok
+test sync_interleaved_insert_between_pages_is_not_double_scheduled ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/tlsprobe.rs (target/debug/deps/tlsprobe-5cbf537e97cf8d21)
+
+running 1 test
+test probe ... ignored, live probe only
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/verdict.rs (target/debug/deps/verdict-5387128763e36e66)
+
+running 35 tests
+test verdict_assemble_enforces_the_4kib_facts_budget ... ok
+test verdict_assemble_facts_budget_alone_can_absent_facts ... ok
+test verdict_assemble_rejects_over_bound_analyzer_names ... ok
+test verdict_assemble_maximal_bounded_report_always_fits ... ok
+test verdict_assemble_normalizes_facts_and_rejects_non_objects ... ok
+test verdict_assemble_truncates_summary_on_codepoint_boundaries ... ok
+test verdict_assemble_shrinks_facts_to_fit_the_envelope ... ok
+test rich_prepare_rejects_conflicting_fresh_capture_without_hiding_it ... ok
+test rich_remote_read_checks_digest_and_preserves_document ... ok
+test verdict_boot_requeues_reportless_job_without_waiting_for_the_ledger ... ok
+test verdict_reconcile_replay_sweep_abandons_verdicts_for_purged_dumps ... ok
+test verdict_local_recovery_requeues_reportless_jobs ... ok
+test verdict_local_sink_records_and_settles_without_any_http ... ok
+test verdict_reconcile_confirms_reporting_job_present_server_side ... ok
+test rich_summary_fallback_later_promotes_full_detail_without_losing_it ... ok
+test verdict_reconcile_drops_reporting_job_when_dump_is_gone ... ok
+test rich_ack_loss_replays_exact_document_and_rejects_wrong_ack_identity ... ok
+test verdict_reconcile_reposts_when_identity_is_absent ... ok
+test verdict_reconcile_requeues_reporting_job_without_local_copy ... ok
+test verdict_replay_pending_with_nothing_pending_makes_no_requests ... ok
+test verdict_reconcile_route_still_absent_keeps_local_mode ... ok
+test verdict_replay_pending_transient_failure_keeps_rows_pending ... ok
+test verdict_replay_dequeues_a_report_already_posted_before_queue_update ... ok
+test verdict_replay_pending_route_absent_keeps_rows_pending ... ok
+test verdict_replay_pending_delivers_stored_verdicts_when_route_appears ... ok
+test verdict_replay_sweep_settles_the_reporting_job_done ... ok
+test verdict_submit_created_settles_done_and_marks_posted ... ok
+test verdict_submit_dump_404_drops_the_job ... ok
+test verdict_submit_rejects_mismatched_submission_before_io ... ok
+test verdict_route_absent_dequeues_only_reporting_jobs_with_local_reports ... ok
+test verdict_submit_invalid_request_fails_the_job ... ok
+test verdict_submit_transient_error_keeps_the_job_reporting ... ok
+test verdict_submit_replay_200_settles_done ... ok
+test verdict_submit_route_404_enters_local_verdict_mode_and_later_replays ... ok
+test rich_terminal_v1_fallback_abandons_full_delivery_and_settles_queue ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+     Running tests/wire.rs (target/debug/deps/wire-76daa45edbe815e2)
+
+running 53 tests
+test wire_analyzer_name_version_bounds ... ok
+test wire_catalog_entry_as_str_matches_serde ... ok
+test wire_analysis_report_round_trips_full_and_minimal ... ok
+test wire_catalog_entry_canonical_timestamp_rules ... ok
+test wire_catalog_entry_full_fixture_round_trips ... ok
+test wire_catalog_entry_nullable_fixture_round_trips ... ok
+test wire_catalog_entry_rejects_null_optionals ... ok
+test wire_catalog_entry_canonical_decimal_rules ... ok
+test wire_catalog_entry_identifier_rules ... ok
+test wire_catalog_entry_requires_nullable_keys ... ok
+test wire_catalog_entry_text_bounds ... ok
+test wire_catalog_query_empty_and_partial ... ok
+test wire_catalog_query_canonical_pairs ... ok
+test wire_catalog_query_rejects_bad_values ... ok
+test wire_catalog_response_next_cursor_rules ... ok
+test wire_catalog_response_round_trips_with_and_without_cursor ... ok
+test wire_catalog_page_fixture_round_trips ... ok
+test wire_catalog_symbol_coverage_counter_rules ... ok
+test wire_decimal_string_rules ... ok
+test wire_cursor_bound_and_whitespace ... ok
+test wire_dump_detail_components_round_trip_standalone ... ok
+test wire_decoded_fixtures_pass_validate ... ok
+test wire_catalog_entry_vocabulary_is_closed ... ok
+test wire_dump_detail_fixture_round_trips ... ok
+test wire_dump_detail_inspection_failure_fixture_round_trips ... ok
+test wire_dump_detail_sha256_rule_is_enforced ... ok
+test wire_dump_detail_identifier_rules_are_enforced ... ok
+test wire_dump_detail_canonical_timestamp_rules_are_enforced ... ok
+test wire_dump_detail_unknown_fields_are_rejected ... ok
+test wire_dump_detail_text_bounds_are_enforced ... ok
+test wire_dump_detail_canonical_decimal_rules_are_enforced ... ok
+test wire_event_feed_entry_bounds ... ok
+test wire_dump_detail_validate_maps_violations_to_decode ... ok
+test wire_error_envelope_round_trips_with_helpers ... ok
+test wire_event_detail_bound_counts_utf8_bytes ... ok
+test wire_event_feed_fixture_round_trips ... ok
+test wire_event_feed_detail_bound ... ok
+test wire_event_feed_params_rejects_bad_values ... ok
+test wire_event_feed_params_serialization ... ok
+test wire_event_feed_page_fixture_round_trips ... ok
+test wire_dump_detail_vocabulary_is_closed ... ok
+test wire_dump_detail_wrong_types_are_rejected ... ok
+test wire_kind_bounds_enforced ... ok
+test wire_event_entry_fixture_round_trips ... ok
+test wire_summary_bound_counts_chars ... ok
+test wire_submission_round_trips_without_server_assigned_fields ... ok
+test wire_wrong_types_are_rejected ... ok
+test wire_validate_maps_violations_to_decode ... ok
+test wire_sha256_rule_enforced ... ok
+test wire_unknown_fields_are_rejected ... ok
+test wire_dump_detail_array_caps_are_enforced ... ok
+test wire_catalog_response_dumps_cap ... ok
+test wire_event_feed_events_cap ... ok
+
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+   Doc-tests dump_analyzer
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

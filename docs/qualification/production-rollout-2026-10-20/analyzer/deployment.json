@@ -1,0 +1,25 @@
+{
+  "utc": "2026-10-20T08:10:55.883605+00:00",
+  "beforePid": 434463,
+  "beforeBinarySha256": "6ca8ed3f4edf9efc8ff87d394de211faff2c389ded0243d2376827cb4bb1defe",
+  "binarySha256": "cc284ecacd1f03d5ed4e5ae8b9659e082139d7b94e2135eb78ccc4088d5541ff",
+  "stoppedBackup": "/home/nzsn/.local/state/dump-analyzer/backups/p6-production-20261020T075807Z/stopped-before.sqlite",
+  "status": "deployed",
+  "pid": 495042,
+  "httpStatus": 200,
+  "version": "0.2.0",
+  "preservedTables": [
+    "local_reports",
+    "report_details",
+    "secrets",
+    "settled_jobs",
+    "byte_cache"
+  ],
+  "reportCount": 5,
+  "richReportCount": 5,
+  "scheduler": "off",
+  "writeBack": "off",
+  "runner": "cdb-ssh",
+  "integrity": "ok",
+  "configurationUnchanged": true
+}

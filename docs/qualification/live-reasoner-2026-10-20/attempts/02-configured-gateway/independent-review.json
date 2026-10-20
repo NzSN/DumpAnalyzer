@@ -1,0 +1,108 @@
+{
+  "schema": "dumpanalyzer.p6.independent-review/v1",
+  "reviewedUtc": "2026-10-20T07:40:48.640857+00:00",
+  "reviewer": "/root/p6_boundary_review",
+  "scope": "Actual synthetic-fixture reasoner run through Claude CLI and the configured gateway; deterministic preservation and structural acceptance",
+  "sourceHead": "f269ce82d2ac28e9ba77f7f393ffc231e639a164",
+  "result": "pass-configured-gateway-cli-subgate",
+  "allIndependentChecksPassed": true,
+  "existingComparator": {
+    "path": "/tmp/dumpanalyzer-p6-live-20261020/reference/compare.py",
+    "executed": true,
+    "exitCode": 0,
+    "passedChecks": 21,
+    "totalChecks": 21,
+    "scope": "Structural preservation; supplemented here with production top-level hypothesis rule"
+  },
+  "independentChecks": {
+    "sourceHeadMatches": true,
+    "allPinnedSourceHashesMatch": true,
+    "immutableReferenceArtifactsMatch": true,
+    "executionExitZero": true,
+    "captureTypeFieldsUnchanged": true,
+    "allDeterministicSectionsPreserved": true,
+    "originalEvidencePreservedExactly": true,
+    "deterministicMechanismPreserved": true,
+    "underlyingCauseNotConfirmed": true,
+    "unsupportedRuleAbsent": true,
+    "allAssessmentReferencesCaptured": true,
+    "productionTopLevelHypothesisRule": true,
+    "perHypothesisEvidenceMissingAndNextChecksPresent": true,
+    "causeMissingAndNextChecksPresent": true,
+    "observedModelWellFormed": true,
+    "providerAndRevisionCorrect": true,
+    "onePresentUntruncatedModelAssessment": true,
+    "modelEvidenceCommandMatchesSource": true,
+    "modelEvidenceEqualsAcceptedAssessment": true,
+    "noCaptureOmissionsOrTruncation": true
+  },
+  "topLevelHypothesisRule": {
+    "applies": false,
+    "passed": true,
+    "actualCauseStatus": "unknown",
+    "perHypothesisCount": 2
+  },
+  "observedResult": {
+    "observedInitModel": "deepseek-flash",
+    "requestedModelAlias": "opus",
+    "configuredGateway": "https://claude.jlcops.com/api/",
+    "rootCauseStatus": "unknown",
+    "mechanismStatus": "confirmed",
+    "originalEvidenceCount": 9,
+    "acceptedModelEvidenceCount": 1
+  },
+  "sourcePinChecks": {
+    "/home/nzsn/Repos/DumpAnalyzer/Cargo.toml": true,
+    "/home/nzsn/Repos/DumpAnalyzer/Cargo.lock": true,
+    "/home/nzsn/Repos/DumpAnalyzer/src/claude_runner.rs": true,
+    "/home/nzsn/Repos/DumpAnalyzer/src/runner.rs": true,
+    "/home/nzsn/Repos/DumpAnalyzer/src/report.rs": true,
+    "/home/nzsn/Repos/DumpAnalyzer/src/assessment.rs": true,
+    "/home/nzsn/Repos/DumpAnalyzer/src/symbols.rs": true,
+    "/home/nzsn/Repos/DumpAnalyzer/tests/claude_runner.rs": true,
+    "/home/nzsn/Repos/DumpAnalyzer/tests/fixtures/report-v2/marked-av.log": true
+  },
+  "referenceArtifactChecks": {
+    "baseline.json": true,
+    "prepared-capture.json": true,
+    "compare.py": true,
+    "comparison-contract.json": true,
+    "lock-verification.json": true
+  },
+  "inputs": {
+    "liveCapture": {
+      "path": "/tmp/dumpanalyzer-p6-live-20261020/attempts/02-configured-gateway/live-capture.json",
+      "bytes": 17257,
+      "sha256": "d20cd31562099ceeb74e912fe971fda1bc0779033977b32a879cba20c2ad0110"
+    },
+    "execution": {
+      "path": "/tmp/dumpanalyzer-p6-live-20261020/attempts/02-configured-gateway/execution.json",
+      "bytes": 913,
+      "sha256": "8f3d846ec74fd1539df127d0342667d49f7c06963cad8a55604ced20a50d0e26"
+    },
+    "referenceManifest": {
+      "path": "/tmp/dumpanalyzer-p6-live-20261020/reference/manifest.json",
+      "bytes": 3522,
+      "sha256": "85c82427ba0d2a4b8c8ed65eeb808fbba6c185eada42930d4dbc912043e36bb4"
+    },
+    "baseline": {
+      "path": "/tmp/dumpanalyzer-p6-live-20261020/reference/baseline.json",
+      "bytes": 10454,
+      "sha256": "f02ff9023129f6bab27d2462c3fa40695200f195fecba3fba269a2ffc3f0d876"
+    },
+    "comparator": {
+      "path": "/tmp/dumpanalyzer-p6-live-20261020/reference/compare.py",
+      "bytes": 2262,
+      "sha256": "b1abf5767bff5934ea190e782ec3d3590843c0287cdb3dcf592530570471c18a"
+    }
+  },
+  "proofLimits": [
+    "The gateway selection opus resolved to observed init model deepseek-flash. This result does not qualify an Anthropic Claude backend model.",
+    "The capture model is the CLI init model string; backend model identity was not independently attested.",
+    "No live tool-denial challenge or denial counter is present; deny-all controls were separately qualified with fake host tests.",
+    "The existing live receipt omits outcome; no cross-receipt outcome equality is claimed.",
+    "Citations are structurally checked, not a proof of every narrative statement. The second hypothesis attributes a null module-RVA field to modules evidence although that field belongs to the typed stack.",
+    "No real dump, SSH/CDB acquisition, PDB match, service rollout, durable publication or companion availability is qualified by this synthetic run.",
+    "This independent review made no model or network calls and did not read credential values."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "label": "http-contracts-test-full-detail",
+  "command": [
+    "pnpm",
+    "--filter",
+    "@dump-ledger/http-contracts",
+    "test"
+  ],
+  "environmentOverrides": {
+    "pnpm_config_verify_deps_before_run": "",
+    "npm_config_offline": "true",
+    "npm_config_update_notifier": "false",
+    "CI": "true"
+  },
+  "startUtc": "2026-10-20T08:01:39.227035+00:00",
+  "exitCode": 0,
+  "durationSeconds": 2.668,
+  "log": "/tmp/dump-ledger-p6-build-koffiriq/http-contracts-test-full-detail.log",
+  "sandbox": "require_escalated for consistent child-test reporting"
+}

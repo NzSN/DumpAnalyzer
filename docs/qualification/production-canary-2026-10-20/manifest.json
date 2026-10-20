@@ -1,0 +1,60 @@
+{
+  "analysisId": "analysis_06F9B90BAB5F449199FA9C9C93",
+  "canonicalReportSha256": "d2ed241e0b7b36f0b6b4bf8cc355673ac910399ffb7cd90488f08fe27a85f2cb",
+  "files": {
+    "README.md": {
+      "bytes": 5989,
+      "sha256": "4a4ad8f93a61fe04eb675c1debb58ddc1bb84c36047c12dd15f9063d57efe24e"
+    },
+    "analyzer/final-state.json": {
+      "bytes": 1207,
+      "sha256": "6c3e696b73082e9ad3e5c5374747b9b4e2baef4be26cc1eb454e3348367fa000"
+    },
+    "approval.json": {
+      "bytes": 630,
+      "sha256": "db4a725052cbc5640f65abb4e340c6f6b61e0aa497bac7936f30e0772bcff556"
+    },
+    "companion/connection-closure.json": {
+      "bytes": 155,
+      "sha256": "f862a7c3f4427a31d06c02ecdb6a69616d35fb57d54c72aa810bc00049e4fe83"
+    },
+    "companion/durability.json": {
+      "bytes": 2790,
+      "sha256": "5f31201cf56e58aa730b8d3caffe746cf3c5f56d99e227e043cf4a3d4a90ccff"
+    },
+    "companion/final-state.json": {
+      "bytes": 1732,
+      "sha256": "4b13b8d5a068c9e326cfac12d91d7069dcc8dddbe3c8df49badcdff5bc1579aa"
+    },
+    "execution/client.py": {
+      "bytes": 5577,
+      "sha256": "67e3d0bfee8ac38727baca7be3f05843d6ee92f260578934c5c08b25d016cd80"
+    },
+    "execution/final-audit.cjs": {
+      "bytes": 2953,
+      "sha256": "379af0a63f8ed2821f8569c122d596dd53634aa79add2e60a0385cf8ff84d349"
+    },
+    "execution/restart-only.cjs": {
+      "bytes": 9235,
+      "sha256": "43af8891a0c73e7e296507bd4cd8fffe26aefe9caebdcbd7aee11460f4cdc7f0"
+    },
+    "publication.json": {
+      "bytes": 675,
+      "sha256": "2ac52ef5da98e0b1150686602524adb53f8b3fa946552e993e912725b7035217"
+    },
+    "read-back-after-restart.json": {
+      "bytes": 517,
+      "sha256": "b4e662bcbba08330d41f34cbc8a7e511e7e358f0a235fffde5e8ff5c7812d63a"
+    },
+    "read-back.json": {
+      "bytes": 518,
+      "sha256": "468161357bbb98853ff84a19ab356dbfd5e050934392967841520cdb7e25cfd4"
+    },
+    "summary.json": {
+      "bytes": 4208,
+      "sha256": "9749ae2be57881d581ad0be96fde2ea59555f87aca5d42f6750d9782de136ac3"
+    }
+  },
+  "schema": "dumpanalyzer.p6.approved-canary-bundle/v1",
+  "status": "passed"
+}
