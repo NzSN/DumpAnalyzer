@@ -1,21 +1,25 @@
 # DumpAnalyzer rich report implementation plan
 
-Status: implementation validated, authorized 2026-10-15. P6 corrected live Claude qualification remains approval-gated; local rollout to 0.2.0 is complete; remote companion rollout is not performed. Baseline: DumpAnalyzer `0bb92ae` and DumpLedger `80fb95a`. Acceptance evidence and remaining gates are recorded in `docs/rich-reports.md`.
+Historical plan authorized and implemented on 2026-10-15, with its dated receipt in §9. Sections 1–8 preserve the pre-implementation gaps, proposed interfaces and acceptance requirements; future-tense task wording is not a current backlog. Planning baselines were DumpAnalyzer `0bb92ae` and DumpLedger `80fb95a`. Source review on 2026-10-20 used DumpAnalyzer `6a19ea297bb219509c994780c96bdd6ce6c4bfab` without rerunning builds, tests or live checks.
+
+At the 2026-10-15 receipt, local rollout to 0.2.0 was complete, corrected live Claude qualification was unrun and remote companion rollout had not been performed. Use the maintained [rich-report guide](../docs/rich-reports.md), [architecture](../docs/architecture.md), [analyzer design](../docs/analyzer-design.md) and [README](../README.md) for current implementation behavior and qualification boundaries. The [deployment receipt](../docs/local-deployment-2026-10-15.md) remains evidence for that dated rollout only.
 
 The intended result is a report detail view containing **a symbol-resolved native stack, the exception record and context, and an evidence-backed root-cause assessment**. The report must preserve those sections through storage, restart, and optional write-back. A short summary remains useful in the paged Reports list.
 
 **Recommended approach:** introduce one versioned, typed full report, save it before producing the compact legacy verdict, and load its detail only when selected. Build deterministic debugger evidence first, then run causal analysis over that evidence. Deliver the local detail view first; complete versioned DumpLedger delivery before claiming that the full report is preserved remotely.
 
-## 1. Current gaps
+## 1. Baseline gaps before implementation (2026-10-15)
 
-| Layer | Current implementation | Required change |
+The recorded source line references in this table identify observations at the planning baseline; they are not links to today's implementation.
+
+| Layer | Implementation at the planning baseline | Required change in this plan |
 | --- | --- | --- |
-| Capture | The script runs `.sympath`, `.reload`, `.ecxr`, `kc`, `lm`, and process information. It does not explicitly collect the exception record. [runner.rs:1443](/home/nzsn/Repos/DumpAnalyzer/src/runner.rs:1443) | Capture named exception, context, stack, symbol, and fault-site evidence sections. |
-| Stack | Up to 32 call-site strings survive, with each string limited to 160 characters. Frame addresses, resolution state, and module attribution are not preserved in the emitted frame objects. [runner.rs:53](/home/nzsn/Repos/DumpAnalyzer/src/runner.rs:53), [runner.rs:1138](/home/nzsn/Repos/DumpAnalyzer/src/runner.rs:1138) | Typed frames with addresses, symbols, offsets, provenance, and explicit unwind/coverage limitations. |
-| Provider contract | Claude accepts an arbitrary `facts` object and uses a different field vocabulary from the deterministic runner. Neither contract requires causal analysis. [claude_runner.rs:34](/home/nzsn/Repos/DumpAnalyzer/src/claude_runner.rs:34) | Both providers satisfy the same report schema and evidence-validation rules. |
-| Preservation | Assembly enforces 4 KiB of facts and a 16 KiB submission, dropping complete keys to fit. The reduced submission is what local storage receives. [verdict.rs:49](/home/nzsn/Repos/DumpAnalyzer/src/verdict.rs:49), [verdict.rs:180](/home/nzsn/Repos/DumpAnalyzer/src/verdict.rs:180) | Save the full report independently; derive a deliberately compact compatibility projection afterward. |
-| Display | The report list omits facts, and its Details disclosure repeats the summary. [http.rs:1147](/home/nzsn/Repos/DumpAnalyzer/src/http.rs:1147), [dashboard.html:510](/home/nzsn/Repos/DumpAnalyzer/src/dashboard.html:510) | A lazy report-detail endpoint and view with the three requested sections. |
-| Reanalysis | Local insertion ignores an existing identity; remote replay is also immutable by analyzer version. [state.rs:977](/home/nzsn/Repos/DumpAnalyzer/src/state.rs:977) | Use a new analyzer version for v2 analysis; preserve old reports and require explicit scoped reanalysis. |
+| Capture | The script runs `.sympath`, `.reload`, `.ecxr`, `kc`, `lm`, and process information. It does not explicitly collect the exception record. Recorded reference: `src/runner.rs:1443`. | Capture named exception, context, stack, symbol, and fault-site evidence sections. |
+| Stack | Up to 32 call-site strings survive, with each string limited to 160 characters. Frame addresses, resolution state, and module attribution are not preserved in the emitted frame objects. Recorded references: `src/runner.rs:53`, `src/runner.rs:1138`. | Typed frames with addresses, symbols, offsets, provenance, and explicit unwind/coverage limitations. |
+| Provider contract | Claude accepts an arbitrary `facts` object and uses a different field vocabulary from the deterministic runner. Neither contract requires causal analysis. Recorded reference: `src/claude_runner.rs:34`. | Both providers satisfy the same report schema and evidence-validation rules. |
+| Preservation | Assembly enforces 4 KiB of facts and a 16 KiB submission, dropping complete keys to fit. The reduced submission is what local storage receives. Recorded references: `src/verdict.rs:49`, `src/verdict.rs:180`. | Save the full report independently; derive a deliberately compact compatibility projection afterward. |
+| Display | The report list omits facts, and its Details disclosure repeats the summary. Recorded references: `src/http.rs:1147`, `src/dashboard.html:510`. | A lazy report-detail endpoint and view with the three requested sections. |
+| Reanalysis | Local insertion ignores an existing identity; remote replay is also immutable by analyzer version. Recorded reference: `src/state.rs:977`. | Use a new analyzer version for v2 analysis; preserve old reports and require explicit scoped reanalysis. |
 
 Increasing the prompt length or adding more fields to the existing `facts` object would leave the preservation and display gaps unresolved.
 
@@ -83,7 +87,7 @@ The canonical report contains these groups:
 }
 ```
 
-This is an illustrative shape, not a finalized wire schema. P0 must finalize field names, nullability, field limits, provenance references, and compatibility rules before parallel implementation.
+This was an illustrative planning shape, not the finalized wire schema. P0 finalized the implemented contract in [`src/report.rs`](../src/report.rs); `ReportCapture` is flattened into the serialized report. Use that source and the maintained rich-report guide for exact fields, nullability, limits and validation rules.
 
 Each evidence entry has an ID, command or acquisition method, result status, transcript range or retained artifact reference, and truncation/error information. Findings refer to those IDs. Evidence unavailable in the dump is different from a command failure, timeout, or parser failure.
 
@@ -208,7 +212,7 @@ Before rollout, back up each affected SQLite database and prove migrations on co
 
 ## 9. Implementation receipt (2026-10-15)
 
-P0–P5 are implemented in the working trees; no commit or push was performed. P6 native acquisition, exact local preservation, real HTTP delivery/replay/restart, migration-on-copy and browser gates passed. The corrected live reasoner and remote companion rollout are not marked passed. Local rollout is recorded in `docs/local-deployment-2026-10-15.md`.
+At this 2026-10-15 receipt, P0–P5 were implemented in the working trees; no commit or push had been performed for that implementation wave. P6 native acquisition, exact local preservation, real HTTP delivery/replay/restart, migration-on-copy and browser gates passed. The corrected live reasoner and remote companion rollout were not marked passed. Local rollout is recorded in `docs/local-deployment-2026-10-15.md`. These statements record that checkpoint, not the later repository or live-service state.
 
 | Work | Result |
 | --- | --- |

@@ -1,7 +1,22 @@
 # DumpAnalyzer Rust implementation — fine-grained tasks
 
+Historical task briefs and acceptance receipts for 2026-10-13–14. All task
+headings marked ● were accepted in that wave; measured results in
+[Stage gates](#stage-gates) are dated evidence, not newly run checks. Source
+review on 2026-10-20 used `6a19ea297bb219509c994780c96bdd6ce6c4bfab` and
+found the planned modules implemented. No builds, tests or live checks were
+run for this documentation update.
+
+Use the [README](../README.md), [architecture](../docs/architecture.md),
+[analyzer design](../docs/analyzer-design.md) and
+[rich-report guide](../docs/rich-reports.md) for maintained behavior. These
+briefs preserve the original interfaces, v1 limits and ownership rules;
+later token storage, provider containment, rich-report storage/delivery and
+queue behavior supersede parts of those initial instructions. Phase-two
+completion is recorded [separately](phase2-live-readiness.md).
+
 Derived from [`rust-implementation-plan.md`](rust-implementation-plan.md).
-Execution via delegated `general-purpose-flash` agents; one agent per task,
+Execution used delegated `general-purpose-flash` agents; one agent per task,
 disjoint file ownership, self-contained briefs (no inherited context).
 
 ## Delegation conventions (all tasks)

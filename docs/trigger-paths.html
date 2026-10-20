@@ -3,119 +3,158 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DumpAnalyzer — how analysis gets triggered</title>
+<title>DumpAnalyzer · analysis triggers and durable delivery</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0 auto; max-width: 1180px; padding: 1.5rem; background: #f7f8fa; color: #1c2430; }
-  h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
-  .muted { color: #667; font-size: .85rem; }
-  svg { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; width: 100%; height: auto; display: block; }
-  .src { fill: #eef4ff; stroke: #4a78c2; }
-  .srctext { font: 12px ui-sans-serif, system-ui; fill: #17325c; text-anchor: middle; font-weight: 600; }
-  .srcsub { font: 10px ui-sans-serif, system-ui; fill: #5a7299; text-anchor: middle; }
-  .tbl { fill: #eefaf1; stroke: #3d9958; }
-  .eng { fill: #f5eefe; stroke: #7c3aed; }
-  .no { fill: #fdeceb; stroke: #b3261e; stroke-dasharray: 5 3; }
-  .flow { stroke: #64748b; stroke-width: 1.6; fill: none; marker-end: url(#arr); }
-  .flowlabel { font: 10px ui-sans-serif, system-ui; fill: #64748b; text-anchor: middle; }
-  ul { font-size: .9rem; line-height: 1.5; }
-  code { background: #eef1f4; border-radius: 4px; padding: 0 .3em; }
+:root { color-scheme:light; --ink:#202e40; --muted:#546477; --line:#d5dde7; }
+* { box-sizing:border-box; }
+body { margin:0; font:16px/1.65 system-ui,sans-serif; color:var(--ink); background:#f5f7fa; }
+header { background:#182b42; color:white; padding:26px max(20px,calc((100vw - 1180px)/2)); }
+header strong { font-size:24px; display:block; }
+header p { margin:5px 0; color:#d4dfed; }
+nav { display:flex; flex-wrap:wrap; gap:16px; margin-top:16px; }
+nav a { color:#dceaff; font-size:14px; }
+main { max-width:1220px; margin:auto; padding:30px 20px 70px; }
+h1 { font-size:34px; line-height:1.25; }
+h2 { margin-top:48px; padding-top:16px; border-top:1px solid var(--line); line-height:1.3; }
+p,li { max-width:110ch; }
+a { color:#1857a4; text-underline-offset:3px; }
+code { font:0.87em ui-monospace,Consolas,monospace; overflow-wrap:anywhere; }
+p code,li code,td code { background:#e9eef5; padding:1px 4px; }
+.muted { color:var(--muted); font-size:14px; }
+.table-scroll { overflow:auto; }
+table { border-collapse:collapse; width:100%; background:white; font-size:14px; }
+th,td { padding:12px 14px; text-align:left; vertical-align:top; border:1px solid var(--line); }
+th { background:#e9eef5; }
+th:first-child,td:first-child { width:21%; }
+figure { margin:25px 0; border:1px solid var(--line); border-radius:8px; background:white; overflow:hidden; }
+.diagram-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px; background:#fbfcfe; border-bottom:1px solid var(--line); }
+button { font:inherit; min-width:38px; min-height:36px; background:white; color:var(--ink); border:1px solid #9aabbe; border-radius:4px; padding:5px 12px; cursor:pointer; }
+button:hover { background:#edf3fc; }
+button:focus-visible,a:focus-visible,.diagram-scroll:focus-visible { outline:3px solid #367ac6; outline-offset:3px; }
+output { font-size:13px; font-variant-numeric:tabular-nums; min-width:45px; }
+.diagram-scroll { overflow:auto; padding:12px; }
+figure.zoomed .diagram-scroll { max-height:85vh; }
+svg { display:block; width:100%; height:auto; max-width:none; }
+figcaption { padding:10px 14px; color:var(--muted); font-size:13px; border-top:1px solid var(--line); }
+.flow { stroke:#64748b; stroke-width:2; fill:none; marker-end:url(#arrow); }
+.label { font:15px system-ui,sans-serif; fill:#546477; text-anchor:middle; }
+.box-title { font:600 21px system-ui,sans-serif; fill:#17325c; }
+.box-line { font:16px system-ui,sans-serif; fill:#3d526d; }
+@media(max-width:700px) { main { padding:20px 16px 55px; } h1 { font-size:28px; } body { font-size:15px; } table { min-width:660px; } .diagram-scroll { padding:6px; } }
+@media print { header nav,.diagram-tools { display:none; } main { padding:0; } body { background:white; font-size:11px; } .diagram-scroll { overflow:visible; max-height:none; } svg { width:100% !important; } }
 </style>
 </head>
 <body>
-<h1>DumpAnalyzer — ways analysis gets triggered (current build)</h1>
-<p class="muted">Verified against <code>src/scheduler.rs</code>, <code>src/sync.rs</code>, <code>src/agent.rs</code> on 2026-10-14 (phase 2).</p> Four automatic paths plus token-guarded manual triggers (added 2026-10-14).</p>
-
-<svg viewBox="0 0 1140 560" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
-    </marker>
-  </defs>
-
-  <!-- Trigger sources -->
-  <rect x="30" y="40" width="290" height="82" rx="8" class="src"/>
-  <text x="175" y="64" class="srctext">1 · Boot — initial_scan</text>
-  <text x="175" y="82" class="srcsub">GET /api/v1/dumps?phase=available (paged)</text>
-  <text x="175" y="97" class="srcsub">every available+sealed dump → discovered</text>
-  <text x="175" y="112" class="srcsub">boot only — no periodic re-scan</text>
-
-  <rect x="30" y="150" width="290" height="82" rx="8" class="src"/>
-  <text x="175" y="174" class="srctext">2 · Event feed — follow_feed</text>
-  <text x="175" y="192" class="srcsub">GET /api/v1/events every poll interval (10 s)</text>
-  <text x="175" y="207" class="srcsub">intake/seal event → get_dump → upsert</text>
-  <text x="175" y="222" class="srcsub">steady-state discovery of new dumps</text>
-
-  <rect x="30" y="260" width="290" height="82" rx="8" class="src"/>
-  <text x="175" y="284" class="srctext">3 · Boot — crash recovery</text>
-  <text x="175" y="302" class="srcsub">Agent::recover: volatile phases → claimed</text>
-  <text x="175" y="317" class="srcsub">verdict::reconcile_on_boot re-submits</text>
-  <text x="175" y="332" class="srcsub">reporting jobs / replays local verdicts</text>
-
-  <rect x="30" y="370" width="290" height="82" rx="8" class="src"/>
-  <text x="175" y="394" class="srctext">4 · Bounded retry</text>
-  <text x="175" y="412" class="srcsub">run_job: transient failure → claimed (≤2 attempts)</text>
-  <text x="175" y="427" class="srcsub">scheduler: Err → backoff 1 s → 30 s cap</text>
-  <text x="175" y="442" class="srcsub">terminal failure → failed (never retried)</text>
-
-  <!-- Job table -->
-  <rect x="440" y="150" width="240" height="120" rx="10" class="tbl"/>
-  <text x="560" y="180" class="srctext" style="fill:#1e6b38">jobs table (SQLite)</text>
-  <text x="560" y="200" class="srcsub">identity: (dumpId, sha256, kind, version)</text>
-  <text x="560" y="216" class="srcsub">phase · attempts · timestamps</text>
-  <text x="560" y="236" class="srcsub">upsert = insert-or-ignore (dedup)</text>
-  <text x="560" y="252" class="srcsub">dropped/done/failed rows are terminal</text>
-
-  <!-- Scheduler loop -->
-  <rect x="440" y="330" width="240" height="110" rx="10" class="eng"/>
-  <text x="560" y="356" class="srctext" style="fill:#4c1d95">scheduler_loop</text>
-  <text x="560" y="374" class="srcsub">claim_next (oldest discovered)</text>
-  <text x="560" y="390" class="srcsub">→ Agent::run_job · concurrency 1</text>
-  <text x="560" y="406" class="srcsub">idle → sleep poll interval</text>
-  <text x="560" y="426" class="srcsub">fetch → verify → analyze → report</text>
-
-  <!-- External ledger -->
-  <rect x="820" y="40" width="280" height="82" rx="10" fill="#f3f4f6" stroke="#8a93a0" stroke-dasharray="5 3"/>
-  <text x="960" y="66" class="srctext" style="fill:#3c4450">DumpLedger</text>
-  <text x="960" y="84" class="srcsub">catalog · event feed · content · analyses</text>
-
-  <!-- Not present -->
-  <rect x="820" y="150" width="280" height="150" rx="10" class="src"/>
-  <text x="960" y="176" class="srctext">5 · Manual (token-guarded, UI)</text>
-  <text x="960" y="196" class="srcsub">POST /-/analyze {"dumpId"} → report JSON</text>
-  <text x="960" y="212" class="srcsub">POST /-/rescan → full catalog sweep now</text>
-  <text x="960" y="228" class="srcsub">(both also as dashboard forms)</text>
-  <text x="960" y="244" class="srcsub">scheduler: 60 s replay sweep of pending</text>
-  <text x="960" y="260" class="srcsub">local verdicts while idle</text>
-  <text x="960" y="284" class="srcsub">open: no per-kind scheduling (all “triage”)</text>
-
-  <!-- flows -->
-  <path class="flow" d="M 320 81 C 420 81 400 150 470 158"/>
-  <text x="395" y="105" class="flowlabel">upsert</text>
-  <path class="flow" d="M 320 191 L 440 191"/>
-  <text x="380" y="183" class="flowlabel">upsert / drop</text>
-  <path class="flow" d="M 320 301 C 400 301 400 250 445 240"/>
-  <text x="382" y="290" class="flowlabel">reset to claimed</text>
-  <path class="flow" d="M 320 411 L 440 395"/>
-  <text x="380" y="420" class="flowlabel">re-claim</text>
-
-  <path class="flow" d="M 560 270 L 560 330"/>
-  <text x="610" y="302" class="flowlabel">claim_next</text>
-
-  <path class="flow" d="M 320 81 C 600 40 700 60 820 72"/>
-  <text x="570" y="50" class="flowlabel">HTTPS + analyzer token</text>
-  <path class="flow" d="M 320 175 C 600 140 700 90 820 90"/>
-  <text x="580" y="120" class="flowlabel">feed poll</text>
-</svg>
-
-<ul>
-  <li><b>Manual</b> (2026-10-14): <code>POST /-/analyze</code> (one dump → report) and
-  <code>POST /-/rescan</code> (full sweep), both bearer-guarded; plus a 60 s idle replay
-  sweep for pending local verdicts.</li>
-  <li><b>Boot scan</b> is the catch-up: the full catalog is paged at every start.</li>
-  <li><b>Event feed</b> is the steady state: new intake becomes a job within one poll interval.</li>
-  <li><b>Crash recovery</b> re-runs interrupted jobs and settles write-back — per the TLA+ spec (CrashReset / reconcile), MBT-replayed against the real store.</li>
-  <li><b>Retry</b> is bounded: attempt budget per job (default 2), then terminal <code>failed</code>; verdict-failed is a report, infra failure is not.</li>
-</ul>
-<p class="muted">Remaining candidate: a <code>scan-once</code> CLI subcommand for a stopped daemon (the instance lock forbids it while running).</p>
+<header><strong>DumpAnalyzer</strong><p>Analysis triggers, recovery and delivery · source inspected 2026-10-20</p>
+<nav aria-label="Trigger guide sections"><a href="#flow">Flow</a><a href="#triggers">Trigger paths</a><a href="#identity">Identity and queues</a><a href="#switches">Control switches</a><a href="#access">Local actions and credentials</a><a href="rich-reports.html">Rich reports</a><a href="architecture.html">Architecture</a></nav></header>
+<main>
+<h1>How analysis starts and reports are delivered</h1>
+<p class="muted">Source revision: <code>6a19ea297bb219509c994780c96bdd6ce6c4bfab</code>, inspected 2026-10-20. This page describes the checked-in implementation. It does not attest to the current running service, deployed binary or live debugger/model qualification.</p>
+<p>Discovery records eligible dump identities. Automatic scheduling claims only the configured analyzer version; manual analysis enters the same acquisition pipeline directly. Durable report delivery has its own loop, so disabling automatic analysis or running a job does not suspend pending publication when write-back is enabled.</p>
+<section aria-labelledby="flow"><h2 id="flow">Flow</h2>
+<figure id="trigger-diagram">
+<div class="diagram-tools" role="group" aria-label="Diagram controls"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-fit>Fit</button><output aria-live="polite">100%</output></div>
+<div class="diagram-scroll" tabindex="0" aria-label="Analysis trigger diagram; scroll after zooming">
+<svg viewBox="0 0 1400 780" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="diagram-title diagram-description">
+<title id="diagram-title">Discovery, automatic and manual analysis, and independent delivery</title>
+<desc id="diagram-description">Boot scans, manual rescans and event-feed lookups create discovery inventory. The scheduler claims current-version jobs into the active queue and recovers interrupted work. Manual requests either reuse an existing rich report or enter the pipeline directly. The pipeline saves immutable reports, and a separate delivery loop publishes pending reports. The following tables provide the same details as text.</desc>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="#64748b"/></marker></defs>
+<rect x="40" y="55" width="360" height="155" rx="10" fill="#eef4ff" stroke="#4a78c2"/>
+<text x="62" y="89" class="box-title">Discovery inputs</text>
+<text x="62" y="120" class="box-line">Boot scan + manual rescan</text>
+<text x="62" y="147" class="box-line">Lifecycle feed → catalog lookup</text>
+<text x="62" y="178" class="box-line">available + sealed SHA-256</text>
+<rect x="520" y="55" width="360" height="155" rx="10" fill="#eefaf1" stroke="#3d9958"/>
+<text x="542" y="89" class="box-title">Discovery inventory</text>
+<text x="542" y="120" class="box-line">Durable discovered identities</text>
+<text x="542" y="147" class="box-line">Insert-or-ignore deduplication</text>
+<text x="542" y="178" class="box-line">Not the active dashboard queue</text>
+<rect x="1000" y="55" width="360" height="155" rx="10" fill="#f5eefe" stroke="#7c3aed"/>
+<text x="1022" y="89" class="box-title">Automatic work</text>
+<text x="1022" y="120" class="box-line">Claim configured version only</text>
+<text x="1022" y="147" class="box-line">Resume claims; concurrency 1</text>
+<text x="1022" y="178" class="box-line">Active queue / bounded retries</text>
+<path class="flow" d="M400 133 H520"/><text x="460" y="117" class="label">upsert</text>
+<path class="flow" d="M880 133 H1000"/><text x="940" y="117" class="label">claim</text>
+<rect x="40" y="345" width="360" height="165" rx="10" fill="#eef4ff" stroke="#4a78c2"/>
+<text x="62" y="380" class="box-title">Manual analysis</text>
+<text x="62" y="412" class="box-line">One dump / case / customer</text>
+<text x="62" y="440" class="box-line">Reuse rich report if present</text>
+<text x="62" y="468" class="box-line">Legacy identity → new version</text>
+<rect x="520" y="345" width="360" height="165" rx="10" fill="#f5eefe" stroke="#7c3aed"/>
+<text x="542" y="380" class="box-title">Acquisition pipeline</text>
+<text x="542" y="412" class="box-line">Fetch/cache → verify bytes</text>
+<text x="542" y="440" class="box-line">Essential + optional symbol pass</text>
+<text x="542" y="468" class="box-line">Deterministic + optional reasoning</text>
+<rect x="1000" y="345" width="360" height="165" rx="10" fill="#eefaf1" stroke="#3d9958"/>
+<text x="1022" y="380" class="box-title">Durable reports</text>
+<text x="1022" y="412" class="box-line">Canonical full report + digest</text>
+<text x="1022" y="440" class="box-line">Compact projection + handoff</text>
+<text x="1022" y="468" class="box-line">One local transaction</text>
+<path class="flow" d="M400 429 H520"/><text x="460" y="412" class="label">new run</text>
+<path class="flow" d="M1180 210 V270 H700 V345"/><text x="940" y="254" class="label">claimed work + restart recovery</text>
+<path class="flow" d="M880 429 H1000"/><text x="940" y="412" class="label">save</text>
+<rect x="1000" y="610" width="360" height="130" rx="10" fill="#fff7e7" stroke="#ab7b22"/>
+<text x="1022" y="646" class="box-title">Independent delivery</text>
+<text x="1022" y="678" class="box-line">Boot reconciliation + 60 s sweep</text>
+<text x="1022" y="708" class="box-line">V2 full / bound V1 fallback</text>
+<path class="flow" d="M1180 510 V610"/><text x="1245" y="566" class="label">write-back on</text>
+<text x="45" y="650" class="box-title">Report saved ≠ full report acknowledged</text>
+<text x="45" y="687" class="box-line">Queue settlement and full-delivery state are tracked separately.</text>
+<text x="45" y="716" class="box-line">SIGTERM/SIGINT stops feed and claims; an in-flight scheduled job drains.</text>
+</svg></div>
+<figcaption>Discovery, execution and delivery use different durable state. Manual report reuse returns without a new run. The text below specifies the gates, recovery behavior and switches.</figcaption></figure>
+</section>
+<section aria-labelledby="triggers"><h2 id="triggers">Trigger paths</h2>
+<div class="table-scroll" tabindex="0" aria-label="Trigger paths table"><table><thead><tr><th scope="col">Path</th><th scope="col">Current behavior</th><th scope="col">Source</th></tr></thead><tbody>
+<tr><td>Boot scan</td><td>After locking the state directory and reconciling restart state, one keyset-paginated <code>GET /api/v1/dumps?phase=available</code> pass records <code>triage</code> candidates with a sealed SHA-256 and configured analyzer version. Existing identities are left untouched. Transient scan failures retry behind backoff.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/sync.rs#L174">sync.rs:174</a><br><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L110">scheduler.rs:110</a></td></tr>
+<tr><td>Event feed</td><td>Follows the persisted event cursor. Subscribes to <code>AcceptDump</code>, <code>RejectDump</code>, <code>BeginPurge</code>, <code>FinishPurge</code>, <code>SealUpload</code>, <code>PromoteObject</code> and <code>MarkQuarantined</code>. Intake events re-read catalog state before insertion; purge/reject events drop the dump's jobs. Symbol events and <code>RecordAnalysis</code> do not schedule work. Empty/no-progress polls sleep for the configured interval (default 10 s); failures can delay discovery.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/sync.rs#L85">sync.rs:85</a></td></tr>
+<tr><td>Manual rescan</td><td><code>POST /-/rescan</code> and <code>/-/rescan-form</code> run the same full scan inline and return the number of newly inserted identities. A rescan discovers candidates; it does not itself execute them or bypass scheduler/version gates. There is no periodic full catalog rescan.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L919">http.rs:919</a></td></tr>
+<tr><td>Manual analysis</td><td><code>POST /-/analyze</code> accepts one <code>dumpId</code>. Case/customer routes and their form counterparts gather available dumps (64-dump cap) and process them sequentially, reporting per-dump skips. Each dump must still be available and sealed. The manual path uses the configured version and bounded pipeline without waiting for an automatic claim.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/analyzer.rs#L275">analyzer.rs:275</a><br><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L566">http.rs:566</a></td></tr>
+<tr><td>Restart recovery</td><td><code>fetching</code>, <code>staged</code> and <code>analyzing</code> reset to <code>claimed</code> without resetting attempts. Current-version claims resume before new claims. Old-version active rows except <code>reporting</code> are dropped; history remains. With write-back on, reporting rows and pending reports reconcile with the ledger. A reporting row with no local verdict returns to discovered and can be acquired again by the enabled current-version scheduler. With write-back off, rows with a local report settle locally and reportless rows return to discovery. Orphaned run workspaces are swept.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/agent.rs#L164">agent.rs:164</a><br><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L110">scheduler.rs:110</a></td></tr>
+<tr><td>Retry and shutdown</td><td>Transient fetch/run failures consume the bounded attempt budget (<code>MAX_ATTEMPTS = 2</code>). Exhaustion or terminal acquisition failure settles the job; a <code>failed</code> report outcome remains a report, while infrastructure failure may produce no report. Scheduler/feed/initial-scan transient failures use 1 s, 2 s, 4 s … 30 s backoff. SIGTERM/SIGINT cancels feed and stops further claims; the in-flight scheduled job finishes within runner bounds before exit.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/agent.rs#L205">agent.rs:205</a><br><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L431">scheduler.rs:431</a></td></tr>
+<tr><td>Report delivery</td><td>Boot reconciliation plus a separate 60-second loop visit durable pending reports when write-back is on. Periodic replay runs when the scheduler is off or busy and publishes already stored evidence without re-running analysis. Boot reconciliation can separately rediscover a reporting job that has no local verdict. A bound V1 summary can settle queue work while full V2 detail remains pending; only the validated full acknowledgement means <code>fullyDelivered</code>.</td><td><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L533">scheduler.rs:533</a><br><a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/verdict.rs#L411">verdict.rs:411</a></td></tr>
+</tbody></table></div></section>
+<section aria-labelledby="identity"><h2 id="identity">Identity, reuse and queues</h2>
+<p>A job identity is <code>(dumpId, inputSha256, kind, analyzerVersion)</code>. Rich reports additionally bind the analyzer name, carry a stable <code>r2_</code> report ID and digest, and are immutable. The default analyzer version is <code>0.2.0</code>; configuration rejects the legacy compact-capture identity <code>0.1.0</code>. Discovery, manual analysis and explorer overlays share the configured version. Use a distinct version for intentional new evidence or a changed capture profile.</p>
+<p>After the catalog availability/hash gate, a manual request returns the existing rich report projection under the same identity before registering a run. It rejects a same-identity legacy compact report and requires a new version for rich reanalysis. An existing rich report attributed to another analyzer name is an integrity conflict. Repeating an analysis request therefore does not force re-execution or overwrite captured evidence.</p>
+<p>The durable discovery inventory is broader than the operator queue. Queue reads include only <code>claimed</code>, <code>fetching</code>, <code>staged</code>, <code>analyzing</code> and <code>reporting</code>; they exclude <code>discovered</code> candidates and terminal rows. Active manual runs are tracked separately and merged into the dashboard queue. The explorer browses the ledger catalog independently and overlays current-version local phases. A large catalog or discovered inventory does not mean that many analyses are running.</p>
+<p class="muted">Sources: <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/state.rs#L663">state.rs:663</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L1106">http.rs:1106</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/explorer.rs#L1">explorer.rs:1</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/analyzer.rs#L275">analyzer.rs:275</a>.</p>
+</section>
+<section aria-labelledby="switches"><h2 id="switches">Control switches</h2>
+<div class="table-scroll" tabindex="0" aria-label="Control switches table"><table><thead><tr><th scope="col">Setting</th><th scope="col">Behavior</th></tr></thead><tbody>
+<tr><td><code>DUMP_ANALYZER_SCHEDULER=on</code> (default)</td><td>Resumes and claims current-version jobs, one scheduled job at a time.</td></tr>
+<tr><td><code>DUMP_ANALYZER_SCHEDULER=off</code></td><td>Boot scan/recovery, feed, dashboard and manual actions still operate. The automatic scheduler claims and resumes no jobs. Delivery still runs if write-back is on.</td></tr>
+<tr><td><code>DUMP_ANALYZER_WRITE_BACK=on</code> (default)</td><td>Enables ledger publication and boot/periodic delivery of pending reports.</td></tr>
+<tr><td><code>DUMP_ANALYZER_WRITE_BACK=off</code></td><td>Treats the ledger as a read-only dump source. Reports save locally and reporting jobs settle locally; no analysis publication attempts run. This switch does not disable automatic acquisition.</td></tr>
+<tr><td><code>DUMP_ANALYZER_POLL_INTERVAL_MS</code></td><td>Defaults to 10,000 ms; accepted range 5,000–30,000 ms. Controls feed idle polling and scheduler idle sleep, separate from the 60-second delivery cadence.</td></tr>
+<tr><td><code>DUMP_ANALYZER_HTTP_ADDR</code></td><td>Defaults to <code>127.0.0.1:4180</code>. Empty disables the HTTP listener.</td></tr>
+</tbody></table></div><p class="muted">Source: <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/config.rs#L18">config.rs:18</a> and <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L431">scheduler.rs:431</a>.</p></section>
+<section aria-labelledby="access"><h2 id="access">Local actions and credentials</h2>
+<p>At boot, <code>DUMP_ANALYZER_TOKEN</code> wins and is persisted as the latest-used ledger token; otherwise the daemon loads the stored token. Boot fails if neither exists. The token is an outbound DumpLedger credential. The token-store routes validate a candidate against the ledger before saving it and updating the HTTP action digest.</p>
+<p>Analysis and rescan JSON actions accept a matching <code>Authorization: Bearer …</code> header. An absent header uses the daemon's configured token if one exists; an explicitly wrong scheme or wrong token rejects. Form actions require a <code>token</code> field, whose empty value also selects the configured token. Without a configured token, guarded actions reject. These fallback rules permit local actions without retyping the saved credential; they do not authenticate the caller of a publicly exposed listener.</p>
+<p>Dashboard/report reads are unauthenticated, and token-store routes do not require an existing local token. Loopback is the default listening scope. A deployment that exposes this listener beyond its intended local audience needs its own caller-access controls; the outbound ledger credential is not such a boundary.</p>
+<p class="muted">Sources: <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L393">scheduler.rs:393</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L881">http.rs:881</a>, <a href="https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L701">http.rs:701</a>. See <a href="rich-reports.html">rich reports</a> for retained-evidence, quality and delivery states, and <a href="architecture.html">the architecture guide</a> for the complete control/data flow.</p>
+</section>
+</main>
+<script>
+(() => {
+  const figure = document.getElementById('trigger-diagram');
+  const svg = figure.querySelector('svg');
+  const output = figure.querySelector('output');
+  let zoom = 100;
+  const setZoom = value => {
+    zoom = Math.max(50, Math.min(400, value));
+    svg.style.width = zoom + '%';
+    figure.classList.toggle('zoomed', zoom > 100);
+    output.value = zoom + '%';
+    output.textContent = zoom + '%';
+  };
+  figure.querySelectorAll('[data-zoom]').forEach(button => {
+    button.addEventListener('click', () => setZoom(zoom + Number(button.dataset.zoom) * 25));
+  });
+  figure.querySelector('[data-fit]').addEventListener('click', () => setZoom(100));
+})();
+</script>
 </body>
 </html>

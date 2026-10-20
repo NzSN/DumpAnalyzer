@@ -1,5 +1,18 @@
 # Field run — DumpAnalyzer against the LAN DumpLedger
 
+Historical receipt for the 2026-10-14 exercise. Host addresses, dump IDs,
+counts, certificate changes and success results below describe that run;
+they have not been revalidated by the 2026-10-20 documentation review.
+The rollback checkbox records an unexecuted option, not an outstanding
+deployment task. The original disposable-state advice applies to this field
+run's state directory; maintained deployments retain reports and credentials.
+
+For current configuration and operating guidance, use the
+[README](../README.md), [architecture](../docs/architecture.md) and
+[rich-report workflow](../docs/rich-reports.md). The later
+[2026-10-15 deployment receipt](../docs/local-deployment-2026-10-15.md)
+records a separate local rollout and preservation boundary.
+
 Target: `https://192.168.150.219:4080` (windows-dev `DESKTOP-6DKB5JD`).
 Discipline: the dump-ledger deployment runbook (backup `ledger.sqlite` before
 any restart; dry-run migrations on a copy; verify health + symbol hash after).
@@ -33,7 +46,7 @@ any restart; dry-run migrations on a copy; verify health + symbol hash after).
 - Scheduled write-back: `dump_048B10C302A4460D8A1FC75088` →
   `analysis_434D8028B9FB44F2A5E090F5FA` (completed, AV 0xc0000005 in
   lceda_pro) listed by `GET …/analyses`; `RecordAnalysis` event on the feed.
-- Clean full sweep running: 113 available dumps discovered.
+- At capture time, a clean full sweep was running: 113 available dumps discovered.
 
 
 1. ☑ Pre-flight: `/health` reachable; analyzer routes exist

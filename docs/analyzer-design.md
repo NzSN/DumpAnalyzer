@@ -1,350 +1,256 @@
 # DumpAnalyzer design
 
-Status: active. The server milestones AI1–AI3 landed in DumpLedger at
-`98e484c` (2026-10-14), with the operator-facing `docs/analyzer-guide.md`;
-our wire types and verdict writer are aligned to the implemented contracts
-(`catalog.ts`, `events.ts`, `analyses.ts`), including the 4 KiB UTF-8
-`facts`/`detail` budgets and the analyzer name/version bounds. Companion to
-DumpLedger's
-`docs/analyzer-integration-design.md` (repo-local:
-`~/Repos/dump-ledger/docs/analyzer-integration-design.md`). That document
-defines the **server surface** (milestones AI1–AI3); this document defines the
-**consumer**: DumpAnalyzer, the Analyzer that pulls dumps from DumpLedger,
-analyzes them with an internal agent, and writes verdicts back.
+Status: implemented v0.2.0, reviewed against source baseline
+`6a19ea297bb219509c994780c96bdd6ce6c4bfab` on 2026-10-20. This is the
+consumer design; DumpLedger owns the catalog, vault, symbol store and server
+analysis contracts. Deployment receipts and test results are dated evidence,
+not guarantees about a running service.
 
-## Purpose and scope
+Use [README](../README.md) for setup and commands,
+[architecture](architecture.md) for flow diagrams,
+[rich reports](rich-reports.md) for evidence and delivery details, and
+[CONTEXT.md](../CONTEXT.md) for domain vocabulary.
 
-DumpAnalyzer is a machine consumer of a DumpLedger instance. It exists to turn
-"an operator downloads a dump and runs CDB by hand" into a continuous,
-auditable pipeline:
+## Purpose and boundaries
 
-- **Discover** work through the dump catalog (`GET /api/v1/dumps`, AI1) and
-  keep current through the event feed (`GET /api/v1/events`, AI2).
-- **Fetch** dump bytes and symbols over the authenticated read surface and
-  the symsrv store, with hash verification and conditional revalidation.
-- **Analyze** each dump with an internal **agent**: an isolated pipeline
-  driver that stages bytes, acquires symbols, runs the debugger toolchain,
-  and extracts facts.
-- **Report** verdicts back as analysis reports
-  (`POST /api/v1/dumps/:dumpId/analyses`, AI3), so results live next to the
-  evidence they describe and survive analyzer restarts.
+DumpAnalyzer discovers available Windows dumps, verifies their bytes, runs CDB
+on a designated Windows analysis host over SSH, and retains reports locally.
+When enabled, write-back publishes them to DumpLedger. Analysis never executes
+inside DumpLedger. The only implemented analysis kind is `triage`.
 
-Non-goals for v1:
+The Rust daemon includes a loopback HTTP dashboard with Queue, Dumps, Reports
+and Settings panels, manual dump/case/customer analysis, token storage, and
+catalog rescan. Browsing never starts analysis. The HTTP surface is optional;
+its failure is logged without stopping the pipeline.
 
-- No operator UI and no human workflow; DumpLedger remains the operator
-  surface. DumpAnalyzer is a headless daemon plus logs. (The loopback
-  status UI added 2026-10-13 is observability only: no actions, no
-  workflow.)
-- No execution of analysis inside DumpLedger, and no changes to DumpLedger's
-  engine beyond what AI1–AI3 already specify.
-- No general debugger-automation framework: exactly one analysis **kind**
-  (`triage`) ships first; the architecture admits more.
-- No push delivery, no cross-instance federation, no storage of analysis
-  artifacts beyond the bounded JSON `facts` object (stack captures and
-  derived files stay in DumpAnalyzer's own bounded workspace, per the
-  integration design's non-goals).
-- DumpAnalyzer never ingests symbols into DumpLedger and never holds an
-  operator session; its only credential is the analyzer token.
+The two providers share deterministic capture. `cdb-ssh` returns its assessment;
+`claude-cdb` additionally asks a local Claude CLI host to assess bounded captured
+evidence. Claude does not drive CDB or receive tools. Neither provider ingests
+symbols into DumpLedger. Full canonical evidence is durable local data, rather
+than a transient workspace artifact or only the compact server verdict.
 
-## Vocabulary
+## Vocabulary and identity
 
-Per CONTEXT.md discipline in DumpLedger, the terms fixed here are the ones
-DumpAnalyzer adds. **Analyzer**, **analyzer token**, **analysis report**, and
-**event feed** are inherited from the integration design and are not
-redefined.
+| Term | Meaning |
+|---|---|
+| Analysis job | Durable scheduling identity `(dumpId, inputSha256, kind, analyzerVersion)` |
+| Agent | Shared pipeline driver owning fetch, verification and per-run local workspace |
+| Run | One execution of that pipeline; transient errors can consume another attempt |
+| Tool runner | Windows CDB transport/capture seam, with optional evidence-only reasoning |
+| Workspace | Per-run local staging directory plus a separate remote CDB directory |
+| Byte cache | Bounded local content-addressed dump bytes, revalidated with ETag and hash |
+| Feed cursor | Durable monotonic event position, persisted after page application |
+| Canonical report | `CrashReportV2` with identity, evidence, assessment, report ID and digest |
+| Compact projection | Bounded v1-compatible summary derived from the canonical report |
 
-**Analysis job**:
-The unit of work: one dump at one pinned content hash, to be analyzed with
-one kind by one analyzer version. Job identity is
-`(dumpId, inputSha256, kind, analyzerVersion)`, mirroring the server-side
-report identity so local dedup and server idempotency align.
-_Avoid_: task, scan
+Server report identity also includes `analyzer.name`. Local job keys omit that
+name: a state directory should retain one analyzer attribution. Manual reuse
+checks the stored canonical name and rejects a conflicting name. Choose a
+distinct version for a changed capture profile instead of overwriting evidence.
+The package default is `0.2.0`; configuration rejects legacy version `0.1.0`.
 
-**Agent**:
-The internal component that executes an analysis job end to end: staging,
-symbol acquisition, toolchain execution, and fact extraction. The agent is
-the only component that touches the tool runner and the workspace.
-_Avoid_: worker, plugin
-
-**Run**:
-One execution of the agent pipeline for one job. Runs are at-least-once:
-crashes and transient failures re-run; exactly-once *effect* comes from the
-server's idempotent write-back, not from suppressing re-runs.
-_Avoid_: attempt (reserved for retry counting), session
-
-**Tool runner**:
-The seam that executes the debugger toolchain (CDB) on a Windows analysis
-host, given a staged dump and a symbol path, returning bounded output. v1
-transport: SSH to a designated Windows box. The DumpLedger host never runs
-the toolchain.
-_Avoid_: executor service, sandbox (overloaded)
-
-**Workspace**:
-A per-run, wipe-after-use directory holding the staged dump and intermediate
-output. Workspaces are never shared between runs and never persist after
-write-back.
-_Avoid_: temp folder (under-specified)
-
-**Byte cache**:
-A bounded local store of already-downloaded dump bytes, keyed by content
-hash, validated with the content `ETag` (`If-None-Match`). A cache hit skips
-the download, never the verification.
-_Avoid_: dump archive
-
-**Feed cursor**:
-The persisted position in the DumpLedger event feed (the opaque, rowid-based
-cursor). It is monotonic: it never moves backward, including across restarts.
-_Avoid_: offset, bookmark
-
-## Reference deployment
+## Deployment and module ownership
 
 ```text
-+--------------------+        HTTPS (analyzer token)         +----------------------+
-| DumpAnalyzer host  | ------------------------------------> | DumpLedger           |
-|  (Linux, Rust)     |   catalog, events, bytes, write-back  |  https://<host>:4080 |
-|                    |                                       |  symsrv listener     |
-|  agent             | <------------------------------------ |  (symbol artifacts)  |
-|    | tool runner   |        symsrv symbol fetch            +----------------------+
-|    v               |
-|  SSH transport     |
-+--------|-----------+
-         v
-+--------------------+
-| Windows analysis   |
-| box (CDB + symsrv) |
-+--------------------+
+DumpAnalyzer (Rust, local SQLite/cache/dashboard)
+  | HTTPS: catalog, feed, content, analysis publication
+  v
+DumpLedger (vault/catalog + symbol service)
+  ^
+  | symsrv lookup from CDB; credential-free symbol path
+Windows analysis host (CDB), reached by DumpAnalyzer over SSH/SCP
 ```
 
-The current DumpLedger deployment on the LAN is `https://192.168.150.219:4080`
-(time-specific; confirm before use). The analyzer host and the Windows
-analysis box may be the same machine, but the tool-runner transport seam is
-kept regardless: dumps are hostile input, and where CDB executes is a
-deployment decision, not a code change.
+The daemon needs a DumpLedger URL and an environment or previously stored
+analyzer token, SSH/SCP access to the Windows host, and CDB on that host.
+Remote ledger URLs require HTTPS; HTTP is accepted only for loopback development
+stubs. `DUMP_ANALYZER_TLS_CA_CERT` adds PEM trust without disabling validation.
+The Windows host separately needs trust/connectivity for symsrv. Use a native
+Windows symbol-cache path such as `C:\symcache`; double backslashes in a
+systemd `EnvironmentFile`. See the [dated deployment receipt](local-deployment-2026-10-15.md)
+for that environment's checkpoint and rollback, not a portable provisioning recipe.
 
-## Module design
+| Source | Responsibility |
+|---|---|
+| [config.rs](../src/config.rs), [main.rs](../src/main.rs) | Validated configuration, provider wiring and process exit behavior |
+| [client.rs](../src/client.rs), [wire.rs](../src/wire.rs) | Typed ledger requests, token handling and contract validation |
+| [sync.rs](../src/sync.rs) | Boot/manual catalog scan and event-feed application |
+| [scheduler.rs](../src/scheduler.rs) | State lock, recovery, configured-version claims, feed supervision and delivery loop |
+| [agent.rs](../src/agent.rs) | Fetch/cache verification, workspace lifecycle, execution and retry classification |
+| [runner.rs](../src/runner.rs), [symbols.rs](../src/symbols.rs) | CDB capture/refinement and independent module/PDB identity evidence |
+| [claude_runner.rs](../src/claude_runner.rs), [assessment.rs](../src/assessment.rs) | Isolated evidence-only reasoning and deterministic assessment fallback |
+| [report.rs](../src/report.rs), [verdict.rs](../src/verdict.rs) | Canonical report, compact projection, publication and reconciliation |
+| [state.rs](../src/state.rs) | SQLite migrations, jobs, settled identities, cursors, secrets, cache and reports |
+| [analyzer.rs](../src/analyzer.rs) | Synchronous manual `DumpId -> IO Report` capability and scope batches |
+| [http.rs](../src/http.rs), [explorer.rs](../src/explorer.rs), [dashboard.html](../src/dashboard.html) | Local actions, paged catalog/report views and UI |
 
-One Rust process (decided 2026-10-13, superseding the earlier TypeScript
-note): a single `dump-analyzer` binary, tokio async runtime, `reqwest` over
-rustls for the server surface, `rusqlite` (bundled SQLite) for local state,
-`serde`/`serde_json` for wire types with symmetric decode/encode and
-unknown-field rejection, `sha2` for content verification. Toolchain
-discipline mirrors DumpLedger's: `cargo test` tiers (unit + integration),
-`cargo clippy -- -D warnings` and `cargo fmt --check` as gates, no new
-dependencies outside the approved manifest. No listening HTTP port in v1;
-health is the process journal (tracing) plus exit codes.
+The state directory is authoritative for local evidence and credentials. It is
+not a disposable catalog index: deleting `analyzer.sqlite` loses canonical
+reports, legacy history, pending delivery, settled markers, cursor and token.
+Back up the stopped service's state before a migration or rollback; restore the
+matching database and binary checkpoint together when following a dated receipt.
+Never open or modify DumpLedger's own database from this process.
 
-| Module | Responsibility | Does not |
-|---|---|---|
-| `ledger-client` | Typed HTTP client for the AI1–AI3 surface; analyzer-token auth; strict response decoding; ETag conditional GETs | retry policy, caching decisions |
-| `catalog-sync` | Initial keyset scan of `GET /api/v1/dumps`; event-follower loop on `GET /api/v1/events`; persists the feed cursor | job execution |
-| `scheduler` | Job table, dedup on job identity, bounded run concurrency (v1: 1), retry with capped backoff, drop rules | HTTP, toolchain |
-| `agent` | The pipeline driver (below); owns workspace lifecycle | scheduling, server writes beyond its own run |
-| `tool-runner` | Transport + CDB script execution with hard time/output bounds | dump staging, report assembly |
-| `verdict-writer` | Report assembly, idempotent POST, restart reconciliation | analysis |
-| `state` | `data/analyzer.sqlite`: jobs, cursors, cache index | — |
+## Discovery, scheduling and recovery
 
-Process-local state only. DumpAnalyzer's SQLite file is its own; it never
-opens DumpLedger's ledger, and it can be deleted and rebuilt from the server
-catalog at the cost of re-analysis.
+Boot acquires `analyzer.lock` using exclusive file creation, opens/migrates
+SQLite, and resolves the token (environment wins and is stored; otherwise the
+stored token is required). It resets volatile execution phases to `claimed`,
+retires execution rows from other analyzer versions, reconciles report delivery,
+and sweeps orphaned local `run-*` workspaces before the initial catalog scan.
+Reporting work from earlier versions is preserved for delivery. The lock guards
+one state directory; it does not coordinate separate hosts or state directories.
 
-## Agent pipeline
+After the boot scan, the event feed, scheduler and delivery replay run
+independently. The scan is not a periodic full-catalog sweep. A missing event
+route permits scan-only operation: later changes require restart or manual
+`POST /-/rescan`. Transient scan/feed failures use capped 1–30 second backoff;
+non-transient contract/auth/state failures can stop the daemon. Feed page
+application precedes cursor persistence, so interrupted pages replay idempotently.
 
-The agent runs one job through these stages. "Persisted" means the stage
-boundary is recorded in the job table before the stage's side effects begin,
-so a crash recovers from the boundary, not from a guess.
+The automatic scheduler claims only the configured version, resumes its
+recovered claims, and runs one scheduled job at a time. That is not a global
+concurrency limit: manual requests can overlap scheduled or other manual work.
+Duplicate concurrent manual execution of one identity is rejected within the
+manual analyzer registry. A scope request gathers at most 64 available dumps
+and executes them sequentially, recording per-dump failures as skips.
 
-| # | Stage | Server touch | Persisted at entry | Crash recovery |
-|---|---|---|---|---|
-| 1 | claim | — (local) | job row: `claimed` | — |
-| 2 | fetch | `GET …/content` (ETag) | `fetching` | re-fetch; partial file is discarded |
-| 3 | verify | — | sha256 of staged bytes == catalog `sha256`, else refetch (bounded) then `failed` | re-fetch |
-| 4 | acquire symbols | symsrv `GET /symbols/…` | module list from bounded inspection + CDB module load needs | re-run |
-| 5 | execute | — (tool runner is local/SSH) | `analyzing` | re-run (bytes re-verified) |
-| 6 | extract facts | — | bounded CDB output parsed into `facts` | re-run |
-| 7 | report | `POST …/analyses` | `reporting`, with pinned `inputSha256` | re-POST; `200` replay is success |
-| 8 | settle | — | `done`/`dropped`/`failed` | — |
+`DUMP_ANALYZER_SCHEDULER=off` disables claiming while scan, feed, UI and manual
+analysis remain active. `DUMP_ANALYZER_WRITE_BACK=off` disables server submission
+and delivery reconciliation, settling reports locally. With write-back enabled,
+pending report replay runs every 60 seconds, even while automatic execution is
+disabled or busy. SIGTERM/SIGINT cancels the loops; the scheduler drains its
+current bounded run before exiting. This is distinct from crash recovery.
 
-Stage rules:
+## Capture and report handoff
 
-- **Pinning.** The job pins `inputSha256` at fetch time and carries it into
-  the POST. Dump bytes are immutable once `available`, so a mismatch at
-  verify time means local corruption (refetch), and a `404`/`410` at any
-  later touch means the dump was purged: the job is `dropped`, never
-  retried.
-- **Outcome vs. infrastructure failure.** A dump that cannot be analyzed
-  (corrupt minidump, missing critical symbols, CDB cannot load) produces a
-  report with `outcome: "failed"` — that is a verdict. A tool-runner failure
-  (SSH down, CDB crashed, timeout) is transient: bounded retry, then job
-  `failed` with no report. The two paths are never conflated.
-- **Idempotent settle.** `201` and `200` (identity replay) both settle the
-  job as `done`. Re-running the same analyzer version against the same bytes
-  is a server-side no-op by design; local dedup exists to save CDB runs, not
-  to guarantee correctness.
-- **Bounded everything.** Download size, CDB wall time, captured output, and
-  workspace size all have hard caps; exceeding a cap fails the run, never
-  hangs it.
+Scheduled execution follows persisted phases
+`claimed -> fetching -> staged -> analyzing -> reporting`. Hash verification
+must succeed before analysis. A corrupt cache entry is discarded and re-fetched
+within the retry budget. The agent allows at most two attempts; transient
+transport/runner failures consume that budget, while terminal errors settle the
+job. A report with outcome `failed` is a captured result, distinct from an
+infrastructure error that prevented capture.
 
-Two agent backends sit behind the tool-runner seam (the scheduler, sync, and
-write-back modules touch neither): the deterministic CDB script runner
-(`cdb-ssh`, default) and, per the 2026-10-13 decision, the `claude-cdb`
-provider, which lets the `claude` CLI drive CDB agentically over SSH under
-`--restricted` containment with schema-forced output (src/claude_runner.rs).
-Both honor the same `RunBounds`; a malformed agent result is a runner error,
-never a verdict.
+The deterministic collector captures essential exception/context and preliminary
+stack evidence before optional symbol refinement. Refinement failure or timeout
+preserves the baseline with explicit limitations. Successful refinement can
+upgrade a failed preliminary result to `completed` when the refined capture
+qualifies. Loaded-PDB quality uses dump CodeView and independent PDB Info-stream
+GUID/age evidence: a debugger `(pdb symbols)` label alone does not establish a
+match. Probe omissions and stack/module truncation remain visible limitations.
 
-## On-demand component
+`claude-cdb` first runs that collector, reserving a portion of the shared wall
+budget for optional reasoning. Its isolated host disables tools and MCP servers
+and denies every tool request. Malformed output, unavailable reasoning or a
+reasoning timeout preserves readable deterministic evidence/assessment and an
+omission. The assessment distinguishes immediate mechanism from underlying
+cause; captured evidence does not automatically establish original-incident
+attribution. See [rich reports](rich-reports.md) for claim qualification rules.
 
-`src/analyzer.rs` defines the capability `f : DumpId -> IO Report` (trait
-`analyzer::Analyzer`, production `PipelineAnalyzer`): one effectful call that
-takes a DumpLedger dump ID and returns a `Report` — detail lookup gated on
-`available` + sealed sha256, then the shared pipeline stages (cache + ETag
-fetch, sha256 verification, bounded toolchain run via `Agent::attempt`).
-It persists no attempt counters; the report is recorded locally and pending
-delivery appears in the work queue. Write-back-off completion settles locally
-at once. Otherwise the replay path delivers it at boot or on its independent
-periodic cadence. A manual completion cannot overwrite a scheduled run already
-executing or reopen a settled identity. Errors map to `NotFound`,
-`NotAvailable`, `Transient` (budget exhausted), `Terminal`. The status UI
-exposes it as token-guarded `POST /-/analyze` (plus a browser form); the
-token is digest-compared in constant time and never stored or rendered.
+`verdict::prepare_report` constructs and validates the canonical document and
+its compact projection. SQLite commits canonical evidence, digest, projection
+and applicable job handoff together before publication. It rejects incompatible
+replacement under an occupied identity. The v1 projection is a compatibility
+view; it is not the complete evidence store.
 
-## Server surface consumed
+Terminal jobs move atomically from `jobs` to `settled_jobs`; reports survive
+independently. Settled identities suppress rediscovery. Queue views include
+claimed/running/reporting work, while discovered candidates and completed dumps
+remain browseable through the catalog explorer. Manual executions have transient
+active records that clear on completion, failure or cancellation.
 
-| DumpLedger surface | Milestone | DumpAnalyzer use |
-|---|---|---|
-| `GET /api/v1/dumps` (+ filters, keyset pages) | AI1 | initial scan; revalidation sweeps |
-| `GET /api/v1/dumps/by-sha256/:sha256` | AI1 | upstream duplicate check before scheduling |
-| `GET /api/v1/dumps/:dumpId` | existing | per-dump detail, `symbolCoverage` preflight |
-| `GET /api/v1/dumps/:dumpId/content` (+ ETag/304) | existing + AI1 | byte fetch and cache revalidation |
-| `GET /api/v1/events?since=…` | AI2 | change tracking; new dumps and purges |
-| `GET /symbols/:name/:id/:file` (symsrv) | existing | symbol acquisition for CDB |
-| `POST/GET /api/v1/dumps/:dumpId/analyses` | AI3 | verdict write-back; restart reconciliation |
-| analyzer token (`Authorization: Bearer`) | AI1 | sole credential, read scope + AI3 POST |
+## Manual reuse and fresh capture
 
-Until AI3 ships on the server, DumpAnalyzer runs in **local-verdict mode**:
-reports are written to its own store with the same identity tuple, and the
-write-back module replays them when the server surface appears. This keeps
-AN2 deliverable against AI1+AI2 alone.
+`PipelineAnalyzer::analyze` first resolves detail and requires `available` with
+a sealed hash. For that identity, an existing canonical report with matching
+analyzer attribution returns its compact projection without another CDB run.
+An existing legacy compact report blocks replacement and asks for a distinct
+version. Changing `DUMP_ANALYZER_VERSION` and restarting creates a fresh capture
+identity; pressing Analyze or Rescan does not force evidence replacement.
 
-## Correctness and idempotency
+Manual execution shares `Agent::attempt`, with the same two-attempt budget but
+no durable attempt counter or intermediate phases. It saves report and handoff
+transactionally; pending delivery can remain `reporting`, while local-only
+completion settles immediately. A manual completion preserves active scheduled
+execution and settled identities. Scope actions apply the same reuse rules.
 
-- **Write-back is optional.** `DUMP_ANALYZER_WRITE_BACK=off` treats the
-  ledger as a read-only dump source: the verdict sink is `LocalVerdictSink`
-  (assemble + record locally + settle `done` — no POST, no acceptance wait),
-  server reconciliation and periodic delivery are skipped. At boot, stale
-  `reporting` rows with a durable report settle locally; rows without a report
-  return to discovery for another run.
-- **Jobs are a work queue.** Terminal transitions atomically move the job
-  from `jobs` to `settled_jobs`. Reports stay available independently; settled
-  identity markers prevent rediscovery. Migration 3 moves pre-existing terminal
-  rows out of the queue. The Jobs widget and its counts start at `claimed`;
-  `discovered` is a scheduling candidate shown in the separate Dumps explorer.
-  The explorer reads the available catalog independently of local job retention,
-  grouped by customer/case with names, search, and scoped analysis actions.
-  Manual executions have a request-scoped active record so they appear in Jobs
-  during execution without leaving a stale row when cancelled.
-- **Exactly-once effect, at-least-once execution.** The server identity
-  `(dumpId, analyzer.name, analyzer.version, kind, inputSha256)` plus
-  idempotent replay gives exactly-once visible effect. DumpAnalyzer never
-  relies on suppressing a re-run for correctness.
-- **Pinned input.** A report is only ever submitted for the hash that was
-  actually analyzed, and `inputSha256` mismatch is a server-side
-  `invalid_request`, so a verdict cannot silently attach to different bytes.
-- **Cursor monotonicity.** Event application is idempotent, so the follower
-  applies a page and *then* persists the cursor (apply-then-persist): a crash
-  between the two replays the page rather than losing it. The cursor never
-  moves backward; a beyond-end poll returns the request cursor, which is the
-  sleep signal (5–30 s cadence).
-- **Purge races.** A purge at any point invalidates the job at its next
-  server touch; accepted reports are cascade-deleted server-side, so no local
-  reconciliation is needed beyond dropping the job.
-- **Restart reconciliation.** On boot: jobs in `reporting` check
-  `GET …/analyses` for their identity tuple (present → `done`, absent →
-  re-POST). If both server report and local copy are absent, the job is requeued.
-  Jobs in `claimed`/`fetching`/`staged`/`analyzing` resume at fetch with byte
-  re-verification and preserved attempt counts; the cursor resumes the feed.
-  Durable report delivery continues independently of automatic job scheduling.
-- **Single-writer discipline.** One DumpAnalyzer process per configured
-  `(analyzer.name, analyzer.version)`: the token has no per-client identity,
-  so two concurrent writers would share one attribution. v1 enforces this
-  with a process lock on the state directory.
+## Publication and restart reconciliation
 
-## Security considerations
+Full v2 publication is attempted before legacy v1 submission. Missing/unsupported
+v2 routes permit a digest-bound compact fallback. Acceptance of that fallback is
+`summaryOnly`, separately tracked from `fullyDelivered`: the replay path can
+later promote full evidence when the route appears. Missing write-back support
+retains local verdicts for later replay. Invalid/conflicting/purged submissions
+can abandon full delivery; transient failures retain pending work. Local report
+history is not removed merely because its server dump is purged.
 
-- The analyzer token comes from an environment variable or secret store, is
-  sent only over TLS, and never appears in URLs, logs, crash output, or the
-  workspace. CDB symbol paths embed no credentials.
-- Dumps are hostile input. The toolchain runs only on the designated analysis
-  box, never on the DumpLedger host, with hard time/output bounds and a
-  wiped workspace. Symbol download over symsrv is read-only; GUID/age and
-  timestamp/size are lookup metadata, not authentication of bytes (per
-  DumpLedger's security model).
-- `facts` and `summary` are stored and later rendered by DumpLedger's web UI:
-  the agent emits plain text only, within the 16 KiB body bound, and must not
-  copy raw dump memory into a report.
-- The analyzer's own SQLite and byte cache contain dump-derived data and get
-  the same volume-level protection as the DumpLedger vault.
+On restart, reporting jobs reconcile against server analyses or repost durable
+reports. A reporting row without a durable report can return to discovery;
+volatile capture phases restart with byte verification and retained attempt
+counts. With write-back off, reporting rows with evidence settle locally and
+reportless rows return to discovery. Server-side idempotency is scoped to the
+full server identity; local transactional storage and dedup avoid unnecessary
+runs but do not make remote execution exactly once.
 
-## Test and model strategy
+Consumed surfaces are catalog/customer/case/detail reads, conditional content
+GETs, events, symsrv and analysis read/write routes. The typed client also
+exposes by-hash lookup; automatic sync does not currently use it as an upstream
+duplicate gate. Protocol budgets and rich endpoint compatibility are documented
+in [rich reports](rich-reports.md) and enforced in client/wire/report code.
 
-- **Unit:** wire decoders for every consumed shape (including duplicate-key
-  and bound rejection), job-identity dedup, retry/drop classification.
-- **Integration:** against a fixture DumpLedger server (in-process Fastify
-  with the real contracts): scan + follow + fetch + ETag 304, token
-  precedence (`401` on wrong token), write-back replay, purge mid-pipeline,
-  crash-recovery at every persisted stage boundary.
-- **Formal:** `specs/DumpAnalyzer.tla` models the job lifecycle, crash/
-  recovery, purge races, and idempotent write-back; checked invariants are
-  listed in `specs/DumpAnalyzer.cfg`:
+## HTTP trust and execution bounds
 
-  ```sh
-  tlc -config specs/DumpAnalyzer.cfg specs/DumpAnalyzer.tla
-  apalache-mc check --no-deadlock --init=Init --next=Next \
-    --inv=PinnedReport --length=10 specs/DumpAnalyzer.tla
-  ```
+The default listener is `127.0.0.1:4180`; an empty `DUMP_ANALYZER_HTTP_ADDR`
+disables it. Read endpoints have no authentication. For action routes, a
+explicit bearer must digest-match; absent authorization or an empty form token
+uses the configured token when one exists. An empty bearer header is rejected.
+This fallback checks credential
+availability, not caller identity. Browser forms intentionally use it. Token
+storage probes a candidate against DumpLedger and updates the UI digest live;
+existing pipeline clients pick up the replacement after restart. Protect the
+listener boundary before exposing it beyond trusted local callers.
 
-  The 2026-10-13 revision (split submit accept/settle, honest purge
-  semantics) produced 1,621,239 TLC-generated states, 428,704 distinct
-  states, depth 33, with no invariant violation; Apalache found no
-  counterexample through length 10 for `PinnedReport`. These are bounded
-  finite-model results. They do not establish that the analyzer is formally
-  verified; the model abstracts HTTP, hashing, and the toolchain, and covers
-  safety only, not liveness.
-- **MBT (MirrorRust):** `tests/mbt.rs` replays the checked corpus
-  (`tests/mbt/traces/`, generated by `tools/mbt/gen_traces.py` from
-  `specs/DumpAnalyzerReplay.tla`: per-action witnesses plus BFS and
-  simulation traces, 33 traces covering all 20 actions) against the real
-  state layer — jobs, cursors, local reports, `Agent::recover_job` — through
-  the `mirror` executable (`MIRROR_BIN`; the Mirrors checkout builds it).
-  `python3 tools/mbt/gen_traces.py --check` is the corpus freshness gate.
-  Observation provenance and the harness's scripted-server boundary are
-  documented in `tests/mbt/harness.rs`; HTTP and toolchain behavior stay
-  with the integration tiers.
-- **Field evidence:** first real runs execute against the LAN instance with
-  known case dumps; CDB output and symbol-load evidence are preserved per
-  run, matching the project's dump-forensics evidence conventions.
+The token is plaintext in SQLite, redacted by `SecretToken` formatting and
+excluded from symbol paths. Protect state and backups as sensitive dump-derived
+data. Reports contain bounded excerpts and metadata; avoid treating them as
+non-sensitive just because the original dump is not served by the dashboard.
 
-## Phasing
+Default configured bounds are 10 minutes of runner wall time, 1 MiB captured
+output, 2 GiB workspace allowance and 10 GiB byte cache. Runner deadlines cover
+local staging/execution waits; remote cleanup has a separate two-second
+best-effort grace. Local SSH/SCP/Claude children are terminated on cancellation
+or applicable bounds. Killing SSH does not prove remote CDB termination.
+Workspace checks are not a continuous remote disk quota, and cleanup is not a
+guarantee that every remote artifact was removed. These are resource controls,
+not a sandbox or an overall HTTP/request deadline.
 
-| Milestone | Content | Server dependency |
-|---|---|---|
-| AN1 | `ledger-client`, `catalog-sync`, `state`; scan + follow + fetch + verify; no analysis | AI1 (AI2 for the feed; scan-only fallback exists) |
-| AN2 | `agent` + `tool-runner` with CDB triage kind; local-verdict mode | — |
-| AN3 | `verdict-writer` live write-back + restart reconciliation; field run | AI3 |
-| AN4 (optional) | second analysis kind; long-poll if cadence proves insufficient | AI4 if it lands |
+## Validation and proof boundary
 
-## Open questions
+The repository's tests include wiremock HTTP contracts, state migrations and
+transaction integrity, fetch/hash/cache paths, runner parsing and containment,
+reasoning fallback, manual lifecycle, report delivery compatibility and UI
+escaping/pagination. Test presence is static evidence of intended coverage;
+this documentation refresh ran no Rust tests, remote commands or live probes.
 
-1. **Symbol acquisition topology.** Point CDB's sympath at DumpLedger's
-   symsrv listener directly (single-HTTP-store-last rule), or pre-seed a
-   local store on the analysis box? Direct is simpler; pre-seeding may win
-   for repeat analyses of one product version.
-2. **Where the analysis box lives.** SSH to the existing Windows dev box is
-   the v1 transport, but a dedicated, more disposable analysis machine is the
-   better long-term answer for hostile dumps.
-3. **Multiple kinds per dump.** The job table admits `kind` already, but
-   scheduling policy (which kinds run for which dumps) is undefined beyond
-   "triage everything".
-4. **Report enrichment.** Whether `facts` should carry CDB command excerpts
-   or stay strictly structured fields; the 16 KiB bound forces the question
-   for noisy stacks.
+The historical 2026-10-13 lifecycle check recorded 1,621,239 TLC-generated
+states, 428,704 distinct states and depth 33 without invariant violation, and
+no Apalache counterexample through length 10 for `PinnedReport`. These bounded
+results describe that model revision, not formal verification of the current
+application. The model abstracts HTTP, hashing and debugger behavior and does
+not prove liveness, rich-report delivery or provider containment.
+
+The checked MBT corpus has 33 traces covering 20 lifecycle actions. The
+handwritten [harness](../tests/mbt/harness.rs) connects modeled transitions to
+real state/recovery operations and a scripted server boundary. It is not a
+model-generated implementation or a proof of HTTP/toolchain execution.
+[tests/mbt.rs](../tests/mbt.rs) returns early when `MIRROR_BIN` is absent;
+ordinary `cargo test` success alone does not establish replay coverage. Use the
+explicit MBT and corpus-freshness commands in [README](../README.md).
+
+Dated qualification reports in [rich reports](rich-reports.md),
+[field run](../Plans/field-run.md) and [readiness](../Plans/phase2-live-readiness.md)
+retain their historical counts, fixtures and live gates. Runtime TLS trust,
+Windows CDB/PDB availability, corrected live Claude qualification and companion
+v2 availability require their own environment checks. Do not infer those passes
+from a documentation-only review.

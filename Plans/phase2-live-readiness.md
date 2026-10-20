@@ -1,5 +1,17 @@
 # Phase 2 — live-readiness tasks
 
+Historical phase-two task plan and 2026-10-14 completion receipt. The
+baseline gaps described in R1, R3 and R4 were the reasons for that wave;
+they are not outstanding gaps in the current implementation. The dated
+gate counts below are retained without rerunning them. Documentation review
+on 2026-10-20 used source `6a19ea297bb219509c994780c96bdd6ce6c4bfab` only.
+
+Current navigation: [README](../README.md),
+[architecture](../docs/architecture.md),
+[analyzer design](../docs/analyzer-design.md) and
+[rich-report workflow](../docs/rich-reports.md). The [field-run receipt](field-run.md)
+records the separate 2026-10-14 live exercise.
+
 Derived from the state after phase 1 (all tasks ●, 218 tests green) and the
 server-side landing of AI1–AI3 in dump-ledger at `98e484c` +
 `docs/analyzer-guide.md`. Same delegation conventions as
@@ -12,13 +24,16 @@ ownership, `--offline --locked` gates, integrator-run wave gates.
 | R2 | `POST /-/rescan` manual catalog re-scan (token-guarded) | b1_client | `src/http.rs`, `tests/http.rs` | — | ● |
 | R3 | Server-side feed action filter + vocabulary pin to the guide | b2_sync | `src/sync.rs`, `tests/sync.rs` | — | ● |
 | R4 | Byte-cache size cap enforcement (LRU by `last_used_at`) | c1_agent | `src/agent.rs`, `src/state.rs` (additive), `tests/agent.rs` | — | ● |
-| R5 | Integrator wiring + docs: scheduler.rs wires R1/R2; README, `docs/architecture.html`, `docs/trigger-paths.html` refresh; `Plans/field-run.md` checklist (no execution) | integrator | — | R1–R4 | ☐ |
+| R5 | Integrator wiring + docs: scheduler.rs wires R1/R2; README, `docs/architecture.html`, `docs/trigger-paths.html` refresh; `Plans/field-run.md` checklist (no execution) | integrator | — | R1–R4 | ● (2026-10-14 receipt below) |
 
 ## R1 — Continuous local-report replay
 
-Boot reconciliation (`reconcile_on_boot`) replays `local_reports.posted = 0`
-only at startup; a long-running daemon with the route appearing mid-run waits
-until the next boot. Add a periodic sweep.
+At the phase-one baseline, boot reconciliation (`reconcile_on_boot`)
+replayed `local_reports.posted = 0` only at startup; a long-running daemon
+with the route appearing mid-run waited until the next boot. This task added
+a periodic sweep. Current delivery is handled independently by the
+write-back-enabled replay loop in `src/scheduler.rs`; full rich-report
+delivery has its own state, described in the rich-report guide.
 
 - **Deliver**:
   1. `pub async fn replay_pending(client, store, config) -> Result<ReplayReport>`
@@ -46,8 +61,9 @@ until the next boot. Add a periodic sweep.
 
 ## R3 — Feed action filter + vocabulary pin
 
-The feed currently passes no `actions` filter (all events over the wire, all
-classified locally by keywords). The guide pins the dump-relevant vocabulary.
+At the phase-one baseline, the feed passed no `actions` filter (all events
+over the wire, all classified locally by keywords). This task pinned the
+dump-relevant vocabulary from the server guide.
 
 - **Deliver**:
   1. `follow_feed` passes `actions` = `AcceptDump, RejectDump, BeginPurge,
@@ -63,8 +79,10 @@ classified locally by keywords). The guide pins the dump-relevant vocabulary.
 
 ## R4 — Byte-cache cap enforcement
 
-`DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES` is parsed but never enforced; the cache
-is content-addressed, so eviction is safe (a miss just refetches).
+At the phase-one baseline, `DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES` was parsed
+but not enforced. This task added eviction to the content-addressed cache;
+a miss refetches the bytes. `src/agent.rs` and `src/state.rs` contain the
+current cap enforcement and LRU bookkeeping.
 
 - **Deliver**:
   1. `state.rs` (additive): `CacheIndex::total_bytes() -> u64` and

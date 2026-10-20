@@ -5,22 +5,38 @@ daemon that discovers Windows minidumps through the DumpLedger catalog,
 analyzes them with an internal agent (CDB toolchain on a Windows analysis
 box via SSH), and writes verdicts back as analysis reports.
 
-Architecture baseline: [block, control-flow and data-flow diagrams](docs/architecture.md)
+Architecture: [block, control-flow and data-flow diagrams](docs/architecture.md)
 ([rendered view](docs/architecture.html)).
 Rich reports: [capture, evidence, detail API, delivery, and rollout](docs/rich-reports.md).
 Design: [`docs/analyzer-design.md`](docs/analyzer-design.md).
-Formal model of the job lifecycle: [`specs/DumpAnalyzer.tla`](specs/DumpAnalyzer.tla)
-(TLC-clean; see the design doc for the bounded evidence).
-Task plan: [`Plans/rust-implementation-tasks.md`](Plans/rust-implementation-tasks.md).
+Lifecycle model (bounded historical checks): [`specs/DumpAnalyzer.tla`](specs/DumpAnalyzer.tla)
+(see the design doc for the evidence and abstraction boundary).
+Documentation map ([full index](docs/README.md)):
+
+- [Domain vocabulary](CONTEXT.md), [current architecture](docs/architecture.md),
+  [consumer design](docs/analyzer-design.md), and [rich report operations](docs/rich-reports.md)
+  describe the maintained implementation.
+- [Rust implementation plan](Plans/rust-implementation-plan.md),
+  [task ledger](Plans/rust-implementation-tasks.md), and
+  [rich report implementation plan](Plans/rich-report-implementation-plan.md)
+  preserve the implementation and qualification history.
+- [Phase 2 readiness](Plans/phase2-live-readiness.md),
+  [field run](Plans/field-run.md), and
+  [local deployment receipt](docs/local-deployment-2026-10-15.md)
+  are dated operational records, not current service health guarantees.
+- [Report fixture inventory](tests/fixtures/report-v2/README.md) and
+  [qualification fixtures](tests/fixtures/report-v2/qualification/README.md)
+  record reproducible evidence and its limits.
 
 ## Build and test
 
 Rust 1.85+ (developed on 1.95). Dependencies are pinned by `Cargo.lock`;
-with a warm registry cache everything runs offline:
+the dev dependency also requires the sibling `../MirrorRust` checkout.
+With that checkout and a warm registry cache, the standard checks run offline:
 
 ```sh
 cargo build --offline --locked
-cargo test --offline --locked        # full suite (needs loopback TCP for wiremock)
+cargo test --offline --locked        # default suite (needs loopback TCP for wiremock)
 cargo clippy --offline --locked --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -38,7 +54,7 @@ export DUMP_ANALYZER_TOKEN='<analyzer bearer token>'   # sha256 goes to the serv
 # The dashboard's "Analyzer token" card stores a new token without a restart:
 # `POST /-/store-token` (or the form) probes the candidate against the live
 # ledger first — a token the server rejects is never stored. On success the
-# UI's action auth uses it immediately; the daemon's server-side pipeline
+# UI's token fallback uses it immediately; the daemon's server-side pipeline
 # picks it up at the next boot.
 export DUMP_ANALYZER_SSH_TARGET='windows-dev'          # Windows analysis box running CDB
 export DUMP_ANALYZER_SYMBOL_CACHE_DIR='C:\symcache'  # on the analysis box;
@@ -50,13 +66,16 @@ dump-analyzer
 
 Optional knobs (see `src/config.rs`): `DUMP_ANALYZER_STATE_DIR` (`./data`),
 `DUMP_ANALYZER_NAME`/`DUMP_ANALYZER_VERSION` (report attribution),
+`DUMP_ANALYZER_SCHEDULER` (`off` disables automatic claiming, while feed and
+manual operation continue), `DUMP_ANALYZER_TLS_CA_CERT` (additional PEM trust),
 `DUMP_ANALYZER_WRITE_BACK` (`off` treats the ledger as a read-only dump
 source: verdicts record locally and jobs settle without `POST …/analyses`),
 `DUMP_ANALYZER_POLL_INTERVAL_MS` (5–30 s feed cadence),
 `DUMP_ANALYZER_RUN_WALL_TIMEOUT_MS`, `DUMP_ANALYZER_MAX_OUTPUT_BYTES`,
 `DUMP_ANALYZER_MAX_WORKSPACE_BYTES`, `DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES`.
 
-The token never appears in logs, errors, or URLs.
+`SecretToken` formatting redacts the credential. The stored token is plaintext
+inside SQLite: restrict access to the state directory and its backups.
 
 ## Tool-runner providers
 
@@ -65,6 +84,9 @@ The agent's analysis backend is selected with `DUMP_ANALYZER_RUNNER`:
 - **`cdb-ssh`** (default): deterministic CDB collection runs over SSH
   (`src/runner.rs`). Essential exception/context evidence is collected before
   optional symbol refinement. A symbol-stage failure preserves that evidence.
+  Successful refinement can
+  upgrade an initially failed essential capture to `completed` when the refined
+  result qualifies; optional-stage failure does not downgrade the baseline.
 - **`claude-cdb`**: the same deterministic collector runs first, then a
   persistent, isolated Claude host assesses bounded captured evidence
   (`src/claude_runner.rs`). Tools and MCP servers are disabled; every tool
@@ -73,8 +95,9 @@ The agent's analysis backend is selected with `DUMP_ANALYZER_RUNNER`:
 
 Both produce the same canonical report: exception record/context, qualified
 native stack, module/PDB evidence and an assessment separating the immediate
-mechanism from the underlying cause. Full evidence is saved before generating
-the compact v1 verdict. The default analyzer version is now `0.2.0`; legacy
+mechanism from the underlying cause. Full capture is retained while deriving
+the compact v1 projection; both are persisted transactionally before delivery.
+The default analyzer version is now `0.2.0`; legacy
 reports remain readable and require a new version for detailed reanalysis.
 
 ```sh
@@ -99,7 +122,9 @@ pending delivery appears in the work queue until the report is accepted
 or retained in local-verdict mode. With write-back off, it settles locally
 immediately.
 
-Hand-trigger through the status UI (loopback, token-guarded):
+Hand-trigger through the status UI (loopback by default). An explicit bearer
+must match when supplied. An absent Authorization header or an empty form token
+uses the daemon's configured token. This fallback does not authenticate the caller:
 
 ```sh
 curl -X POST http://127.0.0.1:4180/-/analyze \
@@ -109,7 +134,10 @@ curl -X POST http://127.0.0.1:4180/-/analyze \
 ```
 
 or the dashboard's action forms (no token field — they run with the
-daemon's stored token). Use the analysis actions to run a dump again.
+daemon's configured token). A matching canonical report is reused without
+another CDB run; a legacy report under the same identity is rejected. For fresh
+capture, configure a distinct `DUMP_ANALYZER_VERSION` and restart. Version
+`0.1.0` is reserved for legacy records and rejected at configuration time.
 The Jobs widget shows **claimed, running, and reporting work**. Discovered
 dumps appear in the separate **Dumps explorer**, grouped by customer and case,
 with search and analysis actions at each level. Completed dumps remain
@@ -133,14 +161,15 @@ curl -X POST http://127.0.0.1:4180/-/analyze-customer \
 ```
 
 A per-dump failure never aborts the batch — it lands in `skipped` with its
-reason. `POST /-/rescan` (same bearer guard, plus a dashboard form) re-runs
+reason. `POST /-/rescan` (same token fallback, plus a dashboard form) re-runs
 the full catalog sweep on demand. Pending local verdicts are replayed every
 60 s when write-back is enabled, including during analysis and with automatic
 scheduling disabled. A write-back route appearing mid-run is picked up
 without a restart. The call is synchronous — a real dump takes
-minutes. Responses: `200` report JSON · `400` malformed · `401` wrong/missing
-token · `404` unknown or purged dump · `409` not `available` · `503`
-transient budget exhausted · `500` terminal.
+minutes. Responses: `200` report JSON · `400` malformed · `401` explicit wrong
+token or no configured token · `404` unknown or purged dump · `409` unavailable
+(including an occupied legacy identity) · `503` transient budget exhausted ·
+`500` terminal.
 
 ## Status UI
 
@@ -162,11 +191,13 @@ browser Back/Forward. Only the visible list is loaded: the queue polls every
 5 seconds, and the selected Dumps or Reports panel every 15 seconds. Both
 browser lists show 25 rows per page; hidden panels make no list requests.
 Daemon status uses lightweight counts. The System/Light/Dark theme is retained.
-No server data is embedded in the shell; HTML/JSON injection is client-escaped. A
-non-loopback bind is a deployment decision: there is no authentication on
-this surface. Dumps are hostile input:
-CDB runs only on the designated analysis box, under hard time/output caps,
-with per-run workspaces wiped afterwards.
+No server data is embedded in the shell; rendered catalog/report text is
+client-escaped. Read endpoints are unauthenticated, and action token fallback
+allows callers to act without presenting a credential. Keep the listener on a
+trusted local boundary; a non-loopback deployment needs an access-control layer.
+CDB runs on the designated analysis box with bounded local waits/output and
+best-effort remote cleanup. These controls do not prove remote termination or
+provide a remote disk quota.
 
 `GET /api/dumps/browse` returns one hierarchy level, with optional `customerId`,
 `caseId`, `q`, `page`, and `pageSize` parameters. Root rows are customers;
@@ -186,19 +217,28 @@ labelled when detailed evidence was not captured.
 
 Catalog and report errors stay inside their panels, retaining the last loaded
 results. Browsing never starts analysis. A manual run appears in Jobs while
-executing; its temporary execution record clears on completion or cancellation,
-while pending report delivery remains visible as `reporting`.
+executing; its temporary execution record clears on completion or cancellation.
+An eligible pending handoff may remain `reporting`; full-report delivery can
+remain pending after its queue row settles, including after V1 summary acceptance.
 
 ## Model-based tests
 
-The job lifecycle spec (`specs/DumpAnalyzer.tla`) is replayed against the
-real state layer via [MirrorRust](../MirrorRust) and the Mirrors toolchain:
+The checked corpus contains 33 traces covering 20 modeled actions. The job
+lifecycle replay spec (`specs/DumpAnalyzerReplay.tla`) is connected to the real
+state/recovery layer by the handwritten `tests/mbt/harness.rs` adapter via
+MirrorRust (the required sibling `../MirrorRust` checkout) and the Mirrors
+toolchain:
 
 ```sh
-cargo test --offline --locked --test mbt   # needs MIRROR_BIN=<path to mirror>
+MIRROR_BIN=/absolute/path/to/mirror cargo test --offline --locked --test mbt
 python3 tools/mbt/gen_traces.py --check    # corpus freshness gate
 python3 tools/mbt/gen_traces.py            # explicit corpus regeneration
 ```
+
+Without `MIRROR_BIN`, the MBT test returns early and the ordinary test run does
+not establish replay coverage. Live TLS and Claude tests require their explicit
+ignored-test flags and environment prerequisites; see the qualification guide.
+This documentation refresh did not run tests or contact live services.
 
 ## Server dependencies
 
@@ -207,5 +247,8 @@ token + ETag, event feed, analysis write-back; see its
 `docs/analyzer-guide.md` for the operator-facing contract). Against older
 servers without the write-back route, reports are kept in local-verdict mode
 (`data/analyzer.sqlite`, `local_reports`) and replayed when the route
-appears. Without the event feed, restart-triggered `initial_scan` still
-finds work.
+appears. Without the event feed, the boot scan still finds work; there is no
+periodic full-catalog sweep. Restart or use `POST /-/rescan` to discover later changes.
+The rich-report path attempts full v2 delivery first and can fall back to the
+v1 compact projection. Summary acceptance is tracked separately from full
+evidence delivery; see the rich-report guide before enabling write-back.

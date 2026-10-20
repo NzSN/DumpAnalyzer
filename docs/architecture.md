@@ -1,105 +1,133 @@
 # DumpAnalyzer architecture
 
-Source revision: `0bb92ae716a32e77a3f92fc9c4830080cf0abfdb` · inspected 2026-10-15.
+Source revision: `6a19ea297bb219509c994780c96bdd6ce6c4bfab` · inspected 2026-10-20.
 
-This snapshot predates rich-report implementation. The current canonical capture, storage, detail and publication path is documented in [rich reports](rich-reports.md).
+These diagrams describe the implemented source at the revision above. They show logical process and storage boundaries, rather than asserting a live deployment configuration. Open [the rendered diagrams](architecture.html) for zoom controls. The report contract is described in [rich reports](rich-reports.md); historical canary evidence is kept separately in [the qualification record](../tests/fixtures/report-v2/qualification/README.md).
 
-These diagrams describe the implemented checkout. They show logical process and storage boundaries, rather than asserting a live deployment configuration. Open [the rendered diagrams](architecture.html) for zoom controls. Arrow labels distinguish calls, control transitions and transferred data.
-
-DumpAnalyzer discovers dumps from DumpLedger, executes CDB on a configured Windows analysis host, saves compact reports locally, and optionally delivers them back to DumpLedger. Its web dashboard exposes a work queue, a customer/case dump explorer, reports and manual actions.
+DumpAnalyzer discovers sealed dumps from DumpLedger, verifies their bytes, executes deterministic CDB collection on a configured Windows host, and saves a canonical forensic report locally. Symbol refinement and evidence-only Claude reasoning are optional stages. The daemon can publish full reports to DumpLedger, fall back to a compact summary for older servers, and retain full evidence locally for later delivery. Its dashboard offers a queue, customer/case dump browsing, report detail and manual actions.
 
 ## 1. Runtime block diagram
 
 ![Runtime blocks and process boundaries](architecture/blocks.svg)
 
-Blue blocks are Rust components; purple blocks are runner providers or their subprocesses; green blocks are durable local storage; amber blocks are operator interfaces; gray blocks are external services. The Rust components share one process and a SQLite store. A `LedgerClient` box represents the common client implementation; several components own separate instances with the same boot configuration.
+Blue blocks are Rust components; purple blocks are runner providers or their subprocesses; green blocks are durable local storage; amber blocks are operator interfaces; gray blocks are external services. Rust components share one process and SQLite store. Several components own separate `LedgerClient` instances built from the same boot configuration.
 
-The Windows CDB process and DumpLedger service have distinct responsibilities and can share a physical host. DumpLedger supplies catalog metadata, audit events, bytes and symbols, and receives reports. DumpAnalyzer owns analysis execution. The optional Claude CLI runs on the daemon host and drives remote CDB over SSH.
+DumpLedger supplies catalog metadata, audit events, dump bytes and symbols, and stores submitted reports. DumpAnalyzer owns execution and local evidence. CDB runs on the configured Windows SSH target; DumpLedger may share that physical host. Both runner choices use the same deterministic CDB collector. With `claude-cdb`, a local Claude CLI receives the owned capture afterward and proposes an assessment; it does not drive CDB.
 
 | Component | Responsibility and implementation |
 | --- | --- |
-| Entry point / configuration | Validate environment, select runner, start daemon: [main.rs](../src/main.rs#L26), [config.rs](../src/config.rs#L128). |
-| Scheduler / intake | Boot, recovery and supervised loops: [scheduler.rs](../src/scheduler.rs#L104). Catalog scan and durable event feed: [sync.rs](../src/sync.rs#L192). |
-| Agent / manual facade | Scheduled execution and shared attempt pipeline: [agent.rs](../src/agent.rs#L213). On-demand analysis, scope batches and active registry: [analyzer.rs](../src/analyzer.rs#L274). |
-| ToolRunner providers | Typed request/result interface: [types.rs](../src/types.rs#L113). Deterministic SSH/CDB adapter: [runner.rs](../src/runner.rs#L1333). Optional Claude adapter: [claude_runner.rs](../src/claude_runner.rs#L78). |
-| Persistence / delivery | SQLite tables and migrations: [state.rs](../src/state.rs#L122). Bounded report assembly, local recording and delivery: [verdict.rs](../src/verdict.rs#L134). |
-| Dashboard / explorer | HTTP dispatch and JSON projections: [http.rs](../src/http.rs#L145). Catalog hierarchy/cache: [explorer.rs](../src/explorer.rs#L163). Browser panels: [dashboard.html](../src/dashboard.html#L528). |
+| Entry point / configuration | Parse configuration, select `cdb-ssh` or `claude-cdb`, install signal handling: [main.rs][main], [config.rs][config]. |
+| Scheduler / intake | Lock and migrate state, recover jobs, scan catalog, supervise feed, scheduling and delivery: [scheduler.rs][boot], [sync.rs][scan]. |
+| Agent / manual facade | Scheduled phases and shared verified-input attempt machinery: [agent.rs][scheduled]. On-demand analysis, existing-report reuse, scope batches and active registry: [analyzer.rs][manual]. |
+| Typed runner / collection | `RunRequest`, `RunOutput` and `ToolRunner`: [types.rs][runner-types]. Mandatory offline collection, optional symbol refinement and PDB qualification: [runner.rs][collect]. |
+| Assessment | Deterministic evidence rule and validation: [assessment.rs][assessment]. Optional evidence-only duplex Claude host: [claude_runner.rs][reasoner]. |
+| Canonical report / persistence | `ReportCapture`, `CrashReportV2`, validation and compact binding: [report.rs][capture]. Atomic canonical report, compact projection and queue handoff: [state.rs][save-rich]. |
+| Publication / replay | Full submission, legacy fallback and independent full-delivery outbox: [verdict.rs][publish], [verdict.rs][replay]. |
+| Dashboard / explorer | Anonymous read projections and token-backed actions: [http.rs][http-routes]. Cached catalog hierarchy: [explorer.rs][browse]. Lazy report detail: [dashboard.html][detail-load]. |
 
-The default HTTP listener is `127.0.0.1:4180`; an empty address disables it. Reads are anonymous. Actions can use the daemon's stored token when no Authorization header is supplied, so the token mechanism is not caller authentication for an exposed listener. The configured analyzer credential authenticates outbound DumpLedger API calls. Updating the stored token changes UI action checks immediately; running pipeline clients take the token from boot configuration.
+The default listener is `127.0.0.1:4180`; an empty `DUMP_ANALYZER_HTTP_ADDR` disables HTTP. Reads, including report detail and evidence, are anonymous. An action without an Authorization header can use the daemon's stored token, so this token mechanism does not authenticate individual callers of an exposed listener. A supplied bearer token must match the stored token. Storing a token first probes DumpLedger, then updates the local secret and UI action checks; existing pipeline clients retain their boot-time credential until restart. See [HTTP authorization][authorization] and [token storage][store-token].
+
+The state lock excludes another process using the same state directory. It does not enforce unique analyzer attribution across different directories or hosts; single-writer use of an analyzer name/version remains an operational requirement. See [state locking][state-lock].
 
 ## 2. Daemon control flow
 
 ![Startup and concurrent daemon control flow](architecture/daemon-control.svg)
 
-Startup completes recovery and the initial catalog scan before starting HTTP. An unavailable catalog can therefore delay the dashboard. Discovery runs even when automatic scheduling is disabled.
+Boot acquires the state-directory lock, opens/migrates SQLite, resolves the credential, recovers volatile jobs, retires active execution from older analyzer versions, reconciles reporting/delivery, and sweeps orphaned `run-*` workspaces. The initial catalog scan completes before HTTP starts, so an unavailable catalog can delay the dashboard. Discovery runs even with automatic scheduling disabled.
 
-After boot, the feed follower, automatic scheduler and delivery loop advance independently under the supervisor. HTTP runs in a separate spawned task. Each feed page is applied before its cursor is committed. The automatic scheduler resumes persisted `Claimed` work before claiming new discoveries and runs one scheduled job at a time. Delivery retries pending reports every 60 seconds, including while analysis is busy or scheduling is disabled.
+After boot, the feed follower, automatic scheduler and report-delivery loop advance independently under the supervisor. HTTP is a separately spawned task. The feed applies a page's events before committing its cursor; an interruption replays the page. Automatic scheduling resumes `Claimed` work for the current version before claiming the oldest current-version `Discovered` row, then awaits one scheduled job before claiming another. Delivery sweeps every 60 seconds, even while analysis is busy or automatic scheduling is off.
 
-| Configuration | What it changes |
+| Configuration | Effect |
 | --- | --- |
-| `DUMP_ANALYZER_SCHEDULER=off` | Disables automatic claims. Catalog intake, browsing, manual analysis and report delivery remain available. |
-| `DUMP_ANALYZER_WRITE_BACK=off` | Saves reports locally and settles eligible work without posting analyses. Catalog/content/symbol reads remain in use; delivery replay is disabled. |
-| `DUMP_ANALYZER_HTTP_ADDR=''` | Disables the dashboard and HTTP action surface. The daemon loops still operate. |
-| `DUMP_ANALYZER_RUNNER` | Selects `cdb-ssh` or `claude-cdb` at boot. Both use the designated Windows CDB host. |
+| `DUMP_ANALYZER_SCHEDULER=off` | Stops automatic claims; intake, browsing, manual analysis and enabled delivery remain available. |
+| `DUMP_ANALYZER_WRITE_BACK=off` | Stores reports locally and settles eligible jobs without posting; dump and symbol reads remain in use. Replay is disabled. |
+| `DUMP_ANALYZER_HTTP_ADDR=''` | Disables HTTP; daemon loops still run. |
+| `DUMP_ANALYZER_RUNNER` | Chooses deterministic `cdb-ssh` or deterministic collection plus optional `claude-cdb` assessment at boot. |
+| `DUMP_ANALYZER_VERSION` | Pins new job/report identity. The default is package version `0.2.0`; legacy `0.1.0` is rejected. A distinct version permits a new capture without overwriting an old identity. |
 
-On restart, `Fetching`, `Staged` and `Analyzing` reset to `Claimed`, preserving attempt counts. `Reporting` is reconciled separately against local reports and, when enabled, the remote analyses API. SIGINT/SIGTERM cancels the loops; the automatic scheduler finishes its in-flight job. HTTP connection tasks are not joined by that drain guarantee. An HTTP serving failure is logged without terminating the pipeline.
+On restart, `Fetching`, `Staged` and `Analyzing` reset to `Claimed`, preserving attempts. Active non-`Reporting` rows from older versions are dropped; report history is retained. Old `Reporting` rows retain their version for reconciliation/delivery. Scheduler claims are restricted to the configured version. SIGINT/SIGTERM cancels the loops, with the scheduler observing cancellation between jobs and draining its current job. HTTP connection tasks are not joined by that guarantee. A serving failure is logged without terminating the pipeline; fatal supervised-loop errors can terminate it.
 
-Sources: [boot ordering](../src/scheduler.rs#L109), [concurrent loops](../src/scheduler.rs#L225), [automatic scheduling](../src/scheduler.rs#L408), [delivery loop](../src/scheduler.rs#L513), [recovery](../src/agent.rs#L167), [feed cursor](../src/sync.rs#L246).
+Sources: [boot and retirement][boot], [supervised futures][supervisor], [current-version scheduling][schedule-loop], [delivery cadence][delivery-loop], [recovery][recovery], [feed cursor ordering][feed], [version configuration][version].
 
 ## 3. Job and manual-request control flow
 
 ![Scheduled and manual analysis control flow](architecture/job-control.svg)
 
-The upper lane records scheduled phases in SQLite. The lower lane handles synchronous HTTP analysis. Both use the Agent's fetch/verification/runner machinery, but manual attempts do not persist each intermediate phase. Their temporary registry entry displays `Claimed` and clears when the request returns, fails or is cancelled. A scope request enumerates available dumps, rejects scopes larger than 64 dumps, and analyzes the accepted scope sequentially; individual failures are returned as skipped items.
+Scheduled execution persists `Discovered → Claimed → Fetching → Staged → Analyzing → Reporting`. It verifies the pinned SHA-256 before invoking the runner, and allows at most two charged transient failures. The canonical report, digest-bound compact projection and scheduled `Reporting` handoff are committed together before publication. A parsed report with outcome `failed` is still a report to save and deliver; transport or runner failure can instead terminate the job without one.
+
+The synchronous manual path first requires an available dump with a sealed hash and pins `(dumpId, inputSha256, triage, configuredVersion)`. If a rich report already exists for that identity and analyzer name, it returns its stored compact projection without another runner execution. A different stored analyzer name is an integrity conflict. A legacy compact row using the identity blocks rich reanalysis until a distinct version is selected. Rich and compact documents are immutable for an identity; concurrent differing captures can therefore conflict instead of replacing saved evidence.
+
+New manual runs use the Agent's fetch/verify/runner machinery without persisting intermediate phases. Their temporary registry entry displays `Claimed` and clears on return, failure or cancellation. The final transaction saves canonical evidence, compact projection and the eligible idle-job handoff. It preserves running scheduled rows and archived terminal identities. With write-back enabled the request returns the stored projection while the independent delivery loop publishes it; with write-back off an eligible idle row settles locally. Scope requests accept at most 64 dumps, process them sequentially and report individual failures as skipped items.
 
 Three queue rules matter:
 
-1. **Discovered is inventory.** It is stored as an automatic scheduling candidate, but the Jobs widget excludes it. The Dumps explorer reads the available catalog independently and includes already analyzed dumps.
+1. **Discovered is inventory.** It is an automatic scheduling candidate, hidden from the Jobs view. The Dumps explorer independently browses the available catalog, including previously analyzed dumps.
 2. **Jobs means active work.** The API merges persistent `Claimed`, `Fetching`, `Staged`, `Analyzing` and `Reporting` rows with active manual requests, deduplicating identities for display.
-3. **Terminal transitions remove queue rows atomically.** `Done`, `Failed` and `Dropped` move to `settled_jobs`. Their identities remain available for deduplication, so an ordinary rescan cannot silently enqueue settled work again.
+3. **Terminal transitions archive identity.** `Done`, `Failed` and `Dropped` move atomically to `settled_jobs` and leave the physical queue. Ordinary discovery does not enqueue that settled identity again.
 
-`Done` describes settlement. A report with analysis outcome `failed` can still settle `Done` after successful storage/delivery. A missing legacy analyses route also settles a scheduled job locally while retaining its report for later replay. Transient delivery errors retain pending work; permanent rejection or purge can settle `Failed` or `Dropped`.
+`Done` describes lifecycle settlement, independently of report execution outcome and full-delivery state. Missing publication routes can settle locally while retaining pending delivery. Automatic concurrency of one is not a global runner limit: separate manual requests can overlap the scheduler and each other. Manual duplicate exclusion belongs to the manual registry, rather than a shared scheduler/manual lock.
 
-With write-back enabled, scheduled analysis posts after recording locally; manual analysis returns its report after local storage and relies on the delivery loop for posting. Manual completion changes an eligible idle job using compare-and-set; it preserves an already running scheduled job or archived terminal identity. Reanalyzing an archived identity therefore need not create a new persistent `Reporting` row, although the manual run remains visible while active.
-
-Automatic concurrency of one is not a global execution limit. Independent manual requests can overlap the scheduler and each other. Manual duplicate protection is scoped to the manual registry, not a shared scheduler lock.
-
-Sources: [scheduled pipeline](../src/agent.rs#L213), [manual pipeline](../src/analyzer.rs#L274), [manual completion](../src/analyzer.rs#L328), [terminal archive](../src/state.rs#L358), [queue projection](../src/http.rs#L1069).
+Sources: [scheduled execution and handoff][scheduled], [manual gates, reuse and save][manual], [scope limit][scope], [atomic report handoff][handoff], [terminal archive][terminal], [queue merge][queue].
 
 ## 4. Analysis and report data flow
 
-![Dump bytes, symbols, reports and delivery data flow](architecture/analysis-data.svg)
+![Dump bytes, typed evidence, canonical reports and delivery](architecture/analysis-data.svg)
 
-The local identity is `(dumpId, inputSha256, kind, analyzerVersion)`; configured analyzer name completes the remote report identity. Bytes are cached by SHA-256 and verified before runner execution, including cache reuse after a `304` response. Downloads currently buffer the content body before writing the cache. Dump bytes live on the filesystem; SQLite stores the cache index and job/report metadata.
+The local `JobIdentity` is `(dumpId, inputSha256, kind, analyzerVersion)`; configured analyzer name completes the canonical and remote report identity. Bytes are cached by expected SHA-256 and verified before execution, including cache reuse following `304`. Downloads buffer the content body before writing the cache. The filesystem holds dump bytes and temporary workspaces; SQLite holds their index and durable metadata. See [identity and runner types][runner-types], [fetch/cache verification][fetch] and [symbol path construction][symbol-path].
 
-`RunRequest` carries the verified dump path, symbol path, per-run workspace and configured bounds. The default runner stages the dump and a deterministic script over SCP, invokes CDB over SSH, and parses its output. Its script uses `.sympath`, `.reload`, `.ecxr`, `kc`, `lm`, `|` and `q`. CDB obtains symbols through `SRV*<remote-cache>*<ledger-base>/symbols`. The optional Claude provider stages the dump and invokes a local CLI that drives remote CDB and returns JSON. These providers share `RunOutput { outcome, summary, facts }`, but do not enforce a common typed forensic-evidence schema.
+The deterministic collector has two CDB phases:
 
-The default runner extracts basic exception code/name/address, up to 32 frame call-site strings, module symbol status and process information. This is not a complete exception record, validated symbol provenance or an evidence-backed root-cause analysis. Run bounds are passed to the adapters; the diagram does not claim that every staging, cleanup or subprocess operation is covered by one global timeout. Local per-run workspaces are wiped after execution; remote scratch cleanup is best effort. There is no durable full-transcript report store.
+1. **Mandatory offline essential collection.** CDB receives `-y` pointing to the per-run directory, containing the dump and scripts, without an HTTP symbol store. Marked sections capture target information, `.exr -1`, `.ecxr`/registers, fault-site disassembly, a preliminary native stack and initial modules. Parsing produces owned `ReportCapture` evidence before optional network symbol work.
+2. **Optional symbol refinement.** A second CDB process sets the configured symbol path, reloads symbols, records detailed modules and obtains a final stack within the remaining time/output budget. Failure, timeout or no final stack retains preliminary evidence and records omissions. Successful refinement classified `Completed` upgrades an offline `Failed` baseline caused by missing symbols; refinement failure leaves the baseline outcome intact. Open/corrupt-dump markers remain failure evidence. After refinement, the collector reads expected minidump ModuleList/RSDS identities, probes loaded PDB Info-stream GUID/age with bounded read-only commands, and applies symbol quality.
 
-**The amber reduction block is a current information-loss boundary.** `verdict::assemble` limits the summary to 2,000 characters, facts to 4 KiB and the JSON submission to 16 KiB, dropping whole facts keys when necessary. This happens before local persistence for both entry points. Frames can be removed, and the local copy cannot recover discarded evidence. Report delivery reuses the persisted compact payload.
+The symbol path normally uses `SRV*<remote-cache>*<ledger-base>/symbols`. A debugger label or function name alone does not establish `matched`: canonical validation requires equal expected/loaded PDB identities and captured references. Frame symbol resolution and unwind reliability are separate fields. See [collector ordering][collect], [essential and refinement scripts][scripts], [refinement outcome upgrade][upgrade], [independent PDB qualification][pdb-probe] and [report validation][report-validation].
 
-`local_reports.posted` is a delivery bookkeeping flag; some permanently abandoned reports also set it. A displayed Posted label alone does not prove remote acceptance. A failed report outcome describes analysis, rather than delivery state.
+`RunOutput` includes optional typed `ReportCapture` alongside outcome, summary and compatibility facts. The capture owns provenance, exception record, saved context/registers/instruction, native stack, module/PDB quality, causal assessment, command evidence and completeness omissions. `CrashReportV2` adds schema version, stable report ID and full report identity. Legacy runner output without a capture is adapted with explicit missing-evidence limitations.
 
-The requested rich report—resolved stack, complete exception information and supported root-cause analysis—is planned in [rich-report-implementation-plan.md](../Plans/rich-report-implementation-plan.md). Its canonical report store and detail API are not implemented in this revision.
+Deterministic assessment can confirm only the narrow immediate mechanism implemented in the source: a saved exception-context, register-indirect `mov` read whose register value equals the AV target and whose evidence is present and untruncated. It leaves the underlying cause unknown. No independently verified origin rule is implemented; validation rejects a confirmed root cause or a claimed origin rule. With `claude-cdb`, the collector runs first and the optional local Claude host receives only the owned capture. Tools are disabled, MCP configuration is empty and strict, hooks/settings sources are disabled, and every control-protocol tool request is denied. Accepted proposals must cite retained evidence and pass the same assessment validation; the deterministic immediate mechanism is preserved. Reasoning failure records an omission and retains deterministic evidence and assessment. See [assessment rule and validation][assessment], [reasoner isolation][reasoner] and [reasoner fallback][reasoner-run].
 
-Sources: [identity and runner types](../src/types.rs#L82), [manual shared attempt](../src/agent.rs#L350), [cache/fetch](../src/agent.rs#L403), [symbol path](../src/agent.rs#L579), [CDB parsing](../src/runner.rs#L1138), [report limits](../src/verdict.rs#L51), [assembly](../src/verdict.rs#L134), [local persistence](../src/verdict.rs#L180).
+Canonical report validation limits the document to 512 KiB, 128 frames, 64 modules, 32 evidence sections and 8 KiB text per evidence section, with valid evidence references and canonical address strings. Collection also uses bounded transcript buffers (configured output cap, with a 4 MiB ceiling). These limits and recorded omissions apply to the retained capture. There is no durable full-transcript store. The local workspace is removed after a runner attempt; remote scratch cleanup is best effort under a separate cleanup deadline. Killing a local SSH process on timeout is not proof that its remote CDB child has terminated. See [limits][report-limits], [runner budget/cleanup][run-bounds] and [SSH timeout handling][ssh-timeout].
+
+`prepare_report` builds validated canonical JSON and its SHA-256 digest, derives a small compatibility projection, then commits canonical JSON/digest in `report_details`, the compact row in `local_reports`, initial full-delivery state and eligible job handoff in one SQLite transaction. The compact projection carries `schemaVersion`, `reportId` and `reportDigest`; only this projection passes through the legacy 4 KiB facts / 16 KiB envelope limits and summary shrinker. The canonical summary itself is capped at 2,000 characters; its typed evidence does not pass through the legacy shrinker. Conflicting content for an existing identity is rejected. See [preparation][prepare], [compact binding][projection] and [transaction][save-rich].
+
+Full publication uses the persisted canonical document. An unsupported rich route falls back to the bound compact summary. Summary acceptance never claims that the remote store has the full evidence, and `summaryOnly` reports remain eligible for later promotion. The durable full-delivery outbox is the `report_details.full_delivery` state plus its stored document; it is independent of the legacy `local_reports.posted` bit:
+
+| State | Meaning |
+| --- | --- |
+| `localOnly` | Stored locally with write-back disabled; not selected by the full-delivery sweep. |
+| `pendingFull` | Full report awaits delivery. |
+| `summaryOnly` | Compact fallback was accepted; full evidence remains local and can be retried. |
+| `fullyDelivered` | Full-report submission was acknowledged. |
+| `abandoned` | Full delivery was permanently abandoned; local evidence remains. |
+
+The legacy `posted` bit is compatibility bookkeeping and can also mark permanently abandoned submissions. Execution outcome, queue settlement, compact-summary bookkeeping and full-delivery state must therefore be read separately. See [delivery states][delivery-states], [full/legacy publication][publish] and [independent replay/promotion][replay].
 
 ## 5. Dashboard data flow and information load
 
-![Bounded explorer, queue and reports data flow](architecture/ui-data.svg)
+![Bounded lists, lazy report detail and evidence disclosure](architecture/ui-data.svg)
 
-The browser loads one list panel at a time. Status counts refresh every 5 seconds; Queue refreshes every 5 seconds while visible; Dumps and Reports refresh every 15 seconds while visible. Search is debounced by 250 ms. Navigation preserves panel, scope, filters and page in the URL hash. Browsing never starts analysis.
+The browser loads one list panel at a time. Visible-page status and Queue refresh every 5 seconds; Dumps and Reports lists refresh every 15 seconds while visible. Search is debounced by 250 ms. Navigation preserves panel, scope, filters, page and selected report in the URL hash. Browsing and opening report detail do not start analysis.
 
 | View | Data source and boundary |
 | --- | --- |
-| Queue | SQL active work plus the ephemeral manual registry. No discovered or terminal rows. |
-| Dumps | Available DumpLedger catalog, customer display names and case titles → shared 30-second daemon snapshot → one page of customers, cases or dumps. Local phases are overlaid for returned dump rows. |
-| Reports | SQLite counts and a filtered, stably ordered page → summary JSON. Facts are omitted from the response, although SQL still reads them internally for selected rows. Details currently expands the same summary. |
-| Status / Settings | Lightweight daemon state and report counts; configuration, token storage, manual actions, rescan and diagnostics. |
+| Queue | Active SQL phases plus ephemeral manual registry; discovered and terminal rows are excluded. This active-work response is not a paginated catalog. |
+| Dumps | Available DumpLedger catalog and customer/case labels → shared 30-second daemon snapshot → a page of customers, cases or dumps. Current local and manual phases overlay returned dump rows. |
+| Reports list | SQL counts and stable filtered page of `ReportListRow`; the query neither reads nor deserializes canonical JSON or facts. Rows include ID, schema, detail availability, summary and full-delivery state. |
+| Report detail | Selecting an ID lazily requests `GET /api/reports/:reportId`. Rich detail includes the saved canonical report, digest and delivery state; legacy detail explicitly says detailed sections were not captured. |
+| Evidence | The detail response includes its bounded evidence array; native `<details>` sections disclose command text on demand and citation buttons open the referenced section. `GET /api/reports/:reportId/evidence/:evidenceId` also provides an individual evidence projection; the dashboard does not separately fetch each section. |
+| Status / Settings | Lightweight daemon/count information, configuration, token storage, manual actions, rescan and diagnostics. |
 
-Both list APIs default to 25 rows and cap page size at 100 rows. Customer/case rows contain counts instead of nested descendant lists. This bounds the response and browser DOM, while the explorer's server cache still holds the complete catalog. The legacy `/api/dumps` endpoint still returns a full snapshot; the dashboard uses `/api/dumps/browse`. There is currently no lazy full-report detail endpoint.
+Reports and explorer APIs default to 25 rows and cap page size at 100; the dashboard requests/renders 25. Customer/case groups contain counts instead of nested descendant lists. The explorer still holds the full catalog snapshot in server memory, and legacy `/api/dumps` still exposes that complete snapshot; the dashboard uses `/api/dumps/browse`.
 
-Sources: [explorer paging](../src/explorer.rs#L163), [snapshot construction](../src/explorer.rs#L284), [report SQL paging](../src/state.rs#L1087), [report JSON projection](../src/http.rs#L1147), [summary disclosure](../src/dashboard.html#L521), [panel fetch](../src/dashboard.html#L528), [polling](../src/dashboard.html#L668).
+Report detail stops list polling, uses an abort/version guard to reject stale responses, and retains at most three selected documents in a browser cache. There is no background evidence refresh. Returning to the list restores its navigation context. The UI presents capture status, exception/context, native frames, symbol identity, mechanism versus origin, missing evidence, provenance and delivery; missing values remain explicit.
+
+Sources: [explorer paging/cache][browse], [summary-only SQL page][report-page], [detail/evidence routes][http-routes], [JSON projections][report-json], [detail rendering][detail-render], [lazy request/cache][detail-load], [polling][polling].
+
+## 6. Qualification boundaries
+
+This document is a source inspection, not a new deployment or live qualification result. The preserved [2026-10-15 canary record][qualification] establishes matching and deliberately mismatched PDB behavior, a controlled immediate null-read mechanism, isolated full-report round-trip/replay/restart, browser detail and migration of a private database copy for that recorded run. Its receipt revisions and artifact identities remain historical. They do not qualify every subsequent code change or unrelated customer dumps. In particular, the corrected live Claude reasoner remained unrun in that record; fake-host checks and fallback evidence do not establish a successful current live model call.
+
+The architecture makes no claim of complete transcript preservation, remote child termination on local timeout, or an implemented confirmed-origin rule. Those limits follow the current code and remain separate from the historical canary's successful checks.
 
 ## Diagram sources
 
@@ -110,4 +138,53 @@ python3 docs/architecture/render.py
 wslview docs/architecture.html
 ```
 
-Rendering requires Graphviz `dot` and Python's `markdown-it-py`. It does not build or run DumpAnalyzer. The HTML contains the SVGs inline, zoom controls and source links pinned to the revision above.
+Rendering requires Graphviz `dot` and Python's `markdown-it-py`. It does not build or run DumpAnalyzer. The HTML contains inline SVGs, zoom controls and source links pinned to the inspected revision.
+
+[main]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/main.rs#L26
+[config]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/config.rs#L192
+[boot]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L110
+[scan]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/sync.rs#L192
+[scheduled]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/agent.rs#L213
+[manual]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/analyzer.rs#L275
+[runner-types]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/types.rs#L82
+[collect]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/runner.rs#L1420
+[assessment]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/assessment.rs#L12
+[reasoner]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/claude_runner.rs#L64
+[capture]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/report.rs#L249
+[save-rich]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/state.rs#L1129
+[publish]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/verdict.rs#L337
+[replay]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/verdict.rs#L470
+[http-routes]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L387
+[browse]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/explorer.rs#L163
+[detail-load]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/dashboard.html#L671
+[authorization]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L881
+[store-token]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L701
+[state-lock]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L613
+[supervisor]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L239
+[schedule-loop]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L427
+[delivery-loop]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/scheduler.rs#L535
+[recovery]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/agent.rs#L167
+[feed]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/sync.rs#L246
+[version]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/config.rs#L205
+[scope]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/analyzer.rs#L375
+[handoff]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/state.rs#L1545
+[terminal]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/state.rs#L463
+[queue]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L1106
+[fetch]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/agent.rs#L403
+[symbol-path]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/agent.rs#L580
+[scripts]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/runner.rs#L2910
+[upgrade]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/runner.rs#L3030
+[pdb-probe]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/runner.rs#L2635
+[report-validation]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/report.rs#L359
+[reasoner-run]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/claude_runner.rs#L330
+[report-limits]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/report.rs#L10
+[run-bounds]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/runner.rs#L1491
+[ssh-timeout]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/runner.rs#L272
+[prepare]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/verdict.rs#L204
+[projection]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/report.rs#L541
+[delivery-states]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/state.rs#L997
+[report-page]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/state.rs#L1451
+[report-json]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/http.rs#L1184
+[detail-render]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/dashboard.html#L608
+[polling]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/src/dashboard.html#L868
+[qualification]: https://github.com/NzSN/DumpAnalyzer/blob/6a19ea297bb219509c994780c96bdd6ce6c4bfab/tests/fixtures/report-v2/qualification/README.md#L38

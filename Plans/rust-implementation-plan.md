@@ -1,9 +1,32 @@
 # DumpAnalyzer Rust implementation plan
 
+Historical plan for the 2026-10-13 Rust implementation. The waves below were
+completed; their original task constraints and stage mapping are retained as
+planning history, not current setup instructions. Source review on 2026-10-20
+used DumpAnalyzer `6a19ea297bb219509c994780c96bdd6ce6c4bfab` without rerunning
+builds, tests or live checks.
+
+For maintained behavior and configuration, use the [README](../README.md),
+[architecture](../docs/architecture.md) and [analyzer design](../docs/analyzer-design.md).
+The [task receipts](rust-implementation-tasks.md#stage-gates) and
+[phase-two receipt](phase2-live-readiness.md) record the original gates;
+[rich reports](../docs/rich-reports.md) describes the later 0.2.0 report path.
+
 Derived from [`docs/analyzer-design.md`](../docs/analyzer-design.md) (Rust
 decision of 2026-10-13) and checked against `specs/DumpAnalyzer.tla`, which
-pins the job lifecycle every task must honor. Covers design milestones
-AN1–AN3; AN4 stays deferred.
+pins the job lifecycle every task had to honor. This plan covered design
+milestones AN1–AN3; AN4 was deferred in the original scope.
+
+## Implementation status at the documentation review
+
+The planned modules are present in `src/`: wire/config/state, client/sync,
+agent/runner/verdict and scheduler/main. On-demand analysis is implemented
+separately in `src/analyzer.rs`, with the HTTP dashboard in `src/http.rs`
+and `src/dashboard.html`. Later additions include persisted token resolution,
+manual rescan, periodic delivery, cache eviction and canonical rich reports.
+The original brief below predates those additions; its v1-only report limits
+and required-environment-token wording do not describe the complete current
+implementation. Historical gate results remain in the linked receipts.
 
 ## Conventions for every task
 

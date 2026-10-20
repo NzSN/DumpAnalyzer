@@ -1,6 +1,8 @@
 # Local DumpAnalyzer deployment — 2026-10-15
 
-Deployed **0.2.0** at [http://127.0.0.1:4180](http://127.0.0.1:4180), verified 2026-10-15T09:45:53.237320+00:00. PID `355896`. The release is built from the rich-report working tree on baseline `0bb92ae`; it has not been committed or pushed.
+Historical deployment receipt, retained with its original measurements and checkpoint paths. The 2026-10-20 documentation review did not query the process, service, databases or endpoints. PID, hashes, counts, temporary paths and settings below describe the 2026-10-15 rollout and must not be used as current inventory or an executable rollback plan without checking their present state. Use the [README](../README.md), [architecture](architecture.md) and [rich-report operator guide](rich-reports.md) for maintained operation.
+
+Deployed **0.2.0** at [http://127.0.0.1:4180](http://127.0.0.1:4180), verified 2026-10-15T09:45:53.237320+00:00. PID `355896`. The release was built from the rich-report working tree on baseline `0bb92ae`; it had not been committed or pushed at this receipt.
 
 - Running executable SHA-256: `b7e7a833ba340c1966a27ed86ea638f466f4f2458724f7391c615d49711ec4a8`.
 - Source manifest digest: `1f2b56505a3b06ead00a475a20357c2fbc7644bcc2241098a9319fa06b94c787`.
@@ -16,9 +18,9 @@ The companion Windows DumpLedger service was not upgraded. The separately approv
 
 ## Checkpoint and rollback
 
-Private checkpoint: `/tmp/dumpanalyzer-rich-migration-canary-deploy-xi4bdmg1`. It contains the previous executable, launch configuration and `pre-deploy.sqlite`. Configuration files contain credentials and must remain private.
+Private checkpoint recorded at deployment: `/tmp/dumpanalyzer-rich-migration-canary-deploy-xi4bdmg1`. It contained the previous executable, launch configuration and `pre-deploy.sqlite`. Configuration files contain credentials and must remain private.
 
-A data-preserving binary rollback is prepared:
+A data-preserving binary rollback was prepared for that checkpoint:
 
 ```sh
 python3 /tmp/dumpanalyzer-rich-migration-canary-deploy-xi4bdmg1/rollback-local.py

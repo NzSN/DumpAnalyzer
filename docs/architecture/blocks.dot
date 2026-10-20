@@ -1,53 +1,76 @@
 digraph Blocks {
-  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.7", fontname="DejaVu Sans", fontsize=15, compound=true];
+  graph [rankdir=TB, newrank=true, bgcolor="transparent", pad="0.25", nodesep="0.25", ranksep="0.65", fontname="DejaVu Sans", fontsize=15];
   node [shape=box, style="rounded,filled", fillcolor="#edf3fc", color="#7397c5", fontname="DejaVu Sans", fontsize=12, margin="0.16,0.12"];
-  edge [color="#63758a", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
+  edge [color="#63758a", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7, constraint=false];
   browser [label="Operator browser\nQueue · Dumps · Reports · Settings", fillcolor="#fff4d9", color="#c99c39"];
   subgraph cluster_local {
-    label="Linux / WSL host"; color="#a7b5c4"; style="rounded";
+    label="Daemon host · Linux / WSL"; color="#a7b5c4"; style="rounded";
     subgraph cluster_process {
-      label="dump-analyzer process · Rust / Tokio"; color="#6088b6"; style="rounded";
-      http [label="HTTP + dashboard\nhttp.rs / dashboard.html\nloopback :4180 by default", fillcolor="#fff4d9", color="#c99c39"];
-      explorer [label="DumpsExplorer\nexplorer.rs\ncatalog cache + hierarchy pages"];
-      manual [label="PipelineAnalyzer\nanalyzer.rs\nmanual / scope requests"];
-      sync [label="Intake\nsync.rs\nboot scan + event feed"];
-      schedule [label="Scheduler\nscheduler.rs\none automatic job at a time"];
-      agent [label="Agent\nagent.rs\nfetch · verify · stage · run"];
-      verdict [label="Verdict + delivery\nverdict.rs / scheduler.rs\nlocal record · POST · replay"];
-      client [label="LedgerClient\nclient.rs\ncatalog / events / content / analyses"];
-      runner [label="ToolRunner interface\ntypes.rs\ncdb-ssh OR claude-cdb", fillcolor="#f1ebfc", color="#9c7bc5"];
+      label="dump-analyzer process · Rust / Tokio · source 6a19ea2"; color="#6088b6"; style="rounded";
+      http [label="HTTP + dashboard\nAnonymous reads · token-backed actions\nLoopback :4180 by default", fillcolor="#fff4d9", color="#c99c39"];
+      explorer [label="DumpsExplorer\n30 s catalog cache + hierarchy pages"];
+      manual [label="PipelineAnalyzer\nManual / scope requests\nReuse stored rich identity"];
+      sync [label="Intake\nBoot scan + durable event feed"];
+      schedule [label="Scheduler\nOne automatic job at a time\nCurrent analyzer version only"];
+      agent [label="Agent\nFetch · SHA-256 verify · run"];
+      report [label="Canonical report +\ncompatibility projection\nreport.rs / verdict.rs\nValidate · atomic save / handoff"];
+      delivery [label="Publication + independent replay\nFull report or legacy summary fallback"];
+      client [label="LedgerClient\nCatalog / events / content / analyses"];
+      runner [label="ToolRunner\nRunRequest → RunOutput\n+ ReportCapture", fillcolor="#f1ebfc", color="#9c7bc5"];
+      collector [label="Shared deterministic SSH/CDB collector\nOffline essentials → optional symbols\nPDB identities + deterministic assessment", fillcolor="#f1ebfc", color="#9c7bc5"];
+      reasoner [label="claude-cdb optional assessment host\nOwned capture only · all tools denied\nStrict empty MCP · fallback on failure", fillcolor="#f1ebfc", color="#9c7bc5"];
+      { rank=same; http; sync; }
+      { rank=same; explorer; schedule; }
+      { rank=same; manual; agent; }
+      { rank=same; report; runner; }
+      { rank=same; delivery; collector; }
+      { rank=same; client; reasoner; }
+      http -> sync [style=invis, weight=100];
+      explorer -> schedule [style=invis, weight=100];
+      manual -> agent [style=invis, weight=100];
+      report -> runner [style=invis, weight=100];
+      delivery -> collector [style=invis, weight=100];
+      client -> reasoner [style=invis, weight=100];
+      http -> explorer -> manual -> report -> delivery -> client [style=invis, constraint=true, weight=100];
+      sync -> schedule -> agent -> runner -> collector -> reasoner [style=invis, constraint=true, weight=100];
     }
-    db [label="SQLite · WAL\nstate.rs\njobs · settled_jobs · cursors\nlocal_reports · byte_cache · secrets", shape=cylinder, fillcolor="#eaf6ee", color="#6eac81"];
-    disk [label="Local filesystem\nSHA-addressed bytes cache\nrun-* temporary workspaces", shape=folder, fillcolor="#eaf6ee", color="#6eac81"];
-    cli [label="Optional local Claude CLI\nclaude-cdb provider only", fillcolor="#f1ebfc", color="#9c7bc5"];
+    db [label="SQLite · WAL\nJobs / settled identities / cursors\nlocal_reports: compact projection\nreport_details: canonical JSON\n+ digest + outbox\nByte-cache index · secrets", shape=cylinder, fillcolor="#eaf6ee", color="#6eac81"];
+    disk [label="Filesystem\nSHA-addressed dump cache\nTemporary run-* workspaces", shape=folder, fillcolor="#eaf6ee", color="#6eac81"];
+    cli [label="Optional local Claude CLI\nEvidence-only causal reasoning", fillcolor="#f1ebfc", color="#9c7bc5"];
   }
   subgraph cluster_external {
     label="External services · may share a Windows host"; color="#a7b5c4"; style="rounded,dashed";
-    ledger [label="DumpLedger service\nHTTPS catalog / events / content\nanalyses + /symbols", fillcolor="#f0f2f5", color="#8a99aa"];
-    cdb [label="Windows analysis process\nCDB + remote scratch / symbol cache\nconfigured SSH target", fillcolor="#f0f2f5", color="#8a99aa"];
+    ledger [label="DumpLedger\nHTTPS catalog / events / content\nFull analyses + legacy analyses + symbols", fillcolor="#f0f2f5", color="#8a99aa"];
+    cdb [label="Windows CDB processes\nOffline essential process\nOptional symbol-refinement process\nRemote scratch + symbol cache", fillcolor="#f0f2f5", color="#8a99aa"];
   }
-  browser -> http [label="GET views / POST actions"];
-  http -> explorer [label="browse"];
-  http -> manual [label="analyze"];
-  http -> db [label="queue / reports / counts"];
-  http -> sync [label="rescan", style=dashed];
-  manual -> agent [label="attempt"];
+  { rank=same; db; disk; cli; }
+  { rank=same; ledger; cdb; }
+  db -> ledger [style=invis, constraint=true, weight=100];
+  disk -> cdb [style=invis, constraint=true, weight=100];
+  browser -> http [constraint=true, label="Views / explicit actions"];
+  http -> explorer [label="Browse"];
+  http -> manual [label="Analyze"];
+  http -> db [label="Queue / summary page\nLazy detail"];
+  http -> sync [label="Rescan", style=dashed];
+  manual -> agent [label="New capture"];
   schedule -> agent [label="run_job"];
-  sync -> db [label="discover / drop / cursor"];
-  db -> schedule [label="claim / resume"];
-  agent -> db [label="phases / attempts"];
-  agent -> disk [label="cache / workspace"];
-  agent -> runner [label="RunRequest"];
-  agent -> verdict [label="RunOutput"];
-  manual -> verdict [label="assemble + save"];
-  verdict -> db [label="report / settle"];
-  explorer -> client [label="catalog + labels"];
-  sync -> client [label="scan + feed"];
-  agent -> client [label="detail + bytes"];
-  verdict -> client [label="write-back enabled"];
-  client -> ledger [label="HTTPS + analyzer credential"];
-  runner -> cdb [label="SCP staging / SSH CDB"];
-  runner -> cli [label="claude-cdb", style=dashed];
-  cli -> cdb [label="SSH commands", style=dashed];
-  cdb -> ledger [label="HTTP symbol lookup", style=dashed];
+  sync -> db [label="Discover / drop / cursor"];
+  db -> schedule [label="Claim / resume"];
+  db -> manual [label="Rich reuse /\nLegacy conflict"];
+  agent -> db [label="Phases / attempts"];
+  agent -> disk [constraint=true, label="Cache / workspace"];
+  agent -> runner [label="Verified input\n+ bounds"];
+  runner -> collector;
+  collector -> reasoner [label="claude-cdb only:\nOwned capture", style=dashed];
+  reasoner -> cli [constraint=true, label="Duplex host;\nDeny tools", style=dashed];
+  runner -> report [label="Typed capture + outcome"];
+  report -> db [constraint=true, label="Canonical + compact\n+ handoff · atomic"];
+  db -> delivery [label="Durable document\n+ delivery state"];
+  delivery -> client [label="Write-back enabled"];
+  explorer -> client [label="Catalog + labels"];
+  sync -> client [label="Scan + feed"];
+  agent -> client [label="Detail + bytes"];
+  client -> ledger [constraint=true, label="HTTPS + analyzer\ncredential"];
+  collector -> cdb [constraint=true, label="SCP staging / SSH"];
+  cdb -> ledger [label="Symbols in\noptional phase only", style=dashed];
 }
