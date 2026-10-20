@@ -922,6 +922,57 @@ impl ExecTransport for TwoPhaseTransport {
         Ok(())
     }
 }
+#[derive(Clone, Default)]
+struct RefiningTransport {
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+#[async_trait]
+impl ExecTransport for RefiningTransport {
+    async fn exec(
+        &self,
+        program: &str,
+        _args: &[&str],
+        _stdin: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<TransportOutput, AnalyzerError> {
+        if program == "cdb" {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let body = if call == 0 { authored_essential_log() } else { RICH.to_owned() };
+            return Ok(TransportOutput {
+                status: Some(0),
+                stdout: body.into_bytes(),
+                stderr: vec![],
+            });
+        }
+        Ok(TransportOutput {
+            status: Some(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+    async fn put_file(&self, _local: &Path, _remote: &str) -> Result<(), AnalyzerError> {
+        Ok(())
+    }
+}
+
+/// The essential pass is deliberately offline, so its verdict is
+/// symbols-missing even for a healthy dump. A completed refinement pass must
+/// upgrade that baseline verdict; only refinement failure preserves it.
+#[tokio::test]
+async fn successful_symbol_refinement_upgrades_offline_baseline_verdict() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = SshCdbRunner::new(RefiningTransport::default())
+        .run(make_request(
+            tmp.path().join("refine-upgrade"),
+            default_bounds(),
+        ))
+        .await
+        .expect("refined run succeeds");
+    assert_eq!(output.outcome, ReportOutcome::Completed);
+    assert!(output.summary.contains("Access violation"));
+    assert!(!output.summary.contains("triage failed"));
+}
+
 #[tokio::test]
 async fn optional_symbol_timeout_preserves_essential_evidence_and_cleans_workspace() {
     use dump_analyzer::report::{CaptureStatus, CauseStatus};

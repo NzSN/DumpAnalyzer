@@ -3027,6 +3027,14 @@ impl<T: ExecTransport> SshCdbRunner<T> {
                 return;
             }
         };
+        // Essential acquisition is deliberately offline (essential_script
+        // carries no store), so a baseline symbols-missing verdict reflects
+        // acquisition order, not evidence. When refinement parses the same
+        // dump as Completed, it is the qualified result: upgrade. The refined
+        // log still contains open-failure or corruption markers when the dump
+        // itself is at fault, so those baselines stay failed. Refinement
+        // failures returned earlier and never touch the baseline outcome.
+        let refined_outcome = optional.outcome;
         let Some(mut extra) = optional.capture else {
             mark_refinement_failure(
                 baseline,
@@ -3077,8 +3085,10 @@ impl<T: ExecTransport> SshCdbRunner<T> {
                 .omissions
                 .push("Optional symbol-refinement output was truncated".into());
         }
-        // Keep baseline outcome: a missing-symbol assessment cannot erase the
-        // acquired exception. Full qualification is represented by each frame.
+        if baseline.outcome == ReportOutcome::Failed && refined_outcome == ReportOutcome::Completed
+        {
+            baseline.outcome = ReportOutcome::Completed;
+        }
         baseline.summary = optional.summary;
         baseline.facts = optional.facts;
     }
