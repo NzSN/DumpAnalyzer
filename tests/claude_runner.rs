@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dump_analyzer::claude_runner::ClaudeCdbRunner;
-use dump_analyzer::report::CauseStatus;
+use dump_analyzer::report::{CauseStatus, MAX_SECTION_BYTES};
 use dump_analyzer::runner::{ExecTransport, SshCdbRunner, TransportOutput};
 use dump_analyzer::types::{AnalyzerError, RunBounds, RunRequest, ToolRunner};
 use serde_json::{Value, json};
@@ -21,6 +21,7 @@ struct FakeTransport {
     puts: Arc<Mutex<Vec<(PathBuf, String)>>>,
     execs: Arc<Mutex<Vec<Vec<String>>>>,
     cdb_delay: Duration,
+    cdb_log: Option<String>,
     fail_cdb: bool,
 }
 #[async_trait::async_trait]
@@ -44,7 +45,7 @@ impl ExecTransport for FakeTransport {
         Ok(TransportOutput {
             status: Some(0),
             stdout: if program == "cdb" {
-                LOG.as_bytes().to_vec()
+                self.cdb_log.as_deref().unwrap_or(LOG).as_bytes().to_vec()
             } else {
                 vec![]
             },
@@ -227,8 +228,50 @@ async fn deterministic_capture_precedes_host_and_model_cannot_replace_evidence()
         .expect("text");
     assert!(prompt.contains("untrusted data"));
     assert!(prompt.contains("OUTPUT_SCHEMA_JSON:"));
+    assert!(prompt.contains("within 6000 UTF-8 bytes"));
+    assert!(prompt.contains("at most 3 hypotheses"));
+    assert!(prompt.contains("host preserves the deterministic immediate mechanism"));
+    assert!(prompt.contains("command names, field paths, and frame numbers are not evidence IDs"));
     assert!(prompt.contains("\"missingEvidence\""));
     assert!(prompt.contains("ExceptionCode: c0000005"));
+    let (_, schema_and_evidence) = prompt
+        .split_once("OUTPUT_SCHEMA_JSON:\n")
+        .expect("schema marker");
+    let (schema_json, allowed_and_evidence) = schema_and_evidence
+        .split_once("\n\nALLOWED_EVIDENCE_IDS_JSON:\n")
+        .expect("allowed evidence marker");
+    let (allowed_json, captured_json) = allowed_and_evidence
+        .split_once("\n\nCAPTURED_EVIDENCE_JSON:\n")
+        .expect("capture marker");
+    let schema: Value = serde_json::from_str(schema_json).expect("valid output schema");
+    let allowed: Value = serde_json::from_str(allowed_json).expect("allowed evidence IDs");
+    let expected_ids = json!(
+        expected
+            .evidence
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(allowed, expected_ids);
+    for path in [
+        "/properties/evidenceRefs/items",
+        "/properties/mechanism/properties/evidenceRefs/items",
+        "/properties/hypotheses/items/properties/evidenceRefs/items",
+    ] {
+        let items = schema.pointer(path).expect("citation schema");
+        assert_eq!(items["type"], "string");
+        assert_eq!(items["enum"], expected_ids, "only retained IDs at {path}");
+    }
+    let supplied_capture: Value = serde_json::from_str(captured_json).expect("capture JSON");
+    let supplied_ids = json!(
+        supplied_capture["evidence"]
+            .as_array()
+            .expect("evidence array")
+            .iter()
+            .map(|item| item["id"].as_str().expect("evidence ID"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(supplied_ids, allowed);
     assert!(
         std::fs::read_dir(&work).expect("work").all(|entry| !entry
             .expect("entry")
@@ -237,6 +280,73 @@ async fn deterministic_capture_precedes_host_and_model_cannot_replace_evidence()
             .starts_with("reasoner-")),
         "private process directory removed"
     );
+}
+
+#[tokio::test]
+async fn model_mechanism_is_discarded_before_validating_causal_hypotheses() {
+    for (cdb_log, expected_mechanism_status) in [
+        (None, CauseStatus::Confirmed),
+        (
+            Some(LOG.replace("rcx=0000000000000000", "rcx=0000000000000008")),
+            CauseStatus::Unknown,
+        ),
+    ] {
+        let dir = tempfile::tempdir().expect("directory");
+        let mut cause = candidate();
+        cause["mechanism"] = json!({
+            "status":"confirmed",
+            "description":"Model-authored mechanism paraphrase must never be retained",
+            "evidenceRefs":["exception", "never-captured-mechanism"]
+        });
+        let binary = fake_host(dir.path(), &print_event(&result_event(&cause)));
+        let transport = FakeTransport {
+            cdb_log,
+            ..FakeTransport::default()
+        };
+        let (request, _) = request(dir.path());
+        let expected = SshCdbRunner::new(transport.clone())
+            .run(request.clone())
+            .await
+            .expect("reference capture")
+            .capture
+            .expect("capture");
+        assert_eq!(
+            expected.root_cause.mechanism.status,
+            expected_mechanism_status
+        );
+        let capture = runner(transport, &binary)
+            .run(request)
+            .await
+            .expect("reasoned report")
+            .capture
+            .expect("capture");
+        assert_eq!(capture.root_cause.status, CauseStatus::Hypothesis);
+        assert_eq!(capture.root_cause.mechanism, expected.root_cause.mechanism);
+        assert_eq!(capture.exception, expected.exception);
+        assert_eq!(capture.context, expected.context);
+        assert_eq!(capture.stack, expected.stack);
+        assert_eq!(capture.symbols, expected.symbols);
+        assert_eq!(capture.completeness, expected.completeness);
+        assert_eq!(capture.evidence.len(), expected.evidence.len() + 1);
+        assert_eq!(
+            capture.evidence[..expected.evidence.len()],
+            expected.evidence
+        );
+        let model_evidence = capture.evidence.last().expect("model evidence");
+        assert_eq!(model_evidence.id, "assessment-model");
+        let accepted: Value = serde_json::from_str(&model_evidence.text).expect("assessment JSON");
+        cause["mechanism"] =
+            serde_json::to_value(&expected.root_cause.mechanism).expect("trusted mechanism");
+        assert_eq!(
+            accepted, cause,
+            "only the trusted mechanism replaces model output"
+        );
+        assert_eq!(
+            serde_json::to_value(&capture.root_cause).expect("accepted cause"),
+            cause
+        );
+        dump_analyzer::assessment::validate(&capture).expect("accepted assessment proof gate");
+    }
 }
 
 #[tokio::test]
@@ -274,22 +384,40 @@ async fn malformed_unavailable_and_invalid_causal_results_preserve_capture() {
     unsupported["conclusion"] = json!("The null target proves a use-after-free caused by V8");
     let mut fabricated = candidate();
     fabricated["evidenceRefs"] = json!(["never-captured"]);
+    let mut unsupported_rule = candidate();
+    unsupported_rule["ruleId"] = json!("model-invented-origin-rule");
+    let mut fabricated_hypothesis = candidate();
+    fabricated_hypothesis["hypotheses"][0]["evidenceRefs"] = json!(["never-captured"]);
     for (index, event) in [
         "not JSON".to_owned(),
         json!({"type":"result","is_error":true}).to_string(),
         result_event(&unsupported),
         result_event(&fabricated),
+        result_event(&unsupported_rule),
+        result_event(&fabricated_hypothesis),
     ]
     .iter()
     .enumerate()
     {
         let dir = tempfile::tempdir().expect("directory");
-        let bin = fake_host(dir.path(), &print_event(event));
-        let (req, _) = request(dir.path());
+        let bin = fake_host(
+            dir.path(),
+            &format!(
+                "{}\nfollowup = sys.stdin.readline()\nif followup: (base / 'unexpected-correction.json').write_text(followup)\ntime.sleep(30)",
+                print_event(event)
+            ),
+        );
+        let (req, work) = request(dir.path());
+        let started = Instant::now();
         let output = runner(FakeTransport::default(), &bin)
             .run(req)
             .await
             .expect("deterministic report survives");
+        assert!(started.elapsed() < Duration::from_secs(2), "case {index}");
+        assert!(
+            !work.join("unexpected-correction.json").exists(),
+            "case {index}"
+        );
         let capture = output.capture.expect("capture");
         assert_eq!(
             capture.exception.code.as_deref(),
@@ -311,6 +439,187 @@ async fn malformed_unavailable_and_invalid_causal_results_preserve_capture() {
             "case {index}"
         );
     }
+}
+
+#[tokio::test]
+async fn one_formatting_correction_accepts_valid_result_and_preserves_capture() {
+    let mut oversized = candidate();
+    oversized["conclusion"] = json!("do-not-echo-rejected".repeat(MAX_SECTION_BYTES));
+    let malformed = json!({"type":"result","is_error":false,
+        "result":"{\"status\" \"do-not-echo-rejected\"}"})
+    .to_string();
+    let wrong_shape = json!({"type":"result","is_error":false,
+        "structured_output":{"conclusion":"do-not-echo-rejected"}})
+    .to_string();
+    let mut previous_correction = None;
+    for first_result in [malformed, wrong_shape, result_event(&oversized)] {
+        let dir = tempfile::tempdir().expect("directory");
+        let control = json!({"type":"control_request","request_id":"after-correction",
+            "request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"touch forbidden"}}}).to_string();
+        let binary = fake_host(
+            dir.path(),
+            &format!(
+                "{}\ncorrection = sys.stdin.readline()\n(base / 'correction.json').write_text(correction)\n{}\nreply = sys.stdin.readline()\nassert json.loads(reply)['response']['response']['behavior'] == 'deny'\n{}\ntime.sleep(30)",
+                print_event(&first_result),
+                print_event(&control),
+                print_event(&result_event(&candidate()))
+            ),
+        );
+        let (request, work) = request(dir.path());
+        let expected = SshCdbRunner::new(FakeTransport::default())
+            .run(request.clone())
+            .await
+            .expect("reference report")
+            .capture
+            .expect("reference capture");
+        let capture = runner(FakeTransport::default(), &binary)
+            .run(request)
+            .await
+            .expect("corrected report")
+            .capture
+            .expect("capture");
+        assert_eq!(capture.root_cause.status, CauseStatus::Hypothesis);
+        assert_eq!(capture.root_cause.mechanism, expected.root_cause.mechanism);
+        assert_eq!(capture.exception, expected.exception);
+        assert_eq!(capture.context, expected.context);
+        assert_eq!(capture.stack, expected.stack);
+        assert_eq!(capture.symbols, expected.symbols);
+        assert_eq!(capture.completeness, expected.completeness);
+        assert_eq!(capture.evidence.len(), expected.evidence.len() + 1);
+        assert_eq!(
+            capture.evidence[..expected.evidence.len()],
+            expected.evidence
+        );
+        assert_eq!(
+            capture.evidence.last().expect("assessment").id,
+            "assessment-model"
+        );
+        dump_analyzer::assessment::validate(&capture).expect("corrected assessment proof gate");
+        let correction: Value = serde_json::from_str(
+            &std::fs::read_to_string(work.join("correction.json")).expect("correction"),
+        )
+        .expect("correction message");
+        assert_eq!(correction["type"], "user");
+        assert_eq!(correction["message"]["role"], "user");
+        let prompt = correction["message"]["content"][0]["text"]
+            .as_str()
+            .expect("prompt");
+        assert!(prompt.contains("within 6000 UTF-8 bytes"));
+        assert!(!prompt.contains("do-not-echo-rejected"));
+        assert!(!prompt.contains("ExceptionCode"));
+        if let Some(previous) = previous_correction.replace(correction.clone()) {
+            assert_eq!(
+                correction, previous,
+                "correction must be static for every format failure"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn repeated_invalid_assessment_json_falls_back_without_a_second_correction() {
+    let dir = tempfile::tempdir().expect("directory");
+    let invalid = json!({"type":"result","is_error":false,"result":"{invalid JSON}"}).to_string();
+    let binary = fake_host(
+        dir.path(),
+        &format!(
+            "{}\ncorrection = sys.stdin.readline()\n(base / 'correction.json').write_text(correction)\n{}\nextra = sys.stdin.readline()\nif extra: (base / 'extra-correction.json').write_text(extra)\ntime.sleep(30)",
+            print_event(&invalid),
+            print_event(&invalid)
+        ),
+    );
+    let (request, work) = request(dir.path());
+    let expected = SshCdbRunner::new(FakeTransport::default())
+        .run(request.clone())
+        .await
+        .expect("reference report")
+        .capture
+        .expect("reference capture");
+    let started = Instant::now();
+    let capture = runner(FakeTransport::default(), &binary)
+        .run(request)
+        .await
+        .expect("fallback report")
+        .capture
+        .expect("capture");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(work.join("correction.json").exists());
+    assert!(!work.join("extra-correction.json").exists());
+    assert_eq!(capture.root_cause, expected.root_cause);
+    assert_eq!(capture.evidence, expected.evidence);
+    assert!(
+        capture
+            .completeness
+            .omissions
+            .iter()
+            .any(|line| line.contains("assessment is not JSON"))
+    );
+}
+
+#[tokio::test]
+async fn formatting_correction_keeps_the_original_deadline() {
+    let dir = tempfile::tempdir().expect("directory");
+    let invalid = json!({"type":"result","is_error":false,"result":"{invalid JSON}"}).to_string();
+    let binary = fake_host(
+        dir.path(),
+        &format!(
+            "time.sleep(0.25)\n{}\ncorrection = sys.stdin.readline()\n(base / 'correction.json').write_text(correction)\ntime.sleep(0.35)\n{}",
+            print_event(&invalid),
+            print_event(&result_event(&candidate()))
+        ),
+    );
+    let (mut request, work) = request(dir.path());
+    request.bounds.wall_timeout = Duration::from_millis(450);
+    let started = Instant::now();
+    let capture = runner(FakeTransport::default(), &binary)
+        .run(request)
+        .await
+        .expect("bounded report")
+        .capture
+        .expect("capture");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(work.join("correction.json").exists());
+    assert_eq!(capture.root_cause.status, CauseStatus::Unknown);
+    assert!(
+        capture
+            .completeness
+            .omissions
+            .iter()
+            .any(|line| line.contains("wall timeout"))
+    );
+}
+
+#[tokio::test]
+async fn formatting_correction_keeps_the_cumulative_output_budget() {
+    let dir = tempfile::tempdir().expect("directory");
+    let invalid = json!({"type":"result","is_error":false,"result":"x".repeat(20_000)}).to_string();
+    let extra_output = json!({"type":"assistant","padding":"x".repeat(20_000)}).to_string();
+    let binary = fake_host(
+        dir.path(),
+        &format!(
+            "{}\ncorrection = sys.stdin.readline()\n(base / 'correction.json').write_text(correction)\n{}\n{}\ntime.sleep(30)",
+            print_event(&invalid),
+            print_event(&extra_output),
+            print_event(&result_event(&candidate()))
+        ),
+    );
+    let (mut request, work) = request(dir.path());
+    request.bounds.max_output_bytes = 32 << 10;
+    let capture = runner(FakeTransport::default(), &binary)
+        .run(request)
+        .await
+        .expect("bounded report")
+        .capture
+        .expect("capture");
+    assert!(work.join("correction.json").exists());
+    assert_eq!(capture.root_cause.status, CauseStatus::Unknown);
+    assert!(
+        capture
+            .completeness
+            .omissions
+            .iter()
+            .any(|line| line.contains("stdout/stderr budget"))
+    );
 }
 
 #[tokio::test]
@@ -508,7 +817,7 @@ async fn resolved_model_and_reasoner_revision_survive_optional_reasoning_failure
             capture
                 .provenance
                 .analysis_revision
-                .contains("reasoner=claude-host-v2.1")
+                .contains("reasoner=claude-host-v2.3")
         );
         assert_eq!(capture.exception.code.as_deref(), Some("0xc0000005"));
         if !valid_result {
@@ -556,9 +865,28 @@ async fn provider_error_results_keep_bounded_actionable_diagnostics() {
 #[tokio::test]
 #[ignore = "requires authenticated Claude; sends only authored fixture evidence"]
 async fn live_reasoner_over_synthetic_fixture_without_remote_dump_transfer() {
+    fn bounded_setting(name: &str, default: u64, maximum: u64) -> u64 {
+        let value = match std::env::var(name) {
+            Ok(raw) => raw.parse::<u64>().unwrap_or_else(|_| panic!("{name}")),
+            Err(std::env::VarError::NotPresent) => default,
+            Err(_) => panic!("{name}"),
+        };
+        assert!((1..=maximum).contains(&value), "{name}");
+        value
+    }
+
     let directory = tempfile::tempdir().expect("directory");
     let (mut request, _) = request(directory.path());
-    request.bounds.wall_timeout = Duration::from_secs(120);
+    let wall_timeout_ms =
+        bounded_setting("DUMP_ANALYZER_LIVE_TEST_WALL_TIMEOUT_MS", 120_000, 600_000);
+    request.bounds.wall_timeout = Duration::from_millis(wall_timeout_ms);
+    request.bounds.max_output_bytes =
+        bounded_setting("DUMP_ANALYZER_LIVE_TEST_MAX_OUTPUT_BYTES", 1 << 20, 8 << 20) as usize;
+    let requested_bounds = json!({
+        "wallTimeoutMs": wall_timeout_ms,
+        "maxOutputBytes": request.bounds.max_output_bytes,
+        "maxWorkspaceBytes": request.bounds.max_workspace_bytes,
+    });
     let output = runner(FakeTransport::default(), Path::new("claude"))
         .run(request)
         .await
@@ -584,7 +912,7 @@ async fn live_reasoner_over_synthetic_fixture_without_remote_dump_transfer() {
             .create_new(true)
             .open(path)
             .expect("new isolated qualification receipt");
-        let receipt = json!({"qualification":"Authored synthetic debugger fixture with actual deny-all Claude host; no SSH or dump transfer", "capture":capture});
+        let receipt = json!({"qualification":"Authored synthetic debugger fixture with actual deny-all Claude host; no SSH or dump transfer", "requestedBounds":requested_bounds, "capture":capture});
         std::io::Write::write_all(
             &mut file,
             serde_json::to_string_pretty(&receipt)

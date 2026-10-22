@@ -101,8 +101,10 @@ The agent's analysis backend is selected with `DUMP_ANALYZER_RUNNER`:
 - **`claude-cdb`**: the same deterministic collector runs first, then a
   persistent, isolated Claude host assesses bounded captured evidence
   (`src/claude_runner.rs`). Tools and MCP servers are disabled; every tool
-  request is denied. Malformed or unavailable reasoning leaves the captured
-  report readable, with a deterministic assessment and an explicit omission.
+  request is denied. An invalid assessment format gets one correction turn
+  within the same time and output limits. Unavailable or still-invalid reasoning
+  leaves the captured report readable, with a deterministic assessment and an
+  explicit omission.
 
 Both produce the same canonical report: exception record/context, qualified
 native stack, module/PDB evidence and an assessment separating the immediate
@@ -117,6 +119,19 @@ export DUMP_ANALYZER_CLAUDE_BIN='claude'        # default; PATH lookup
 export DUMP_ANALYZER_CLAUDE_MODEL=''            # optional override
 # claude itself needs its own auth (subscription or API key) on this host.
 ```
+
+The supplied [systemd unit](deploy/systemd/dump-analyzer.service) can use
+[claude-with-settings.py](deploy/systemd/claude-with-settings.py) as
+`DUMP_ANALYZER_CLAUDE_BIN`. Install the adapter under
+`~/.local/libexec/dump-analyzer/`; it imports connection and model settings from
+`~/.claude/settings.json` and launches `~/.local/bin/claude` with the provider's
+tool restrictions intact. The unit optionally reads
+`~/.config/dump-analyzer/claude-auth.env` for `ANTHROPIC_AUTH_TOKEN` or
+`ANTHROPIC_API_KEY`; keep that file mode `0600`. Systemd does not source an
+interactive shell's `.zshrc`. Model aliases follow the configured gateway, and
+reports record the model reported by the CLI. Use a distinct
+`DUMP_ANALYZER_VERSION` when switching an existing deployment to this provider
+so earlier deterministic reports are preserved and new requests run the model.
 
 Both providers require `DUMP_ANALYZER_SSH_TARGET` (the Windows analysis box).
 Run bounds cover local staging/execution waits and captured output; cleanup has

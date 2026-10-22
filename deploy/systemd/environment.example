@@ -1,0 +1,26 @@
+# Install as ~/.config/dump-analyzer/environment with mode 0600 only after
+# supplying the token and trusted CA. Replace /home/lsz for another account.
+# systemd EnvironmentFile values do not expand ~, $HOME, or %h.
+DUMP_ANALYZER_BASE_URL=https://192.168.150.219:4080
+# Set once; the daemon stores the latest token in its private state database.
+# DUMP_ANALYZER_TOKEN='replace-with-analyzer-token'
+DUMP_ANALYZER_TLS_CA_CERT=/home/lsz/.config/dump-analyzer/ledger-ca.pem
+DUMP_ANALYZER_STATE_DIR=/home/lsz/.local/state/dump-analyzer
+DUMP_ANALYZER_SSH_TARGET=win10
+DUMP_ANALYZER_RUNNER=cdb-ssh
+# To enable evidence-only Claude assessment, install claude-with-settings.py
+# under ~/.local/libexec/dump-analyzer/ and configure a distinct report version:
+# DUMP_ANALYZER_RUNNER=claude-cdb
+# DUMP_ANALYZER_CLAUDE_BIN=/home/lsz/.local/libexec/dump-analyzer/claude-with-settings.py
+# DUMP_ANALYZER_VERSION=0.2.0-claude-profile1
+# DUMP_ANALYZER_MAX_OUTPUT_BYTES=8388608
+# The adapter reads ~/.claude/settings.json. If authentication comes from an
+# interactive shell, explicitly configure ANTHROPIC_AUTH_TOKEN or
+# ANTHROPIC_API_KEY in ~/.config/dump-analyzer/claude-auth.env (mode 0600).
+# Single quotes preserve the Windows backslash literally in EnvironmentFile.
+DUMP_ANALYZER_SYMBOL_CACHE_DIR='C:\symcache'
+DUMP_ANALYZER_HTTP_ADDR=127.0.0.1:4180
+DUMP_ANALYZER_SCHEDULER=off
+DUMP_ANALYZER_WRITE_BACK=off
+DUMP_ANALYZER_WEBHOOK=off
+RUST_LOG=info

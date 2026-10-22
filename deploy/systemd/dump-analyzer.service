@@ -1,0 +1,23 @@
+[Unit]
+Description=DumpAnalyzer daemon
+ConditionPathExists=%h/.config/dump-analyzer/environment
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+WorkingDirectory=%h/.local/state/dump-analyzer
+EnvironmentFile=%h/.config/dump-analyzer/environment
+# Optional credential for the Claude provider; keep this file mode 0600.
+EnvironmentFile=-%h/.config/dump-analyzer/claude-auth.env
+ExecStartPre=/usr/bin/python3 %h/.local/libexec/dump-analyzer/prepare-state.py
+ExecStart=%h/.local/bin/dump-analyzer
+Restart=on-failure
+RestartSec=10s
+RestartPreventExitStatus=2
+KillMode=mixed
+TimeoutStopSec=25min
+UMask=0077
+
+[Install]
+WantedBy=default.target
