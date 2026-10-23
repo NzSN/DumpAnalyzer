@@ -86,6 +86,27 @@ fn build_runner(config: &Config) -> Result<Arc<dyn ToolRunner>> {
             )
             .with_model(config.claude_model.clone()),
         ),
+        dump_analyzer::types::RunnerKind::DshHttp => {
+            let base_url = config.dsh_base_url.clone().ok_or_else(|| {
+                AnalyzerError::Config(
+                    "DUMP_ANALYZER_DSH_BASE_URL is required for DUMP_ANALYZER_RUNNER=dsh-http"
+                        .to_owned(),
+                )
+            })?;
+            let api = dump_analyzer::dsh_runner::HttpDshApi::new(
+                base_url,
+                config.dsh_token.as_ref(),
+                config.tls_ca_cert.as_deref(),
+            )?;
+            Arc::new(
+                dump_analyzer::dsh_runner::DshCdbRunner::new(
+                    SshTransport::new(target),
+                    Arc::new(api),
+                    &config.dsh_preset,
+                )
+                .with_model(config.dsh_model.clone()),
+            )
+        }
     };
     Ok(runner)
 }

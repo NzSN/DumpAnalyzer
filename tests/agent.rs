@@ -276,6 +276,10 @@ fn test_config(server: &MockServer, state_dir: &Path, byte_cache_max_bytes: u64)
         runner: dump_analyzer::types::RunnerKind::CdbSsh,
         claude_bin: "claude".to_string(),
         claude_model: None,
+        dsh_base_url: None,
+        dsh_token: None,
+        dsh_model: None,
+        dsh_preset: "analyzer-triage".to_owned(),
         tls_ca_cert: None,
         webhook_enabled: false,
         webhook_admin_token: None,
@@ -1052,7 +1056,7 @@ async fn agent_byte_cache_stays_consistent_across_evictions() {
     let harness = Harness::with_byte_cache_cap(SinkBehavior::Accept, Vec::new(), 150).await;
     let mut shas: Vec<String> = Vec::new();
 
-    for (index, letter) in [b'a', b'b', b'c', b'd', b'e'].into_iter().enumerate() {
+    for (index, letter) in (*b"abcde").into_iter().enumerate() {
         let payload = vec![letter; 60];
         let sha = sha256_hex(&payload);
         let dump = format!("dump_{index:02}");

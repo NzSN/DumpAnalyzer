@@ -613,3 +613,88 @@ fn config_webhook_actions_bounds_match_the_ledger_limits() {
         "over-length names the variable: {err}"
     );
 }
+
+#[test]
+fn config_runner_dsh_http_parses_service_settings() {
+    let config = parse(&[
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+        ("DUMP_ANALYZER_DSH_TOKEN", "dsh-scoped-token"),
+        ("DUMP_ANALYZER_DSH_MODEL", "deepseek-v4-flash"),
+        ("DUMP_ANALYZER_DSH_PRESET", "analyzer-triage-v2"),
+    ]);
+    assert_eq!(config.runner, dump_analyzer::types::RunnerKind::DshHttp);
+    assert_eq!(
+        config.dsh_base_url.as_ref().map(|url| url.as_str()),
+        Some("http://127.0.0.1:4181/")
+    );
+    assert_eq!(config.dsh_token, Some(SecretToken::new("dsh-scoped-token")));
+    assert_eq!(config.dsh_model.as_deref(), Some("deepseek-v4-flash"));
+    assert_eq!(config.dsh_preset, "analyzer-triage-v2");
+}
+
+#[test]
+fn config_runner_dsh_http_requires_base_url() {
+    let err = parse_err(&[("DUMP_ANALYZER_RUNNER", "dsh-http")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_BASE_URL"),
+        "names the variable: {err}"
+    );
+}
+
+#[test]
+fn config_dsh_base_url_requires_https_off_loopback() {
+    let err = parse_err(&[
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://192.0.2.10:4181"),
+    ]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_BASE_URL"),
+        "names the variable: {err}"
+    );
+    assert!(err.contains("https://"), "states the scheme rule: {err}");
+}
+
+#[test]
+fn config_dsh_base_url_rejects_credentials_and_query() {
+    for url in [
+        "https://user@127.0.0.1:4181",
+        "https://127.0.0.1:4181/?token=x",
+    ] {
+        let err = parse_err(&[
+            ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+            ("DUMP_ANALYZER_DSH_BASE_URL", url),
+        ]);
+        assert!(
+            err.contains("DUMP_ANALYZER_DSH_BASE_URL"),
+            "names the variable: {err}"
+        );
+    }
+}
+
+#[test]
+fn config_dsh_token_rejects_whitespace() {
+    let err = parse_err(&[
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+        ("DUMP_ANALYZER_DSH_TOKEN", "not valid"),
+    ]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_TOKEN"),
+        "names the variable: {err}"
+    );
+}
+
+#[test]
+fn config_dsh_defaults_and_preset_validation() {
+    let config = parse(&[]);
+    assert_eq!(config.dsh_base_url, None);
+    assert_eq!(config.dsh_token, None);
+    assert_eq!(config.dsh_model, None);
+    assert_eq!(config.dsh_preset, "analyzer-triage");
+    let err = parse_err(&[("DUMP_ANALYZER_DSH_PRESET", "bad\u{0007}preset")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_PRESET"),
+        "names the variable: {err}"
+    );
+}

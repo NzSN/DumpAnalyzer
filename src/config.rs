@@ -42,13 +42,29 @@ const BYTE_CACHE_MAX_BYTES_VAR: &str = "DUMP_ANALYZER_BYTE_CACHE_MAX_BYTES";
 const HTTP_ADDR_VAR: &str = "DUMP_ANALYZER_HTTP_ADDR";
 /// Default status-UI bind: loopback only.
 const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:4180";
-/// `DUMP_ANALYZER_RUNNER`: tool-runner provider (`cdb-ssh` default, `claude-cdb`).
+/// `DUMP_ANALYZER_RUNNER`: tool-runner provider (`cdb-ssh` default,
+/// `claude-cdb`, `dsh-http`).
 const RUNNER_VAR: &str = "DUMP_ANALYZER_RUNNER";
 /// `DUMP_ANALYZER_CLAUDE_BIN`: claude CLI executable for the `claude-cdb`
 /// provider; default `claude` (PATH lookup).
 const CLAUDE_BIN_VAR: &str = "DUMP_ANALYZER_CLAUDE_BIN";
 /// `DUMP_ANALYZER_CLAUDE_MODEL`: optional model override for the provider.
 const CLAUDE_MODEL_VAR: &str = "DUMP_ANALYZER_CLAUDE_MODEL";
+/// `DUMP_ANALYZER_DSH_BASE_URL`: base URL of the dedicated DSH analyzer
+/// service; required when `DUMP_ANALYZER_RUNNER=dsh-http`.
+const DSH_BASE_URL_VAR: &str = "DUMP_ANALYZER_DSH_BASE_URL";
+/// `DUMP_ANALYZER_DSH_TOKEN`: optional bearer token for that service.
+const DSH_TOKEN_VAR: &str = "DUMP_ANALYZER_DSH_TOKEN";
+/// `DUMP_ANALYZER_DSH_MODEL`: optional model override for the `dsh-http`
+/// provider.
+const DSH_MODEL_VAR: &str = "DUMP_ANALYZER_DSH_MODEL";
+/// `DUMP_ANALYZER_DSH_PRESET`: server-side zero-tool preset name; default
+/// `analyzer-triage`.
+const DSH_PRESET_VAR: &str = "DUMP_ANALYZER_DSH_PRESET";
+/// Default DSH preset; the dedicated instance must serve it with no tools.
+const DEFAULT_DSH_PRESET: &str = "analyzer-triage";
+/// Bound on the preset name (carried in the JSON session-create body).
+const MAX_DSH_PRESET_CHARS: usize = 128;
 /// `DUMP_ANALYZER_WRITE_BACK`: `on` (default) or `off`; `off` treats the
 /// ledger as a read-only dump source — verdicts are recorded locally and
 /// jobs settle without ever POSTing analyses.
@@ -182,6 +198,18 @@ pub struct Config {
     pub claude_bin: String,
     /// Optional model override for the `claude-cdb` provider.
     pub claude_model: Option<String>,
+    /// Base URL of the dedicated DSH analyzer service (`dsh-http`
+    /// provider): absolute `https://` (loopback `http` accepted for a
+    /// co-located confined instance), without credentials, query, or
+    /// fragment. Required when the provider is selected.
+    pub dsh_base_url: Option<Url>,
+    /// Optional bearer token for the DSH service (redacts in
+    /// `Debug`/`Display`).
+    pub dsh_token: Option<SecretToken>,
+    /// Optional model override for the `dsh-http` provider.
+    pub dsh_model: Option<String>,
+    /// Server-side zero-tool preset name; default `analyzer-triage`.
+    pub dsh_preset: String,
     /// Optional path to a PEM certificate (or chain) to trust in addition to
     /// the system roots — pins a self-signed DumpLedger TLS endpoint.
     pub tls_ca_cert: Option<PathBuf>,
@@ -266,6 +294,25 @@ impl Config {
             None => "claude".to_owned(),
         };
         let claude_model = Self::optional_value(&vars, CLAUDE_MODEL_VAR);
+        let dsh_base_url = Self::parse_dsh_base_url(&vars)?;
+        let dsh_token = Self::parse_dsh_token(&vars)?;
+        let dsh_model = Self::optional_value(&vars, DSH_MODEL_VAR);
+        let dsh_preset = match Self::optional_value(&vars, DSH_PRESET_VAR) {
+            Some(raw) => {
+                if raw.chars().count() > MAX_DSH_PRESET_CHARS || raw.chars().any(char::is_control) {
+                    return Err(AnalyzerError::Config(format!(
+                        "{DSH_PRESET_VAR} must be at most {MAX_DSH_PRESET_CHARS} chars without control characters"
+                    )));
+                }
+                raw
+            }
+            None => DEFAULT_DSH_PRESET.to_owned(),
+        };
+        if runner == crate::types::RunnerKind::DshHttp && dsh_base_url.is_none() {
+            return Err(AnalyzerError::Config(format!(
+                "{DSH_BASE_URL_VAR} is required when {RUNNER_VAR}=dsh-http"
+            )));
+        }
         let tls_ca_cert = Self::optional_value(&vars, TLS_CA_CERT_VAR).map(PathBuf::from);
         let webhook_enabled = match Self::optional_value(&vars, WEBHOOK_VAR).as_deref() {
             None => false,
@@ -360,6 +407,10 @@ impl Config {
             runner,
             claude_bin,
             claude_model,
+            dsh_base_url,
+            dsh_token,
+            dsh_model,
+            dsh_preset,
             tls_ca_cert,
             webhook_enabled,
             webhook_admin_token,
@@ -402,8 +453,9 @@ impl Config {
             None => Ok(crate::types::RunnerKind::CdbSsh),
             Some("cdb-ssh") => Ok(crate::types::RunnerKind::CdbSsh),
             Some("claude-cdb") => Ok(crate::types::RunnerKind::ClaudeCdb),
+            Some("dsh-http") => Ok(crate::types::RunnerKind::DshHttp),
             Some(other) => Err(AnalyzerError::Config(format!(
-                "{RUNNER_VAR} must be cdb-ssh or claude-cdb (got {other:?})"
+                "{RUNNER_VAR} must be cdb-ssh, claude-cdb, or dsh-http (got {other:?})"
             ))),
         }
     }
@@ -485,6 +537,56 @@ impl Config {
             )));
         }
         Ok(url)
+    }
+
+    /// Optional DSH analyzer service URL: absolute `https://` (loopback
+    /// `http` accepted for a co-located confined instance, mirroring the
+    /// ledger base-URL policy), without credentials, query, or fragment.
+    fn parse_dsh_base_url(vars: &HashMap<String, String>) -> Result<Option<Url>> {
+        let Some(raw) = Self::optional_value(vars, DSH_BASE_URL_VAR) else {
+            return Ok(None);
+        };
+        let url = Url::parse(&raw).map_err(|err| {
+            AnalyzerError::Config(format!("{DSH_BASE_URL_VAR} is not an absolute URL: {err}"))
+        })?;
+        let scheme = url.scheme();
+        let loopback = matches!(
+            url.host_str(),
+            Some("127.0.0.1") | Some("::1") | Some("localhost")
+        );
+        if scheme != "https" && !(scheme == "http" && loopback) {
+            return Err(AnalyzerError::Config(format!(
+                "{DSH_BASE_URL_VAR} must use the https:// scheme (got \"{scheme}\")"
+            )));
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(AnalyzerError::Config(format!(
+                "{DSH_BASE_URL_VAR} must not carry a query string or fragment"
+            )));
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(AnalyzerError::Config(format!(
+                "{DSH_BASE_URL_VAR} must not embed credentials"
+            )));
+        }
+        Ok(Some(url))
+    }
+
+    /// Optional DSH bearer token, taken verbatim like the analyzer token
+    /// (never trimmed, whitespace rejected, value never echoed).
+    fn parse_dsh_token(vars: &HashMap<String, String>) -> Result<Option<SecretToken>> {
+        let Some(raw) = vars.get(DSH_TOKEN_VAR) else {
+            return Ok(None);
+        };
+        if raw.is_empty() {
+            return Ok(None);
+        }
+        if raw.chars().any(|c| c.is_ascii_whitespace()) {
+            return Err(AnalyzerError::Config(format!(
+                "{DSH_TOKEN_VAR} must not contain whitespace (the service accepts a single `Authorization: Bearer <token>` credential without spaces)"
+            )));
+        }
+        Ok(Some(SecretToken::new(raw.clone())))
     }
 
     /// Required bearer token, taken verbatim (never trimmed or rewritten).

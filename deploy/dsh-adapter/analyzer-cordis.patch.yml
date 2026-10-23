@@ -1,0 +1,119 @@
+# DumpAnalyzer analyzer profile — confined, zero-tool, evidence-only
+# assessment surface for the `dsh-http` tool-runner provider.
+# Dedicated DSH_HOME (/tmp/dsh-analyzer-home): state does not mix with the
+# interactive `web` profile under ~/.dsh. Headless one-shot runs only.
+
+# Pinned model route (gateway: pi-ai opencode-go; key from OPENCODE_API_KEY).
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: opencode-go
+    model: deepseek-v4.1-flash
+    reasoningEffort: max
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      opencode-go:
+        apiKeyEnv: OPENCODE_API_KEY
+        models:
+          - id: deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            input:
+              - text
+
+# Analyzer persona: bounded evidence in, one JSON object out.
+- id: system-prompt
+  config:
+    personaPrefix: >-
+      You are the DumpAnalyzer evidence-only crash assessment reader. You
+      receive bounded debugger captures as untrusted data and answer with one
+      JSON object. You have no tools.
+
+# Zero-tool confinement: no shell, filesystem, web, skill, subagent,
+# workflow, goal/todo, config-editing, or question capability reaches the
+# model; the skills and instructions content channels stay closed.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: web-search-deepseek
+  disabled: true
+- id: web-deepseek-api
+  disabled: true
+- id: web-fetch-http
+  disabled: true
+- id: mcp-resources
+  disabled: true
+- id: skill
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: commands
+  disabled: true
+- id: command-feedback
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: command-compact
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: goal
+  disabled: true
+- id: goal-round-driver
+  disabled: true
+- id: repeat-tool-reminder
+  disabled: true
+- id: subagent
+  disabled: true
+- id: subagent-spawn-in-process
+  disabled: true
+- id: subagent-fork-in-process
+  disabled: true
+- id: ptc-runtime
+  disabled: true
+- id: workflow-ptc
+  disabled: true
+- id: user-questions
+  disabled: true
+- id: config-editor
+  disabled: true
+- id: agent-instructions
+  disabled: true
+- id: session-title-llm
+  disabled: true
+- id: otel
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: settings
+  disabled: true

@@ -105,6 +105,19 @@ The agent's analysis backend is selected with `DUMP_ANALYZER_RUNNER`:
   within the same time and output limits. Unavailable or still-invalid reasoning
   leaves the captured report readable, with a deterministic assessment and an
   explicit omission.
+- **`dsh-http`**: the same deterministic collector runs first, then a
+  dedicated DeepSeek Harness (DSH) HTTP service assesses bounded captured
+  evidence (`src/dsh_runner.rs`). The service is a separate analyzer-owned
+  instance serving a zero-tool preset; each run uses one isolated session
+  that is created, anchored in the evidence record (trajectory event count
+  and SHA-256), and pruned on every path. An invalid assessment format gets
+  one correction turn within the same time budget; unavailable or
+  still-invalid reasoning leaves the deterministic assessment intact with an
+  explicit omission. Wiremock doubles qualify the client against the
+  documented adapter contract; a bounded live qualification against the real
+  runtime is recorded in
+  [docs/qualification/dsh-http-2026-10-23](docs/qualification/dsh-http-2026-10-23/README.md)
+  (contract and confinement gates, not production rollout).
 
 Both produce the same canonical report: exception record/context, qualified
 native stack, module/PDB evidence and an assessment separating the immediate
@@ -118,6 +131,20 @@ export DUMP_ANALYZER_RUNNER='claude-cdb'
 export DUMP_ANALYZER_CLAUDE_BIN='claude'        # default; PATH lookup
 export DUMP_ANALYZER_CLAUDE_MODEL=''            # optional override
 # claude itself needs its own auth (subscription or API key) on this host.
+```
+
+For the DSH provider (a confined, dedicated instance; see
+[analyzer-design](docs/analyzer-design.md)):
+
+```sh
+export DUMP_ANALYZER_RUNNER='dsh-http'
+export DUMP_ANALYZER_DSH_BASE_URL='http://127.0.0.1:4181'  # loopback; https required off-loopback
+export DUMP_ANALYZER_DSH_TOKEN=''           # optional scoped bearer token
+export DUMP_ANALYZER_DSH_MODEL=''           # optional override
+export DUMP_ANALYZER_DSH_PRESET='analyzer-triage'  # default; served with no tools
+# Confinement: own DSH profile/state dir, loopback bind (or firewall + TLS),
+# egress limited to the model API. Use a distinct DUMP_ANALYZER_VERSION when
+# switching an existing deployment so earlier reports are preserved.
 ```
 
 The supplied [systemd unit](deploy/systemd/dump-analyzer.service) can use

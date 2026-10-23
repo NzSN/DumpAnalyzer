@@ -23,10 +23,11 @@ and Settings panels, manual dump/case/customer analysis, token storage, and
 catalog rescan. Browsing never starts analysis. The HTTP surface is optional;
 its failure is logged without stopping the pipeline.
 
-The two providers share deterministic capture. `cdb-ssh` returns its assessment;
-`claude-cdb` additionally asks a local Claude CLI host to assess bounded captured
-evidence. Claude does not drive CDB or receive tools. Neither provider ingests
-symbols into DumpLedger. Full canonical evidence is durable local data, rather
+The three providers share deterministic capture. `cdb-ssh` returns its
+assessment; `claude-cdb` additionally asks a local Claude CLI host to assess
+bounded captured evidence, and `dsh-http` asks a dedicated DeepSeek Harness
+HTTP service the same way. Neither reasoner drives CDB or receives tools. No
+provider ingests symbols into DumpLedger. Full canonical evidence is durable local data, rather
 than a transient workspace artifact or only the compact server verdict.
 
 ## Vocabulary and identity
@@ -79,6 +80,7 @@ for that environment's checkpoint and rollback, not a portable provisioning reci
 | [agent.rs](../src/agent.rs) | Fetch/cache verification, workspace lifecycle, execution and retry classification |
 | [runner.rs](../src/runner.rs), [symbols.rs](../src/symbols.rs) | CDB capture/refinement and independent module/PDB identity evidence |
 | [claude_runner.rs](../src/claude_runner.rs), [assessment.rs](../src/assessment.rs) | Isolated evidence-only reasoning and deterministic assessment fallback |
+| [dsh_runner.rs](../src/dsh_runner.rs), [reason.rs](../src/reason.rs) | DSH HTTP adapter client and the shared evidence-only reasoning contract |
 | [report.rs](../src/report.rs), [verdict.rs](../src/verdict.rs) | Canonical report, compact projection, publication and reconciliation |
 | [state.rs](../src/state.rs) | SQLite migrations, jobs, settled identities, cursors, secrets, cache and reports |
 | [analyzer.rs](../src/analyzer.rs) | Synchronous manual `DumpId -> IO Report` capability and scope batches |
@@ -163,6 +165,29 @@ reasoning timeout preserves readable deterministic evidence/assessment and an
 omission. The assessment distinguishes immediate mechanism from underlying
 cause; captured evidence does not automatically establish original-incident
 attribution. See [rich reports](rich-reports.md) for claim qualification rules.
+
+`dsh-http` runs the same collector and reasoning contract against a
+dedicated DeepSeek Harness HTTP service ([dsh_runner.rs](../src/dsh_runner.rs)).
+The service is analyzer-owned and confined: loopback-bound (plain HTTP is
+accepted for loopback only, mirroring the ledger URL policy) or HTTPS with an
+optional scoped bearer token, serving a zero-tool preset
+(`DUMP_ANALYZER_DSH_PRESET`, default `analyzer-triage`). Each run creates a
+fresh session, anchors a bounded trajectory digest (event count and SHA-256)
+in the assessment evidence entry, and a session prune is attempted on every
+path — success, reasoning failure, and the shared run deadline alike, the
+last with its own small budget. A malformed response spends one
+formatting-correction turn inside the original budget; any reasoning failure
+preserves the deterministic evidence and assessment with an explicit
+omission. The provider codes against the minimal adapter contract documented
+in the module (session create, message, bounded events export, delete), so a
+pinned DSH revision's real endpoint shapes adapt in one file. The adapter implementation lives in
+[deploy/dsh-adapter](../../deploy/dsh-adapter/README.md) (headless-profile
+driver). Wiremock tests qualify the client against the contract; the
+[2026-10-23 live qualification](qualification/dsh-http-2026-10-23/README.md)
+exercised the full chain against the real runtime with deepseek-v4.1-flash:
+session lifecycle, bearer auth, zero-tool confinement, trajectory anchoring,
+export-then-prune, and one indirect-injection probe. That receipt is dated
+evidence, not production readiness; the provider is off by default.
 
 `verdict::prepare_report` constructs and validates the canonical document and
 its compact projection. SQLite commits canonical evidence, digest, projection

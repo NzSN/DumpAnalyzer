@@ -93,12 +93,16 @@ pub struct JobIdentity {
 
 /// Which tool-runner provider the daemon wires at boot
 /// (`DUMP_ANALYZER_RUNNER`). `CdbSsh` is the deterministic CDB script runner;
-/// `ClaudeCdb` drives CDB through the `claude` CLI agent (decision
-/// 2026-10-13). Both execute CDB on the analysis box over SSH.
+/// `ClaudeCdb` asks a local `claude` CLI host for an evidence-only
+/// assessment of the deterministic capture (decision 2026-10-13);
+/// `DshHttp` asks a dedicated DeepSeek Harness HTTP service the same way
+/// (docs/analyzer-design.md, "DSH HTTP provider"). All execute CDB on the
+/// analysis box over SSH.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunnerKind {
     CdbSsh,
     ClaudeCdb,
+    DshHttp,
 }
 
 /// Verdict outcome; wire spelling matches the server's AnalysisReport.
