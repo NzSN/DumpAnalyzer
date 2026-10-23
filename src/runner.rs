@@ -1341,14 +1341,33 @@ impl<T: ExecTransport> SshCdbRunner<T> {
     /// covers the complete analysis including follow-up queries.
     pub async fn begin_session(
         &self,
-        mut request: RunRequest,
+        request: RunRequest,
         deadline: tokio::time::Instant,
     ) -> Result<(RunOutput, Arc<crate::analysis_tools::CdbSession<T>>)>
     where
         T: 'static,
     {
-        let query_budget =
-            crate::analysis_tools::MAX_QUERY_OUTPUT_BYTES.min(request.bounds.max_output_bytes / 4);
+        self.begin_session_with_query_limit(
+            request,
+            deadline,
+            crate::analysis_tools::MAX_QUERY_OUTPUT_BYTES,
+        )
+        .await
+    }
+
+    /// The DSH Forensicator bridge needs room for all-thread V8/JIT envelopes
+    /// before it can project a bounded evidence excerpt. Reserve that room
+    /// from the original output cap, never from a second independent budget.
+    pub(crate) async fn begin_session_with_query_limit(
+        &self,
+        mut request: RunRequest,
+        deadline: tokio::time::Instant,
+        query_limit: usize,
+    ) -> Result<(RunOutput, Arc<crate::analysis_tools::CdbSession<T>>)>
+    where
+        T: 'static,
+    {
+        let query_budget = query_limit.min(request.bounds.max_output_bytes / 4);
         request.bounds.max_output_bytes -= query_budget;
         let plan = self.plan(&request)?;
         let session = Arc::new(crate::analysis_tools::CdbSession::new(

@@ -18,6 +18,7 @@ pub mod dsh_runner;
 pub mod explorer;
 pub mod forensicator;
 pub mod http;
+mod javascript;
 mod reason;
 pub mod report;
 pub mod runner;

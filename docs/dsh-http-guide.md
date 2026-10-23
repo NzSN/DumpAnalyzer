@@ -219,7 +219,10 @@ systemd restrictions still apply. MCP does not create a Windows sandbox.
 The shared run deadline still covers acquisition and reasoning, with 80%
 reserved as the initial collector's maximum. Investigation permits at most
 eight attempted queries, at most 30 seconds each, and reserves the smaller of
-64 KiB or one quarter of the configured output cap for query output. The
+64 KiB or one quarter of the configured output cap for debugger-only query
+output. With Forensicator enabled, the ceiling is 1 MiB instead of 64 KiB,
+still at most one quarter of that same run cap, because V8 emits all-thread
+MCP results before the host can select a compact excerpt. The
 remaining output allowance belongs to initial collection. Each retained
 query excerpt is capped at 8 KiB; the report's 32-evidence-entry cap includes
 baseline entries and reserves a slot for the final assessment. Cleanup keeps
@@ -277,7 +280,7 @@ Use the absolute native executable, not `lake`, a shell command, or an MCP
 URL. The daemon launches it with the fixed argument `mcp`; no extra package,
 adapter overlay, or Forensicator HTTP listener is needed. With the variable
 unset, discovery exposes the existing six debugger tools. With it set,
-discovery also exposes these four tools in `dump_analysis` (for example,
+discovery also exposes these tools in `dump_analysis` (for example,
 `mcp__dump_analysis__forensicator_inspect` in DSH):
 
 | Tool | Arguments and behavior |
@@ -286,6 +289,7 @@ discovery also exposes these four tools in `dump_analysis` (for example,
 | `forensicator_list_plugins` | `{}`; discover analyzer names and descriptions from the installed Forensicator. |
 | `forensicator_analyze` | `{"plugins":["cause"]}`; explicitly select 1–8 analyzers. Optional `symbols` names an existing workspace-relative PDB directory. Empty or omitted plugin lists are rejected to avoid implicitly running the full pipeline. |
 | `forensicator_match` | For example, `{"pdbs":["fixture.pdb"]}`; select 1–16 existing workspace-relative PE/PDB files in `exes` and/or `pdbs`. Mismatch and unknown identities are forensic results, not execution errors. |
+| `forensicator_javascript_stack` | `{}` or `{"thread_id":42,"max_frames":16,"include_jit":true}`; recover physical JavaScript and optimized frames using `v8`, optionally adding `jit` code/feedback observations. `thread_id` is a decimal **OS thread ID**, not a CDB thread index; omitted selects all observed threads. `max_frames` is 1–32, default 16; `include_jit` defaults to false. Optional `symbols` is a workspace-relative PDB directory. |
 
 For a source build, run `lake build` in the Forensicator checkout, use
 `deploy/deploy.py --skip-forensicator`, and point the variable at that
@@ -322,15 +326,40 @@ overwrite the baseline exception, symbols, or deterministic mechanism.
 Missing executables and invalid MCP responses become failed evidence;
 unavailable reasoning preserves the deterministic assessment.
 
+The focused JavaScript tool retains a bounded JSON projection in the existing
+evidence record (`kind: forensicator.javascriptStack.v1`). The report dashboard
+renders its frames, names, scripts, function-start lines, frame PCs and optional
+JIT code objects in a separate table with an evidence link. The canonical
+report schema and the CDB native-stack section stay intact. Frame-count limits
+and the 8 KiB evidence budget remove whole records and report `omittedFrameCount`,
+so a truncated excerpt remains valid JSON. Long names are explicitly shortened.
+Default V8 recovery already includes optimized physical frames; `include_jit`
+adds metadata at extra scan cost and is not needed just to recover their names.
+
+Recovery requires the relevant captured stack/heap bytes and compatible V8
+layouts. The tested release uses V8 14.6 layout heuristics and may fall back to
+that layout for an unknown version. A reported frame kind without recovered
+function metadata is an unresolved candidate. `heapCaptured` reports the
+upstream cage-page observation, not complete heap coverage. Missing names,
+missing threads, and absent JIT metadata remain explicit. Inlined logical
+frames, asynchronous ancestry, exact executing statement/column positions and
+complete stack coverage are not recovered. `functionStartLine` is the function's
+start line, not a call-site or crash line. JIT code lookup and feedback are
+forensic observations, not proof that optimization caused the crash.
+
 The default tests use a controlled stdio peer and a controlled reasoner. The
 optional native test uses generated Windows x64 minidump/PDB files, calls all
-four tools through the HTTP bridge, and compares forensic reports with the
-native CLI. It needs Python 3 for the controlled fixtures and loopback TCP:
+four upstream tools through the HTTP bridge, and compares forensic reports
+with the native CLI. A second native test creates a V8 cage, normal and
+optimized frames, a dispatch table and feedback vectors, then checks recovery
+and the missing-heap negative control through the focused tool. These tests
+need Python 3 and loopback TCP:
 
 ```sh
 cargo test --offline --locked --test forensicator --test dsh_tools --test config
 FORENSICATOR_TEST_BIN=/absolute/path/to/Forensicator/.lake/build/bin/forensicator \
-  cargo test --offline --locked --test forensicator native_forensicator_mcp -- --ignored
+  cargo test --offline --locked --test forensicator -- --ignored
+node tests/dashboard_javascript.mjs
 ```
 
 These checks cover interoperability, retained citations, budget enforcement,

@@ -69,6 +69,13 @@ impl Fixture {
         let workspace = root.path().join("work");
         std::fs::create_dir(&workspace).unwrap();
         std::fs::write(workspace.join("mode"), mode).unwrap();
+        if mode == "javascript" {
+            std::fs::write(
+                workspace.join("javascript.json"),
+                include_str!("fixtures/forensicator-v8-jit.json"),
+            )
+            .unwrap();
+        }
         let bin = native.unwrap_or_else(|| {
             let bin = root.path().join("fake forensicator");
             std::fs::write(&bin, include_str!("fixtures/forensicator-mcp.py")).unwrap();
@@ -123,7 +130,7 @@ impl Fixture {
 async fn real_stdio_lifecycle_pins_dump_and_retains_all_four_tools() {
     let fixture = Fixture::standard("ok").await;
     let definitions = fixture.tools.definitions();
-    assert_eq!(definitions.as_array().unwrap().len(), 10);
+    assert_eq!(definitions.as_array().unwrap().len(), 11);
     for tool in definitions.as_array().unwrap() {
         assert!(tool["inputSchema"]["properties"].get("path").is_none());
     }
@@ -353,6 +360,165 @@ async fn legacy_text_results_remain_citable() {
     fixture.session.close().await;
 }
 
+#[tokio::test]
+async fn javascript_tool_recovers_optimized_frames_and_binds_jit_metadata() {
+    let fixture = Fixture::standard("javascript").await;
+    let evidence = fixture
+        .tools
+        .call(
+            "forensicator_javascript_stack",
+            json!({"thread_id":42,"include_jit":true}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(evidence.status, CaptureStatus::Present, "{evidence:?}");
+    let data: Value = serde_json::from_str(&evidence.text).unwrap();
+    assert_eq!(data["recoveredFrameCount"], 2);
+    assert_eq!(data["optimizedFrameCount"], 1);
+    assert_eq!(data["frames"][0]["function"], "optimizedFunction");
+    assert_eq!(data["frames"][0]["frameType"], "OptimizedJavaScript");
+    assert_eq!(data["frames"][0]["functionStartLine"], 2);
+    assert_eq!(
+        data["frames"][0]["jit"]["codeResolution"]["codeObject"],
+        "0x600000100"
+    );
+    assert!(
+        data["frames"][0]["jit"]["codeResolution"]
+            .get("nativeOffset")
+            .is_none()
+    );
+    assert_eq!(data["frames"][1]["function"], "plainFunction");
+    assert!(
+        data["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l.as_str().unwrap().contains("inlined logical frames"))
+    );
+    let wire = fixture.wire();
+    assert_eq!(wire[3]["params"]["name"], "analyze");
+    assert_eq!(
+        wire[3]["params"]["arguments"]["plugins"],
+        json!(["v8", "jit"])
+    );
+    assert_eq!(
+        wire[3]["params"]["arguments"]["path"],
+        json!(fixture.request.dump_path)
+    );
+    assert!(
+        wire[3]["params"]["arguments"].get("thread_id").is_none(),
+        "upstream has no thread filter; the host projects the result"
+    );
+    let empty = fixture
+        .tools
+        .call("forensicator_javascript_stack", json!({"thread_id":7}))
+        .await
+        .unwrap();
+    let data: Value = serde_json::from_str(&empty.text).unwrap();
+    assert_eq!(data["candidateFrameCount"], 0);
+    assert_eq!(data["selectedThreadFrameCount"], 0);
+    assert!(data["frames"].as_array().unwrap().is_empty());
+    fixture.session.close().await;
+}
+
+#[tokio::test]
+async fn javascript_excerpt_limits_preserve_valid_json_and_mark_omissions() {
+    let fixture = Fixture::standard("javascript").await;
+    let evidence = fixture
+        .tools
+        .call("forensicator_javascript_stack", json!({"max_frames":1}))
+        .await
+        .unwrap();
+    assert_eq!(evidence.status, CaptureStatus::Truncated);
+    let data: Value = serde_json::from_str(&evidence.text).unwrap();
+    assert_eq!(data["frames"].as_array().unwrap().len(), 1);
+    assert_eq!(data["omittedFrameCount"], 1);
+    assert_eq!(data["includeJit"], false);
+    assert!(data["frames"][0]["jit"].is_null());
+    fixture.session.close().await;
+
+    let fixture = Fixture::standard("javascript").await;
+    let mut raw: Value =
+        serde_json::from_str(include_str!("fixtures/forensicator-v8-jit.json")).unwrap();
+    let mut frame = raw["plugins"][0]["custom"][0]["v8_frames"][0].clone();
+    frame["script_name"] = json!("bundle".repeat(30));
+    let frames: Vec<Value> = (0..32)
+        .map(|depth| {
+            let mut f = frame.clone();
+            f["depth"] = json!(depth);
+            f
+        })
+        .collect();
+    raw["plugins"][0]["custom"][0]["v8_frames"] = json!(frames);
+    raw["plugins"][0]["custom"][1]["v8_frame_count"] = json!(32);
+    std::fs::write(
+        fixture.request.work_dir.join("javascript.json"),
+        raw.to_string(),
+    )
+    .unwrap();
+    let evidence = fixture
+        .tools
+        .call("forensicator_javascript_stack", json!({"max_frames":32}))
+        .await
+        .unwrap();
+    assert_eq!(evidence.status, CaptureStatus::Truncated, "{evidence:?}");
+    let data: Value = serde_json::from_str(&evidence.text).unwrap();
+    assert!(evidence.text.len() <= MAX_SECTION_BYTES);
+    assert_eq!(data["recoveredFrameCount"], 32);
+    assert!(data["omittedFrameCount"].as_u64().unwrap() > 0);
+    assert!(!data["frames"].as_array().unwrap().is_empty());
+    fixture.session.close().await;
+}
+
+#[tokio::test]
+async fn invalid_javascript_arguments_or_source_data_never_become_recovered_frames() {
+    let fixture = Fixture::standard("javascript").await;
+    for args in [
+        json!({"path":"/etc/passwd"}),
+        json!({"thread_id":-1}),
+        json!({"thread_id":4294967296u64}),
+        json!({"max_frames":0}),
+        json!({"max_frames":33}),
+        json!({"include_jit":"yes"}),
+        json!({"symbols":"../outside"}),
+    ] {
+        assert!(
+            fixture
+                .tools
+                .call("forensicator_javascript_stack", args)
+                .await
+                .is_err()
+        );
+    }
+    assert!(!fixture.request.work_dir.join("wire.jsonl").exists());
+    fixture.session.close().await;
+    for mismatch in [false, true] {
+        let fixture = Fixture::standard("javascript").await;
+        let mut raw: Value =
+            serde_json::from_str(include_str!("fixtures/forensicator-v8-jit.json")).unwrap();
+        if mismatch {
+            raw["plugins"][1]["custom"][1]["jit_frames"][0]["function_name"] =
+                json!("unrelatedFunction");
+        } else {
+            raw["plugins"][0]["custom"][1]["v8_frame_count"] = json!(999);
+        }
+        std::fs::write(
+            fixture.request.work_dir.join("javascript.json"),
+            raw.to_string(),
+        )
+        .unwrap();
+        let evidence = fixture
+            .tools
+            .call("forensicator_javascript_stack", json!({"include_jit":true}))
+            .await
+            .unwrap();
+        assert_eq!(evidence.status, CaptureStatus::Failed);
+        assert!(evidence.text.is_empty());
+        assert_eq!(fixture.tools.evidence().await, vec![evidence]);
+        fixture.session.close().await;
+    }
+}
+
 async fn wait_for_pid(workspace: &Path) -> u32 {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
@@ -556,7 +722,7 @@ async fn native_forensicator_mcp_matches_cli_through_the_reasoner_bridge() {
     let init = bridge_rpc(&server, 1, "initialize", json!({"protocolVersion":"2025-11-25", "capabilities":{}, "clientInfo":{"name":"native-test", "version":"1"}})).await;
     assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
     let list = bridge_rpc(&server, 2, "tools/list", json!({})).await;
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 11);
     let plugins = bridge_rpc(
         &server,
         3,
@@ -642,4 +808,80 @@ async fn native_forensicator_mcp_matches_cli_through_the_reasoner_bridge() {
     server.close().await;
     fixture.session.close().await;
     assert_eq!(fixture.tools.evidence().await.len(), 4);
+}
+
+#[tokio::test]
+#[ignore = "requires FORENSICATOR_TEST_BIN, Python 3 and loopback TCP; only synthetic V8 heap data is used"]
+async fn native_javascript_recovery_preserves_optimized_frames_and_missing_heap_limits() {
+    let executable =
+        PathBuf::from(std::env::var("FORENSICATOR_TEST_BIN").expect("set FORENSICATOR_TEST_BIN"));
+    let fixture = Fixture::new("", 1024 * 1024, Duration::from_secs(30), Some(executable)).await;
+    let generator = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/forensicator-js.py");
+    let generate = |without_heap: bool| {
+        let mut command = std::process::Command::new("python3");
+        command
+            .arg("-B")
+            .arg(&generator)
+            .arg(&fixture.request.dump_path);
+        if without_heap {
+            command.arg("--without-heap");
+        }
+        assert!(command.status().unwrap().success());
+    };
+    generate(false);
+    let mut server = dump_analyzer::analysis_mcp::McpServer::start(
+        fixture.tools.clone(),
+        Instant::now() + Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+    let result = bridge_rpc(&server, 1, "tools/call", json!({"name":"forensicator_javascript_stack","arguments":{"thread_id":42,"include_jit":true}})).await;
+    assert_eq!(result["result"]["isError"], false, "{result}");
+    let data: Value = serde_json::from_str(
+        result["result"]["structuredContent"]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(data["recoveredFrameCount"], 2);
+    assert_eq!(data["optimizedFrameCount"], 1);
+    assert_eq!(
+        data["frames"][0]["framePc"], "0x200001010",
+        "exception context takes priority over the thread's initial context"
+    );
+    assert_eq!(data["frames"][0]["function"], "optimizedFunction");
+    assert_eq!(data["frames"][0]["script"], "fixture.js");
+    assert_eq!(data["frames"][0]["functionStartLine"], 2);
+    assert_eq!(
+        data["frames"][0]["jit"]["codeResolution"]["codeObject"],
+        "0x600000100"
+    );
+    assert_eq!(data["frames"][0]["jit"]["sfiCrosscheck"], true);
+    assert_eq!(data["frames"][1]["function"], "plainFunction");
+    generate(true);
+    let result = bridge_rpc(
+        &server,
+        2,
+        "tools/call",
+        json!({"name":"forensicator_javascript_stack","arguments":{"include_jit":true}}),
+    )
+    .await;
+    assert_eq!(result["result"]["isError"], false, "{result}");
+    let missing: Value = serde_json::from_str(
+        result["result"]["structuredContent"]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(missing["heapCaptured"], false);
+    assert_eq!(missing["recoveredFrameCount"], 0);
+    assert_eq!(missing["candidateFrameCount"], 2);
+    for frame in missing["frames"].as_array().unwrap() {
+        assert_eq!(frame["metadataRecovered"], false);
+        assert!(frame["function"].is_null());
+        assert!(frame["jit"].is_null());
+    }
+    server.close().await;
+    fixture.session.close().await;
+    assert_eq!(fixture.tools.evidence().await.len(), 2);
 }

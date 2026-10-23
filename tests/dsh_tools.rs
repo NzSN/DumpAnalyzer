@@ -78,6 +78,7 @@ enum Mode {
     Valid,
     Forensicator,
     ForensicatorUnavailable,
+    Javascript,
     BadReference,
     InvalidHypothesis,
     Confirmed,
@@ -152,13 +153,19 @@ impl DshApi for Reasoner {
             let tools = Self::rpc(&mcp, 2, "tools/list", json!({})).await;
             let forensicator = matches!(
                 self.mode,
-                Mode::Forensicator | Mode::ForensicatorUnavailable
+                Mode::Forensicator | Mode::ForensicatorUnavailable | Mode::Javascript
             );
             assert_eq!(
                 tools["result"]["tools"].as_array().unwrap().len(),
-                if forensicator { 10 } else { 6 }
+                if forensicator { 11 } else { 6 }
             );
-            let query = if forensicator {
+            let query = if matches!(self.mode, Mode::Javascript) {
+                assert!(prompt.contains("forensicator_javascript_stack"));
+                assert!(
+                    prompt.contains("Inlined logical frames and async ancestry are not recovered")
+                );
+                json!({"name":"forensicator_javascript_stack", "arguments":{"thread_id":42}})
+            } else if forensicator {
                 assert!(prompt.contains("Forensicator"));
                 json!({"name":"forensicator_inspect", "arguments":{}})
             } else {
@@ -177,12 +184,25 @@ impl DshApi for Reasoner {
             }
             if forensicator {
                 assert_eq!(result["result"]["isError"], false);
-                assert!(
-                    evidence["command"]
-                        .as_str()
-                        .unwrap()
-                        .contains("Forensicator MCP inspect")
-                );
+                if matches!(self.mode, Mode::Javascript) {
+                    assert!(
+                        evidence["command"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Forensicator MCP javascript_stack")
+                    );
+                    let data: Value =
+                        serde_json::from_str(evidence["text"].as_str().unwrap()).unwrap();
+                    assert_eq!(data["recoveredFrameCount"], 200);
+                    assert!(data["omittedFrameCount"].as_u64().unwrap() > 0);
+                } else {
+                    assert!(
+                        evidence["command"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Forensicator MCP inspect")
+                    );
+                }
             } else {
                 assert!(evidence["text"].as_str().unwrap().contains("de ad be ef"));
             }
@@ -265,7 +285,7 @@ async fn reasoner_can_discover_call_cite_and_persist_forensicator_evidence() {
             capture
                 .provenance
                 .analysis_revision
-                .contains("forensicator=mcp-stdio-v1")
+                .contains("forensicator=mcp-stdio-v2")
         );
         let evidence = capture.evidence.iter().find(|e| e.id == "query-1").unwrap();
         assert!(evidence.command.contains("Forensicator MCP inspect"));
@@ -349,6 +369,65 @@ fn request(root: &Path, wall: Duration) -> RunRequest {
             max_workspace_bytes: 2 * 1024 * 1024,
         },
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reasoner_uses_javascript_recovery_and_retains_large_result_as_bounded_evidence() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let run = request(temp.path(), Duration::from_secs(5));
+    std::fs::create_dir(&run.work_dir).unwrap();
+    std::fs::write(run.work_dir.join("mode"), "javascript").unwrap();
+    let mut raw: Value =
+        serde_json::from_str(include_str!("fixtures/forensicator-v8-jit.json")).unwrap();
+    let frame = raw["plugins"][0]["custom"][0]["v8_frames"][0].clone();
+    let frames: Vec<Value> = (0..200)
+        .map(|depth| {
+            let mut frame = frame.clone();
+            frame["depth"] = json!(depth);
+            frame
+        })
+        .collect();
+    raw["plugins"][0]["custom"][0]["v8_frames"] = json!(frames);
+    raw["plugins"][0]["custom"][1]["v8_frame_count"] = json!(200);
+    assert!(
+        raw.to_string().len() > 32 * 1024,
+        "MCP repeats structured content as text, exceeding the original 64 KiB wire allowance"
+    );
+    std::fs::write(run.work_dir.join("javascript.json"), raw.to_string()).unwrap();
+    let executable = temp.path().join("forensicator");
+    std::fs::write(&executable, include_str!("fixtures/forensicator-mcp.py")).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let debugger = Debugger::default();
+    let reasoner = Reasoner::new(Mode::Javascript);
+    let output = DshCdbRunner::new(debugger.clone(), reasoner.clone(), "analyzer-triage")
+        .with_forensicator(Some(executable))
+        .run(run)
+        .await
+        .unwrap();
+    let capture = output.capture.as_ref().unwrap();
+    assert_eq!(capture.root_cause.evidence_refs, vec!["query-1"]);
+    assert_eq!(capture.root_cause.status, CauseStatus::Hypothesis);
+    assert!(capture.completeness.truncated);
+    let evidence = capture.evidence.iter().find(|e| e.id == "query-1").unwrap();
+    assert!(evidence.text.len() <= dump_analyzer::report::MAX_SECTION_BYTES);
+    let identity = JobIdentity {
+        dump_id: "javascript-fixture".into(),
+        input_sha256: "0".repeat(64),
+        kind: "triage".into(),
+        analyzer_version: "0.2.0-js-test".into(),
+    };
+    let report = CrashReportV2::from_output(&identity, "test", &output).unwrap();
+    let serialized = report.canonical_json().unwrap();
+    let restored: CrashReportV2 = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(
+        restored.capture.evidence.iter().find(|e| e.id == "query-1"),
+        Some(evidence)
+    );
+    assert_eq!(debugger.queries.load(Ordering::SeqCst), 0);
+    assert!(debugger.cleaned.load(Ordering::SeqCst));
+    assert_eq!(reasoner.closes.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

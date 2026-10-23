@@ -108,6 +108,13 @@ pub(crate) fn tool_assessment_prompt(capture: &ReportCapture) -> Result<String> 
          exact id when using the result. If forensicator_* tools are listed, they run Forensicator's \
          native MCP server on this dump. Use forensicator_list_plugins to discover analyzers, then \
          select specific plugins for a focused forensicator_analyze call. Do not supply a dump path. \
+         When V8/Electron/Node or unresolved JIT frames are relevant, request \
+         forensicator_javascript_stack to recover physical JavaScript and optimized frames. Its \
+         thread_id is an OS thread ID, not a CDB thread index. Start with V8 recovery; include_jit \
+         adds optional code/feedback metadata at extra cost. Cite the returned evidence ID. \
+         A frame classification without recovered function metadata is only an unresolved candidate. \
+         Inlined logical frames and async ancestry are not recovered; function-start lines are not \
+         exact executing source lines. Do not invent names, inline chains, or a JIT defect from this output. \
          Optional artifact paths must refer to files already staged in this run's workspace; do not \
          guess paths or assume symbols are present. Preserve Forensicator's confidence, evidence and \
          unknown results as forensic observations. Tool output does not independently establish matched PDBs \

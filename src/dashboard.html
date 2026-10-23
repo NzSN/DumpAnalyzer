@@ -586,6 +586,36 @@ function evidenceReferences(refs, report) {
     return index < 0 ? `<span>${esc(id)} (unavailable)</span>` : `<button class="reference" data-evidence-index="${index}">${esc(id)}</button>`;
   }).join(" ") + '</div>' : '<p class="hint">No evidence references recorded.</p>';
 }
+function javascriptStackMarkup(report) {
+  const queries = arrayOf(report.evidence).filter((entry) => typeof entry.command === "string" && entry.command.startsWith("Forensicator MCP javascript_stack;")).map((entry) => {
+    let data = null;
+    try {
+      const parsed = JSON.parse(entry.text);
+      if (parsed?.kind === "forensicator.javascriptStack.v1" && Array.isArray(parsed.frames)) data = parsed;
+    } catch { /* Failed or older queries may have no complete JSON result. */ }
+    return { entry, data };
+  });
+  if (!queries.length) return "";
+  let markup = '<section class="card"><h3>JavaScript and optimized frames</h3><p class="hint">Forensicator recovery from captured V8 memory. These are physical-frame observations; inlined logical frames and async ancestry are unavailable. Function-start lines are not exact executing source locations.</p>';
+  for (const {entry, data} of queries) {
+    markup += `<h4>Recovery query ${esc(entry.id)} · ${esc(statusLabel(entry.status))}</h4>` + evidenceReferences([entry.id], report);
+    if (entry.error) markup += `<p class="detail-warning">${esc(entry.error)}</p>`;
+    if (!data) {
+      markup += '<p class="muted">No complete JavaScript recovery result was retained. Missing recovery does not establish that JavaScript frames were absent.</p>';
+      continue;
+    }
+    markup += detailFields([["OS thread", data.threadId ?? "All observed threads"], ["Frames with function metadata", data.recoveredFrameCount], ["Optimized frames with metadata", data.optimizedFrameCount], ["Frame candidates", data.candidateFrameCount], ["Frames omitted from this excerpt", data.omittedFrameCount], ["V8 cage memory observed", data.heapCaptured ? "Yes" : "Not established"]]);
+    if (data.frames.length) {
+      markup += '<div class="table-scroll" role="region" aria-label="Recovered JavaScript frames" tabindex="0"><table class="stack-table"><thead><tr><th scope="col">Thread / depth</th><th scope="col">JavaScript function</th><th scope="col">Frame evidence</th><th scope="col">JIT metadata</th></tr></thead><tbody>';
+      markup += data.frames.map((frame) => `<tr><td>${esc(frame.threadId)} / ${esc(frame.depth)}<br>${esc(frame.frameType)}</td><td><span class="mono">${esc(frame.function || "Unresolved function candidate")}</span><div class="muted">${esc(frame.script || "Script unavailable")}${frame.functionStartLine != null ? " · function starts at line " + esc(frame.functionStartLine) : " · function-start line unavailable"}</div><div class="muted">${frame.metadataRecovered ? "Function metadata recovered" : "Classification only; function metadata unavailable"}</div></td><td class="mono">${detailFields([["Frame PC", frame.framePc], ["Frame pointer", frame.framePointer]])}</td><td>${frame.jit ? detailFields([["Code object", frame.jit.codeResolution?.codeObject], ["Entrypoint", frame.jit.codeResolution?.entrypoint], ["Feedback vector", frame.jit.feedbackVector], ["Feedback slots", frame.jit.slotCount], ["SFI cross-check", frame.jit.sfiCrosscheck ? "Passed" : "Not established"]]) : '<span class="muted">Not requested or unavailable</span>'}</td></tr>`).join("");
+      markup += '</tbody></table></div>';
+    } else {
+      markup += '<p class="muted">No JavaScript frame candidates were recovered for the selected thread scope.</p>';
+    }
+    markup += detailItems("Recovery limitations", data.limitations, "Completeness was not established.");
+  }
+  return markup + '</section>';
+}
 function cancelDetailRequest() {
   detailState.version++;
   detailState.controller?.abort();
@@ -638,6 +668,7 @@ function richReportMarkup(envelope) {
   if (frames.length) markup += '<div class="table-scroll" role="region" aria-label="Captured native stack" tabindex="0"><table class="stack-table"><thead><tr><th scope="col">Frame</th><th scope="col">Location</th><th scope="col">Addresses</th><th scope="col">Resolution / unwind</th></tr></thead><tbody>' + frames.map((frame) => `<tr><td>${esc(frame.index)}</td><td>${esc(frame.module || "Unknown module")}<br><span class="mono">${esc(frame.function || "Unresolved function")}${frame.displacement ? " + " + esc(frame.displacement) : ""}</span>${frame.sourceFile ? '<div class="muted">' + esc(frame.sourceFile) + (frame.sourceLine != null ? ":" + esc(frame.sourceLine) : " · line unavailable") + '</div>' : '<div class="muted">Source location not captured</div>'}${evidenceReferences(frame.evidenceRefs, report)}</td><td class="mono">${detailFields([["Instruction pointer", frame.instructionPointer], ["Stack pointer", frame.stackPointer], ["Frame pointer", frame.framePointer], ["Return address", frame.returnAddress], ["Module RVA", frame.moduleRva]])}</td><td>${esc(statusLabel(frame.resolution))}<br><span class="muted">Unwind: ${esc(statusLabel(frame.unwind))}</span></td></tr>`).join("") + '</tbody></table></div>';
   else markup += '<p class="muted">No stack frames were captured.</p>';
   markup += detailItems("Stack limitations", stack.limitations, "No stack limitations recorded; unwind quality still follows each frame's status.") + '</section>';
+  markup += javascriptStackMarkup(report);
   markup += '<section class="card"><h3>Symbols and evidence</h3><h4>Module and PDB provenance</h4>';
   const pdb = (value) => value ? `${known(value.guid)} · age ${known(value.age)}` : "Not captured";
   markup += modules.length ? modules.map((module) => `<details><summary>${esc(module.module || "Unknown module")} · ${esc(statusLabel(module.quality))}</summary>${detailFields([["Image base", module.imageBase], ["Image size", module.imageSize], ["Timestamp", module.timestamp], ["Expected PDB GUID / age", pdb(module.expectedPdb)], ["Loaded PDB GUID / age", pdb(module.loadedPdb)], ["PDB path", module.pdbPath]])}${evidenceReferences(module.evidenceRefs, report)}</details>`).join("") : '<p class="muted">No module identity records were captured. Function names alone do not establish matching symbols.</p>';

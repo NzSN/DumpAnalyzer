@@ -22,7 +22,7 @@ verified dump bytes → offline essential CDB pass → optional symbol CDB pass
                                                        v1 bound summary fallback
 ```
 
-The canonical report contains exception record/context, address-bearing native stack, module/PDB qualification, causal assessment, retained command excerpts and explicit completeness limits. Addresses and exception parameters are hexadecimal strings. The implemented parser targets native Windows x64; it does not reconstruct JavaScript, asynchronous or managed stacks.
+The canonical report contains exception record/context, address-bearing native stack, module/PDB qualification, causal assessment, retained command excerpts and explicit completeness limits. Addresses and exception parameters are hexadecimal strings. The CDB parser targets native Windows x64. With Forensicator configured, the DSH reasoner can request `forensicator_javascript_stack` to recover physical JavaScript and optimized JIT frames from captured V8 metadata. Its bounded observations stay in retained evidence and render in a separate JavaScript frame table; they do not replace the native stack or change the canonical report schema. Inlined logical frames, asynchronous ancestry and managed stacks are not reconstructed. Source lines identify function starts, not exact executing statements. See [Forensicator recovery and limits](dsh-http-guide.md#forensicator-mcp-tools).
 
 ### Two-pass collection and quality
 

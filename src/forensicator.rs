@@ -17,15 +17,16 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Take};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::time::{Instant, timeout_at};
 
-use crate::analysis_tools::{
-    AnalysisTools, CdbSession, MAX_QUERY_OUTPUT_BYTES, QUERY_TIMEOUT, QueryBudget,
-};
+use crate::analysis_tools::{AnalysisTools, CdbSession, QUERY_TIMEOUT, QueryBudget};
 use crate::report::{CaptureStatus, Evidence, MAX_SECTION_BYTES};
 use crate::runner::ExecTransport;
 use crate::types::{AnalyzerError, Result, RunRequest};
 
 const PROTOCOLS: [&str; 3] = ["2025-11-25", "2025-06-18", "2024-11-05"];
 const TOOLS: [&str; 4] = ["inspect", "analyze", "match", "list_plugins"];
+/// V8 emits all walked threads before the host can select a compact result.
+/// This is still bounded by the shared run allocation (at most 1/4 of output).
+pub(crate) const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
 pub struct ForensicatorTools {
     debugger: Arc<dyn AnalysisTools>,
@@ -74,6 +75,16 @@ impl ForensicatorTools {
         match &query {
             Query::Analyze(args) => {
                 arguments["plugins"] = json!(args.plugins);
+                if let Some(symbols) = &args.symbols {
+                    arguments["symbols"] = json!(relative_path(&workspace, symbols, true).await?);
+                }
+            }
+            Query::Javascript(args) => {
+                arguments["plugins"] = if args.include_jit {
+                    json!(["v8", "jit"])
+                } else {
+                    json!(["v8"])
+                };
                 if let Some(symbols) = &args.symbols {
                     arguments["symbols"] = json!(relative_path(&workspace, symbols, true).await?);
                 }
@@ -184,15 +195,19 @@ impl AnalysisTools for ForensicatorTools {
         }
         self.budget.attempt()?;
         let query = Query::parse(name, arguments.clone())?;
+        let javascript = match &query {
+            Query::Javascript(options) => Some(options.clone()),
+            _ => None,
+        };
         // Reserve the remaining acquisition budget, including protocol
         // envelopes and duplicated text/structuredContent. Refund observed
         // unused bytes only after the full response, never on cancellation.
         let (index, mut evidence, cap) = self.budget.reserve(
             format!(
                 "Forensicator MCP {}; {arguments}; dump=current verified dump",
-                query.name()
+                query.label()
             ),
-            MAX_QUERY_OUTPUT_BYTES,
+            MAX_OUTPUT_BYTES,
         );
         let deadline = self.deadline.min(Instant::now() + QUERY_TIMEOUT);
         let mut unused_bytes = 0;
@@ -217,10 +232,29 @@ impl AnalysisTools for ForensicatorTools {
                 evidence.error = Some(error.message().into());
             }
             Some(Ok(Ok(result))) => {
-                evidence.text = result.text;
                 unused_bytes = cap.saturating_sub(result.wire_bytes);
                 let retained_cap = cap.min(MAX_SECTION_BYTES);
-                evidence.truncated = evidence.text.len() > retained_cap;
+                let projected = match javascript {
+                    Some(options) if !result.is_error => {
+                        crate::javascript::project(&result.text, &options, retained_cap)
+                    }
+                    _ => Ok(crate::javascript::Projection {
+                        text: result.text,
+                        truncated: false,
+                    }),
+                };
+                match projected {
+                    Ok(projected) => {
+                        evidence.text = projected.text;
+                        evidence.truncated =
+                            projected.truncated || evidence.text.len() > retained_cap;
+                    }
+                    Err(message) => {
+                        evidence.error = Some(message.into());
+                        self.budget.finish(index, evidence.clone(), unused_bytes);
+                        return Ok(evidence);
+                    }
+                }
                 let mut end = retained_cap.min(evidence.text.len());
                 while !evidence.text.is_char_boundary(end) {
                     end -= 1;
@@ -234,7 +268,7 @@ impl AnalysisTools for ForensicatorTools {
                 } else if evidence.truncated {
                     (
                         CaptureStatus::Truncated,
-                        Some("Forensicator evidence exceeded the retained-output limit".into()),
+                        Some("Forensicator evidence was limited by the requested frame or retained-output budget".into()),
                     )
                 } else {
                     (CaptureStatus::Present, None)
@@ -261,6 +295,10 @@ fn tool_definitions() -> Vec<Value> {
         ("match", "Compare this dump's module identities with PE/PDB files already staged in this run's workspace. Requires at least one artifact. Mismatch and unknown are successful forensic results; this does not upgrade the host's symbol status.",
             json!({"exes":files,"pdbs":files}), vec![]),
         ("list_plugins", "List Forensicator analyzer names and descriptions before selecting a focused analysis.", json!({}), vec![]),
+        ("javascript_stack", "Recover physical JavaScript frames, including optimized Maglev/TurboFan frames, using Forensicator's v8 analyzer. Optionally add jit code/feedback metadata. Thread IDs are OS IDs, not CDB indexes. Missing memory/layout support leaves unresolved candidates. Does not expand inlined frames; source lines are function starts, not executing lines.",
+            json!({"thread_id":{"type":"integer","minimum":0,"maximum":u32::MAX},
+                "max_frames":{"type":"integer","minimum":1,"maximum":32,"default":16},
+                "include_jit":{"type":"boolean","default":false},"symbols":file}), vec![]),
     ].into_iter().map(|(name, description, properties, required)| json!({
         "name":format!("forensicator_{name}"),"description":description,
         "inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},
@@ -291,6 +329,7 @@ struct Match {
 enum Query {
     Inspect,
     Analyze(Analyze),
+    Javascript(crate::javascript::Options),
     Match(Match),
     ListPlugins,
 }
@@ -320,9 +359,17 @@ impl Query {
     fn name(&self) -> &'static str {
         match self {
             Self::Inspect => "inspect",
-            Self::Analyze(_) => "analyze",
+            Self::Analyze(_) | Self::Javascript(_) => "analyze",
             Self::Match(_) => "match",
             Self::ListPlugins => "list_plugins",
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        if matches!(self, Self::Javascript(_)) {
+            "javascript_stack"
+        } else {
+            self.name()
         }
     }
 
@@ -357,6 +404,20 @@ impl Query {
                     ));
                 }
                 Ok(Self::Analyze(args))
+            }
+            "forensicator_javascript_stack" => {
+                let args: crate::javascript::Options = decode(args)?;
+                if !(1..=32).contains(&args.max_frames)
+                    || args
+                        .symbols
+                        .as_deref()
+                        .is_some_and(|path| !valid_relative_path(path))
+                {
+                    return Err(invalid(
+                        "Select 1 to 32 JavaScript frames and workspace-relative symbols",
+                    ));
+                }
+                Ok(Self::Javascript(args))
             }
             "forensicator_match" => {
                 let args: Match = decode(args)?;

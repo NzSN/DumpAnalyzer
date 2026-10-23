@@ -207,7 +207,12 @@ the latest stable GitHub release into
 `--forensicator-version v0.0.1` or skip with `--skip-forensicator`.
 The reasoner then discovers
 `forensicator_inspect`, `forensicator_analyze`, `forensicator_match`, and
-`forensicator_list_plugins` under the same `dump_analysis` namespace. The
+`forensicator_list_plugins` under the same `dump_analysis` namespace, plus
+`forensicator_javascript_stack` for focused V8 frame recovery. It recovers
+physical JavaScript and optimized JIT frames when the captured heap supports
+them, with optional code/feedback metadata. Reports render these observations
+with their evidence references and limitations; inlined logical frames and
+async ancestry remain unavailable. The
 analyzer invokes `forensicator mcp` locally, supplies the verified dump, and
 retains results as citable evidence within the shared investigation budget.
 See [Forensicator setup and limits](docs/dsh-http-guide.md#forensicator-mcp-tools).

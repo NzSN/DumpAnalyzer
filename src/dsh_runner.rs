@@ -663,7 +663,15 @@ impl<T: ExecTransport + 'static> ToolRunner for DshCdbRunner<T> {
         collection.bounds.wall_timeout = request.bounds.wall_timeout.mul_f64(0.8);
         let tool_mode = self.analysis_tools || self.forensicator_bin.is_some();
         let (mut output, session) = if tool_mode {
-            let (output, session) = self.collector.begin_session(collection, deadline).await?;
+            let query_limit = if self.forensicator_bin.is_some() {
+                crate::forensicator::MAX_OUTPUT_BYTES
+            } else {
+                crate::analysis_tools::MAX_QUERY_OUTPUT_BYTES
+            };
+            let (output, session) = self
+                .collector
+                .begin_session_with_query_limit(collection, deadline, query_limit)
+                .await?;
             (output, Some(session))
         } else {
             let output = tokio::time::timeout_at(deadline, self.collector.run(collection))
@@ -690,7 +698,7 @@ impl<T: ExecTransport + 'static> ToolRunner for DshCdbRunner<T> {
             .provenance
             .analysis_revision
             .push_str(if self.forensicator_bin.is_some() {
-                "reasoner=dsh-http-mcp-v1;forensicator=mcp-stdio-v1"
+                "reasoner=dsh-http-mcp-v1;forensicator=mcp-stdio-v2"
             } else if tool_mode {
                 "reasoner=dsh-http-mcp-v1"
             } else {

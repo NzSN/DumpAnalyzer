@@ -108,7 +108,8 @@ argument, call, time and output limits; the adapter caps each MCP call at 30
 seconds and disables automatic reconnect. Use a distinct analyzer version
 when enabling tools so existing report identities remain reproducible.
 
-The same endpoint can expose Forensicator's four native stdio MCP tools.
+The same endpoint can expose Forensicator's four native stdio MCP tools and
+the focused `forensicator_javascript_stack` recovery tool.
 Set `DUMP_ANALYZER_FORENSICATOR_BIN` in the **daemon** environment to the
 absolute built executable, with `DUMP_ANALYZER_DSH_TOOLS=on`. DumpAnalyzer
 launches `forensicator mcp` and publishes the `forensicator_*` tools through

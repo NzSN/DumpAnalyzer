@@ -205,7 +205,8 @@ evidence, not production readiness; the provider is off by default.
 
 The optional `DUMP_ANALYZER_DSH_TOOLS=on` profile adds a run-scoped MCP bridge
 for bounded debugger investigation. Setting `DUMP_ANALYZER_FORENSICATOR_BIN`
-also adds Forensicator's four stdio MCP tools through that bridge. The host
+also adds Forensicator's four stdio MCP tools through that bridge, plus a
+focused `forensicator_javascript_stack` projection of its V8/JIT analyzers. The host
 pins the verified local dump, constrains additional artifact paths to the
 workspace, and shares call/output/evidence budgets across both backends.
 Queries retain citable evidence before the model receives their results;
@@ -214,6 +215,13 @@ The bridge is revoked before final evidence assembly. Forensicator children
 are terminated and reaped on completion or cancellation. See the
 [MCP setup and limits](dsh-http-guide.md#optional-mcp-debugger-investigation)
 and [Forensicator integration](dsh-http-guide.md#forensicator-mcp-tools).
+
+The JavaScript projection preserves physical frame identities, frame PCs,
+function/script metadata and optional JIT observations as bounded query
+evidence. It does not expand inlined frames, infer missing names, or convert
+function-start lines into executing source locations. Whole-record truncation
+keeps the evidence JSON valid. The dashboard renders these retained records
+without adding fields to the canonical report contract.
 
 `verdict::prepare_report` constructs and validates the canonical document and
 its compact projection. SQLite commits canonical evidence, digest, projection

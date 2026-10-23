@@ -54,6 +54,10 @@ for line in sys.stdin:
             continue
         data = {"tool": params["name"], "arguments": params["arguments"],
                 "confidence": "unknown", "overall": "mismatch"}
+        if mode == "javascript":
+            assert params["name"] == "analyze"
+            data = json.loads(Path("javascript.json").read_text())
+            data["plugins"] = [p for p in data["plugins"] if p["name"] in params["arguments"]["plugins"]]
         if mode == "retained_limit":
             data["large"] = "é" * 10000
         result = {"structuredContent": data, "isError": False,

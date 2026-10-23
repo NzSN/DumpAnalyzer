@@ -1,0 +1,159 @@
+{
+  "plugins": [
+    {
+      "name": "v8",
+      "count": 0,
+      "strings": null,
+      "vtables": null,
+      "linked_lists": null,
+      "arrays": null,
+      "chunks": null,
+      "shape_clusters": null,
+      "custom": [
+        {
+          "v8_frames": [
+            {
+              "thread_id": 42,
+              "depth": 0,
+              "frame_type": "OptimizedJavaScript",
+              "native_symbol": "0x200001010",
+              "native_offset": 0,
+              "return_address": "0x200001010",
+              "frame_pointer": "0x10000",
+              "js_function_name": "optimizedFunction",
+              "script_name": "fixture.js",
+              "script_line": 2
+            },
+            {
+              "thread_id": 42,
+              "depth": 1,
+              "frame_type": "JavaScript",
+              "native_symbol": "0x7FFA1000",
+              "native_offset": 0,
+              "return_address": "0x7FFA1000",
+              "frame_pointer": "0x10080",
+              "js_function_name": "plainFunction",
+              "script_name": "fixture.js",
+              "script_line": null
+            }
+          ]
+        },
+        {
+          "v8_frame_count": 2
+        },
+        {
+          "v8_heap_captured": true
+        }
+      ]
+    },
+    {
+      "name": "jit",
+      "count": 0,
+      "strings": null,
+      "vtables": null,
+      "linked_lists": null,
+      "arrays": null,
+      "chunks": null,
+      "shape_clusters": null,
+      "custom": [
+        {
+          "jit_frame_count": 2
+        },
+        {
+          "jit_frames": [
+            {
+              "thread_id": 42,
+              "depth": 0,
+              "function_name": "optimizedFunction",
+              "script_name": "fixture.js",
+              "script_line": 2,
+              "feedback_vector": "0x100061000",
+              "slot_count": 3,
+              "sfi_crosscheck": true,
+              "feedback_path": "feedback_cell_direct",
+              "code_resolution": {
+                "dispatch_handle": "0x65536",
+                "entrypoint": "0x200001000",
+                "code_object": "0x600000100",
+                "return_address": "0x200001010",
+                "native_offset": "0x16",
+                "caller_code_object": "0x600000100"
+              },
+              "feedback_slots": [
+                {
+                  "index": 0,
+                  "raw": "0x0",
+                  "state": {
+                    "state": "uninitialized"
+                  }
+                },
+                {
+                  "index": 1,
+                  "raw": "0x458753",
+                  "state": {
+                    "instance_type": null,
+                    "object": "0x100070000",
+                    "state": "monomorphic"
+                  }
+                },
+                {
+                  "index": 2,
+                  "raw": "0x84",
+                  "state": {
+                    "state": "smi",
+                    "value": 42
+                  }
+                }
+              ]
+            },
+            {
+              "thread_id": 42,
+              "depth": 1,
+              "function_name": "plainFunction",
+              "script_name": "fixture.js",
+              "script_line": null,
+              "feedback_vector": "0x100060000",
+              "slot_count": 3,
+              "sfi_crosscheck": true,
+              "feedback_path": "feedback_cell_direct",
+              "code_resolution": {
+                "dispatch_handle": "0x0",
+                "entrypoint": "0x7FFA1000",
+                "code_object": "0x600000000",
+                "return_address": "0x7FFA1000",
+                "native_offset": "0x0",
+                "caller_code_object": "0x600000000"
+              },
+              "feedback_slots": [
+                {
+                  "index": 0,
+                  "raw": "0x0",
+                  "state": {
+                    "state": "uninitialized"
+                  }
+                },
+                {
+                  "index": 1,
+                  "raw": "0x458753",
+                  "state": {
+                    "instance_type": null,
+                    "object": "0x100070000",
+                    "state": "monomorphic"
+                  }
+                },
+                {
+                  "index": 2,
+                  "raw": "0x84",
+                  "state": {
+                    "state": "smi",
+                    "value": 42
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
