@@ -30,6 +30,8 @@ Documentation map ([full index](docs/README.md)):
 - [DSH HTTP provider guide](docs/dsh-http-guide.md) covers the optional
   `dsh-http` backend: adapter deployment, route selection, credentials, and
   its dated live-qualification scope.
+- [Deployment assets](deploy/README.md) cover the install script, systemd
+  units, environment templates, and the config/state split.
 
 ## Build and test
 

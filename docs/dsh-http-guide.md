@@ -25,6 +25,27 @@ DumpAnalyzer (Rust daemon)                    DSH adapter (Node, confined)
 - The Windows analysis box over SSH, as for every provider
   (`DUMP_ANALYZER_SSH_TARGET`); the DSH side never touches it.
 
+## Scripted deployment
+
+`deploy/deploy.py` performs the full install into the live user layout, or
+under a staging directory for inspection:
+
+```sh
+python3 deploy/deploy.py --dry-run                 # print the plan, change nothing
+python3 deploy/deploy.py --root /tmp/stage         # stage a tree under /tmp/stage
+python3 deploy/deploy.py                           # deploy to the real user layout
+python3 deploy/deploy.py --skip-dsh                # daemon only, no adapter
+```
+
+It builds the release binary (unless `--no-build`), backs up a replaced
+binary with a dated suffix, installs helper scripts, units, the adapter, and
+the confined DSH profile — and **never overwrites user configuration**:
+existing `environment`, `dsh-adapter.env`, `dsh-routes.json`, and an
+installed profile patch are kept unless `--force-config` is given. It never
+starts or restarts services; it prints the remaining manual steps (fill
+secrets, enable the adapter, restart the daemon). The manual path below
+remains the reference for what the script does.
+
 ## Step 1 — the confined analyzer profile (one-time)
 
 The adapter drives a dedicated, zero-tool DSH profile. Never reuse an
