@@ -83,6 +83,33 @@ with adapter HTTP 500 → deterministic fallback. A wiremock test also asserts
 the key appears in the create body yet never in the prompt or the retained
 report evidence.
 
+## Addendum 2: analyzer-selected route (provider/model/effort/catalog sizes)
+
+Route selection moved from profile-pinned to analyzer-configured:
+`DUMP_ANALYZER_DSH_PROVIDER` / `_DSH_MODEL` / `_DSH_REASONING_EFFORT` /
+`_DSH_CONTEXT_WINDOW` / `_DSH_MAX_TOKENS` flow through the session-create
+body; the adapter resolves them against its allowlisted route table
+([deploy/dsh-adapter/routes.json](../../../deploy/dsh-adapter/routes.json)),
+pins the route per session, and drives it through a generated `--patch`
+overlay (0600, pruned with the session). Overlay semantics verified on the
+installed runtime: a patch entry replaces the target's config wholesale, so
+the adapter always emits the complete provider block. Live evidence (adapter
+launched without `OPENCODE_API_KEY`; key per session via
+`DUMP_ANALYZER_DSH_LIVE_API_KEY`):
+
+| Run | Route | Result |
+| --- | --- | --- |
+| Alternate route | `opencode-go/qwen3.8-flash`, effort `low` | adopted 3,876-byte assessment (`Hypothesis`); provenance `opencode-go/qwen3.8-flash`; label `effort=low`; session `dshan-298121fceaec4427956b2ef3`; trajectory `8 events sha256:e0df10d1f04b0673`; 37.4 s |
+| Request-supplied catalog numbers | `opencode-go/deepseek-v4.1-flash`, `contextWindow=1000000`, `maxTokens=384000` | adopted 2,227-byte assessment (`Unknown`); session `dshan-5034055a0595496eb18686d2`; trajectory `8 events sha256:8c9167eab792bede`; 28.6 s |
+| Default route (backward compat) | adapter default | provenance `opencode-go/deepseek-v4.1-flash`; adopted assessment (`Unknown`); 46.5 s |
+| Non-allowlisted provider | `evil-gateway` | HTTP 400 `provider evil-gateway is not allowlisted`; no session created |
+| Unlisted model without numbers | `brand-new-model` | HTTP 400 with guidance to supply contextWindow/maxTokens; no session created |
+
+Adapter boot check composed every allowlisted route's overlay before
+listening; zero overlay files remained after session prunes. Wiremock
+coverage added: route fields in the create body, effort in the evidence
+label, config enum/bounds/ordering validation.
+
 ## Reproduce
 
 ```sh

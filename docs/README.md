@@ -15,6 +15,7 @@ its own source revision and narrower execution scope.
 | [Analyzer design](analyzer-design.md) | Component contracts, storage, recovery, trust boundaries, and formal-model scope. |
 | [Rich reports](rich-reports.md) · [HTML](rich-reports.html) | Typed evidence, deterministic assessment, symbol qualification, canonical report storage, detail APIs, and full-delivery states. |
 | [Analysis triggers](trigger-paths.html) | Discovery, automatic claims, recovery, manual requests, report reuse, rescan, and delivery. |
+| [DSH HTTP provider guide](dsh-http-guide.md) | `dsh-http` setup, adapter deployment, route selection, credentials, verification, and operations. |
 | [Domain vocabulary](../CONTEXT.md) | Project terms and responsibilities. |
 | [Report fixtures](../tests/fixtures/report-v2/README.md) | Source fixtures and regression-test boundaries. |
 
@@ -35,6 +36,7 @@ does not re-inspect the code or refresh a source-revision claim.
 | [2026-10-20 configured reasoner qualification](qualification/live-reasoner-2026-10-20/README.md) | Passed the evidence-only CLI/gateway reasoner subgate at source `f269ce8`; alias `opus` reported model `deepseek-flash`. This does not qualify an Anthropic Claude model, full P6 or deployment. |
 | [2026-10-20 production rollout checkpoint](qualification/production-rollout-2026-10-20/README.md) | Analyzer application `f269ce8` rebuilt/deployed in manual/write-back-off mode; companion upgraded `69eb3d3` → `7c2a51b` for rich reports, excluding later WH1 work. Deployment passed; publication/read-back/restart canary and full P6 were still pending at this checkpoint. |
 | [2026-10-20 approved production canary](qualification/production-canary-2026-10-20/README.md) | One explicitly approved 63,438-byte real-dump report published, replayed and read back exactly, then preserved through companion restart. The P6 production rollout and bounded canary gates passed; automatic scheduling/write-back remain off. |
+| [2026-10-23 `dsh-http` live qualification](qualification/dsh-http-2026-10-23/README.md) | Bounded contract/confinement gates for the DSH provider against the real runtime, including route selection and the per-session key path. Dated evidence; not production rollout, load, or delivery qualification. |
 
 Recorded PIDs, service state, endpoints, file locations, hashes, test counts,
 and remote companion status are snapshot-specific. The earlier documentation

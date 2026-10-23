@@ -172,7 +172,16 @@ The model credential is analyzer-owned: `DUMP_ANALYZER_DSH_API_KEY` is
 forwarded once per session over the token-protected channel and injected by
 the adapter into each headless run's environment, never persisted and never
 entering prompts, evidence, or reports; without it, the adapter's own
-launch-environment key applies.
+launch-environment key applies. The route is analyzer-selected per session:
+`DUMP_ANALYZER_DSH_PROVIDER` (allowlisted by the adapter's route table — a
+request can never introduce an unconfigured gateway), `_DSH_MODEL`,
+`_DSH_REASONING_EFFORT` (`low`/`medium`/`high`/`max`), and
+`_DSH_CONTEXT_WINDOW`/`_DSH_MAX_TOKENS` (bounded, ordered) for models the
+table does not pre-list. The adapter pins the resolved route per session,
+drives it through a generated `--patch` overlay pruned with the session,
+and reports `provider/model`, which the report's provenance records. The
+route tuple is part of the capture profile: use a distinct
+`DUMP_ANALYZER_VERSION` per route on a live deployment.
 The service is analyzer-owned and confined: loopback-bound (plain HTTP is
 accepted for loopback only, mirroring the ledger URL policy) or HTTPS with an
 optional scoped bearer token, serving a zero-tool preset

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dump_analyzer::config::SecretToken;
-use dump_analyzer::dsh_runner::{DshCdbRunner, HttpDshApi};
+use dump_analyzer::dsh_runner::{DshCdbRunner, DshRoute, HttpDshApi};
 use dump_analyzer::report::CauseStatus;
 use dump_analyzer::runner::{ExecTransport, SshCdbRunner, TransportOutput};
 use dump_analyzer::types::{AnalyzerError, RunBounds, RunRequest, ToolRunner};
@@ -433,6 +433,54 @@ async fn collection_failure_never_touches_the_service() {
 }
 
 #[tokio::test]
+async fn route_fields_flow_into_session_create_and_label() {
+    let server = MockServer::start().await;
+    mount_lifecycle(
+        &server,
+        ResponseTemplate::new(200).set_body_json(turn(candidate())),
+    )
+    .await;
+    let dir = tempfile::tempdir().expect("directory");
+    let request = request(dir.path(), BOUNDS);
+    let api =
+        HttpDshApi::new(Url::parse(&server.uri()).expect("wiremock URL"), None, None).expect("api");
+    let route = DshRoute {
+        provider: Some("opencode-go".into()),
+        model: Some("qwen3.8-flash".into()),
+        reasoning_effort: Some("low".into()),
+        context_window: Some(1_000_000),
+        max_tokens: Some(131_072),
+    };
+    let output = DshCdbRunner::new(FakeTransport::default(), Arc::new(api), "analyzer-triage")
+        .with_route(route)
+        .run(request)
+        .await
+        .expect("report");
+    let requests = server.received_requests().await.expect("requests");
+    let create = requests[0].body_json::<Value>().expect("create body");
+    assert_eq!(create["preset"], "analyzer-triage");
+    assert_eq!(create["provider"], "opencode-go");
+    assert_eq!(create["model"], "qwen3.8-flash");
+    assert_eq!(create["reasoningEffort"], "low");
+    assert_eq!(create["contextWindow"], 1_000_000);
+    assert_eq!(create["maxTokens"], 131_072);
+    assert!(create.get("apiKey").is_none(), "no key when unconfigured");
+    let capture = output.capture.expect("capture");
+    // The adapter-reported route wins provenance; the effort is anchored in
+    // the evidence label.
+    assert_eq!(
+        capture.provenance.model.as_deref(),
+        Some("dsh-fixture-model")
+    );
+    let assessment = capture
+        .evidence
+        .iter()
+        .find(|item| item.id == "assessment-model")
+        .expect("assessment evidence");
+    assert!(assessment.command.contains("effort=low"));
+}
+
+#[tokio::test]
 async fn api_key_is_forwarded_at_create_and_never_leaks() {
     let server = MockServer::start().await;
     mount_lifecycle(
@@ -494,6 +542,17 @@ async fn live_dsh_http_provider_qualification() {
     let api_key = std::env::var("DUMP_ANALYZER_DSH_LIVE_API_KEY")
         .ok()
         .map(SecretToken::new);
+    let route = DshRoute {
+        provider: std::env::var("DUMP_ANALYZER_DSH_LIVE_PROVIDER").ok(),
+        model: std::env::var("DUMP_ANALYZER_DSH_LIVE_MODEL").ok(),
+        reasoning_effort: std::env::var("DUMP_ANALYZER_DSH_LIVE_REASONING_EFFORT").ok(),
+        context_window: std::env::var("DUMP_ANALYZER_DSH_LIVE_CONTEXT_WINDOW")
+            .ok()
+            .map(|raw| raw.parse().expect("live context window")),
+        max_tokens: std::env::var("DUMP_ANALYZER_DSH_LIVE_MAX_TOKENS")
+            .ok()
+            .map(|raw| raw.parse().expect("live max tokens")),
+    };
     let dir = tempfile::tempdir().expect("directory");
     let bounds = RunBounds {
         wall_timeout: Duration::from_secs(170),
@@ -509,6 +568,7 @@ async fn live_dsh_http_provider_qualification() {
     )
     .expect("DSH API client");
     let output = DshCdbRunner::new(FakeTransport::default(), Arc::new(api), "analyzer-triage")
+        .with_route(route)
         .run(request)
         .await
         .expect("live report");

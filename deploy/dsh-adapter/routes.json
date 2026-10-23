@@ -1,0 +1,20 @@
+{
+  "default": {"provider": "opencode-go", "model": "deepseek-v4.1-flash", "reasoningEffort": "max"},
+  "providers": {
+    "opencode-go": {
+      "kind": "pi-ai",
+      "apiKeyEnv": "OPENCODE_API_KEY",
+      "models": {
+        "deepseek-v4.1-flash": {"contextWindow": 1000000, "maxTokens": 384000},
+        "deepseek-v4-pro": {"contextWindow": 1000000, "maxTokens": 384000},
+        "qwen3.7-plus": {"contextWindow": 1000000, "maxTokens": 65536},
+        "qwen3.8-flash": {"contextWindow": 1000000, "maxTokens": 131072},
+        "qwen3.8-max": {"contextWindow": 1000000, "maxTokens": 131072},
+        "minimax-m3": {"contextWindow": 1000000, "maxTokens": 131072},
+        "claude-haiku-5-5": {"contextWindow": 1000000, "maxTokens": 128000},
+        "gemini-4-argon-contributor": {"contextWindow": 1048576, "maxTokens": 65536},
+        "cat-jam-free": {"contextWindow": 262144, "maxTokens": 131072}
+      }
+    }
+  }
+}

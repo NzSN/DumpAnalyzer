@@ -35,10 +35,23 @@ profile. Deployment tool, not part of the Rust crate.
    the adapter itself speaks plain HTTP.
 
    Model key sources, in order: a per-session `apiKey` from the analyzer's
-   `DUMP_ANALYZER_DSH_API_KEY` (injected into each headless child as
-   `DSH_ANALYZER_API_KEY_ENV`, default `OPENCODE_API_KEY`; held in memory
-   only, dropped at session prune), then the adapter's launch environment,
-   then `$DSH_HOME/.env`.
+   `DUMP_ANALYZER_DSH_API_KEY` (injected into each headless child under the
+   selected provider's `apiKeyEnv`; held in memory only, dropped at session
+   prune), then the adapter's launch environment, then `$DSH_HOME/.env`.
+
+## Route table
+
+The analyzer may select a route per session (`provider`, `model`,
+`reasoningEffort` `low|medium|high|max`, and catalog `contextWindow` /
+`maxTokens` for models the table does not list). Selectable providers are
+allowlisted in `routes.json` (path: `DSH_ANALYZER_ROUTES`); a request can
+never introduce a gateway the deployment did not configure. The selected
+route generates a `--patch` overlay (`$DSH_HOME/overlays/`, mode 0600,
+pruned with the session) overriding the profile's `agent-default-model`
+and, for `kind: "pi-ai"` providers, the complete provider block — overlays
+replace an entry's config wholesale (verified on dsh 0.2.1-rc.2). At boot
+the adapter composes every allowlisted route's overlay and refuses to start
+on failure; `DSH_ANALYZER_SKIP_BOOT_CHECK=1` skips this.
 
 3. Point the analyzer at it:
 

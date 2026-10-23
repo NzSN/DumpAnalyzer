@@ -27,6 +27,9 @@ Documentation map ([full index](docs/README.md)):
 - [Report fixture inventory](tests/fixtures/report-v2/README.md) and
   [qualification fixtures](tests/fixtures/report-v2/qualification/README.md)
   record reproducible evidence and its limits.
+- [DSH HTTP provider guide](docs/dsh-http-guide.md) covers the optional
+  `dsh-http` backend: adapter deployment, route selection, credentials, and
+  its dated live-qualification scope.
 
 ## Build and test
 
@@ -141,8 +144,13 @@ export DUMP_ANALYZER_RUNNER='dsh-http'
 export DUMP_ANALYZER_DSH_BASE_URL='http://127.0.0.1:4181'  # loopback; https required off-loopback
 export DUMP_ANALYZER_DSH_TOKEN=''           # optional scoped bearer token
 export DUMP_ANALYZER_DSH_API_KEY=''         # optional model key, forwarded per session
-export DUMP_ANALYZER_DSH_MODEL=''           # optional override
 export DUMP_ANALYZER_DSH_PRESET='analyzer-triage'  # default; served with no tools
+# Route selection (optional; the adapter's route table allowlists providers):
+export DUMP_ANALYZER_DSH_PROVIDER=''        # e.g. opencode-go
+export DUMP_ANALYZER_DSH_MODEL=''           # model within the provider's catalog
+export DUMP_ANALYZER_DSH_REASONING_EFFORT=''  # low|medium|high|max
+export DUMP_ANALYZER_DSH_CONTEXT_WINDOW=''  # catalog size for unlisted models
+export DUMP_ANALYZER_DSH_MAX_TOKENS=''      # <= context window
 # Confinement: own DSH profile/state dir, loopback bind (or firewall + TLS),
 # egress limited to the model API. Use a distinct DUMP_ANALYZER_VERSION when
 # switching an existing deployment so earlier reports are preserved.

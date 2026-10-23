@@ -17,12 +17,18 @@
 //! minimal contract served by the pinned deployment's analyzer adapter; the
 //! endpoint shapes live only here:
 //!
-//! * `POST /v1/analyzer-sessions` — body `{"preset": string, "model"?:
-//!   string, "apiKey"?: string}`; returns `{"sessionId": string}`. The
-//!   optional `apiKey` is the model provider credential for the session's
-//!   headless runs: the adapter injects it into the child process
-//!   environment, holds it only in memory, and drops it at session prune.
-//!   It never enters prompts, evidence, logs, or reports.
+//! * `POST /v1/analyzer-sessions` — body `{"preset": string, "provider"?:
+//!   string, "model"?: string, "reasoningEffort"?: string,
+//!   "contextWindow"?: number, "maxTokens"?: number, "apiKey"?: string}`;
+//!   returns `{"sessionId": string}`. The route fields select one
+//!   adapter-allowlisted provider and a model within it for the session's
+//!   lifetime; the adapter owns the provider catalog and rejects anything
+//!   else, so a request can never redirect evidence to an unconfigured
+//!   gateway. The optional `apiKey` is the model provider credential for the
+//!   session's headless runs: the adapter injects it into the child process
+//!   environment under the selected provider's key variable, holds it only
+//!   in memory, and drops it at session prune. It never enters prompts,
+//!   evidence, logs, or reports.
 //! * `POST /v1/analyzer-sessions/{id}/messages` — body `{"prompt":
 //!   string}`; the server runs one zero-tool turn and returns `{"status":
 //!   "completed", "response": <string|object>, "model"?: string}`. A
@@ -67,6 +73,36 @@ const EVENTS_RESPONSE_CAP: usize = 2 * 1024 * 1024;
 /// Bound on exported trajectory events for the evidence digest.
 const EVENTS_EXPORT_LIMIT: usize = 256;
 
+/// The analyzer-selected model route for one session. Every field is
+/// optional; the adapter applies its pinned default route for unset fields
+/// and rejects routes outside its allowlist. The route is fixed for the
+/// session's lifetime.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DshRoute {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+/// One session-create request: preset plus the optional route.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DshSessionRequest<'a> {
+    preset: &'a str,
+    #[serde(flatten)]
+    route: &'a DshRoute,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_key: Option<&'a str>,
+}
+
 /// One completed message turn from the DSH service.
 #[derive(Debug)]
 pub struct DshTurn {
@@ -89,7 +125,12 @@ pub struct TrajectoryDigest {
 /// or over wiremock.
 #[async_trait::async_trait]
 pub trait DshApi: Send + Sync {
-    async fn create_session(&self, preset: &str, model: Option<&str>) -> Result<String>;
+    async fn create_session(
+        &self,
+        preset: &str,
+        route: &DshRoute,
+        api_key: Option<&str>,
+    ) -> Result<String>;
     async fn send_message(&self, session_id: &str, prompt: &str) -> Result<DshTurn>;
     async fn trajectory_digest(&self, session_id: &str) -> Result<TrajectoryDigest>;
     async fn close_session(&self, session_id: &str) -> Result<()>;
@@ -200,15 +241,18 @@ impl HttpDshApi {
 
 #[async_trait::async_trait]
 impl DshApi for HttpDshApi {
-    async fn create_session(&self, preset: &str, model: Option<&str>) -> Result<String> {
+    async fn create_session(
+        &self,
+        preset: &str,
+        route: &DshRoute,
+        api_key: Option<&str>,
+    ) -> Result<String> {
         let url = self.url(&["v1", "analyzer-sessions"])?;
-        let mut body = json!({"preset": preset});
-        if let Some(model) = model {
-            body["model"] = json!(model);
-        }
-        if let Some(api_key) = &self.api_key {
-            body["apiKey"] = json!(api_key.expose());
-        }
+        let body = DshSessionRequest {
+            preset,
+            route,
+            api_key: api_key.or(self.api_key.as_ref().map(|key| key.expose())),
+        };
         let response = self
             .request(reqwest::Method::POST, url)
             .header(CONTENT_TYPE, JSON)
@@ -361,7 +405,7 @@ pub struct DshCdbRunner<T: ExecTransport> {
     collector: SshCdbRunner<T>,
     api: Arc<dyn DshApi>,
     preset: String,
-    model: Option<String>,
+    route: DshRoute,
 }
 
 impl<T: ExecTransport> DshCdbRunner<T> {
@@ -370,7 +414,7 @@ impl<T: ExecTransport> DshCdbRunner<T> {
             collector: SshCdbRunner::new(transport),
             api,
             preset: preset.into(),
-            model: None,
+            route: DshRoute::default(),
         }
     }
     pub fn with_remote_base(mut self, base: impl Into<String>) -> Self {
@@ -378,7 +422,13 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         self
     }
     pub fn with_model(mut self, model: Option<String>) -> Self {
-        self.model = model;
+        self.route.model = model;
+        self
+    }
+    /// The full route selection (provider, model, reasoning effort, catalog
+    /// sizes), overriding any earlier `with_model` value.
+    pub fn with_route(mut self, route: DshRoute) -> Self {
+        self.route = route;
         self
     }
 
@@ -394,7 +444,7 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         let prompt = reason::assessment_prompt(capture)?;
         let session = tokio::time::timeout_at(
             deadline,
-            self.api.create_session(&self.preset, self.model.as_deref()),
+            self.api.create_session(&self.preset, &self.route, None),
         )
         .await
         .map_err(|_| runner_error("DSH session create exceeded shared run wall timeout"))??;
@@ -414,6 +464,9 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         let (cause, model) = outcome?;
         let mut label =
             format!("bounded evidence-only DSH HTTP assessment (zero-tool session {session})");
+        if let Some(effort) = &self.route.reasoning_effort {
+            label.push_str(&format!("; effort={effort}"));
+        }
         match digest {
             Some(digest) => label.push_str(&format!(
                 "; trajectory {} events sha256:{}",
@@ -463,7 +516,14 @@ impl<T: ExecTransport> ToolRunner for DshCdbRunner<T> {
             })??;
         let capture = output.capture.get_or_insert_with(ReportCapture::default);
         capture.provenance.provider = "dsh-http".into();
-        capture.provenance.model = self.model.clone();
+        // The adapter reports the session's actual route as
+        // `provider/model` on each turn, replacing this nominal value.
+        capture.provenance.model = match (&self.route.provider, &self.route.model) {
+            (Some(provider), Some(model)) => Some(format!("{provider}/{model}")),
+            (None, Some(model)) => Some(model.clone()),
+            (Some(provider), None) => Some(format!("{provider}/<default>")),
+            (None, None) => None,
+        };
         if !capture.provenance.analysis_revision.is_empty() {
             capture.provenance.analysis_revision.push(';');
         }

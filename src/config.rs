@@ -58,6 +58,20 @@ const DSH_TOKEN_VAR: &str = "DUMP_ANALYZER_DSH_TOKEN";
 /// `DUMP_ANALYZER_DSH_MODEL`: optional model override for the `dsh-http`
 /// provider.
 const DSH_MODEL_VAR: &str = "DUMP_ANALYZER_DSH_MODEL";
+/// `DUMP_ANALYZER_DSH_PROVIDER`: optional provider route for the `dsh-http`
+/// provider; the adapter allowlists the selectable providers.
+const DSH_PROVIDER_VAR: &str = "DUMP_ANALYZER_DSH_PROVIDER";
+/// `DUMP_ANALYZER_DSH_REASONING_EFFORT`: optional reasoning effort for the
+/// `dsh-http` route (`low`, `medium`, `high`, `max`).
+const DSH_REASONING_EFFORT_VAR: &str = "DUMP_ANALYZER_DSH_REASONING_EFFORT";
+/// `DUMP_ANALYZER_DSH_CONTEXT_WINDOW`: optional catalog context-window size
+/// for a route model the adapter does not pre-list.
+const DSH_CONTEXT_WINDOW_VAR: &str = "DUMP_ANALYZER_DSH_CONTEXT_WINDOW";
+/// `DUMP_ANALYZER_DSH_MAX_TOKENS`: optional catalog max-tokens size for such
+/// a model; must not exceed the context window.
+const DSH_MAX_TOKENS_VAR: &str = "DUMP_ANALYZER_DSH_MAX_TOKENS";
+/// Upper bound accepted for catalog context-window/max-tokens values.
+const MAX_DSH_CONTEXT_WINDOW: u64 = 2_000_000;
 /// `DUMP_ANALYZER_DSH_API_KEY`: optional model API key forwarded to the
 /// DSH adapter at session create; the adapter injects it as the provider key
 /// for each headless run. When unset, the adapter's own launch-environment
@@ -217,6 +231,16 @@ pub struct Config {
     /// create (redacts in `Debug`/`Display`). Never persisted, never echoed
     /// into prompts, evidence, or reports.
     pub dsh_api_key: Option<SecretToken>,
+    /// Optional provider route for the `dsh-http` provider; the adapter
+    /// allowlists the selectable providers.
+    pub dsh_provider: Option<String>,
+    /// Optional reasoning effort (`low`, `medium`, `high`, `max`).
+    pub dsh_reasoning_effort: Option<String>,
+    /// Optional catalog context-window size for a route model the adapter
+    /// does not pre-list; bounded by 2,000,000.
+    pub dsh_context_window: Option<u32>,
+    /// Optional catalog max-tokens size; never exceeds the context window.
+    pub dsh_max_tokens: Option<u32>,
     /// Server-side zero-tool preset name; default `analyzer-triage`.
     pub dsh_preset: String,
     /// Optional path to a PEM certificate (or chain) to trust in addition to
@@ -307,6 +331,37 @@ impl Config {
         let dsh_token = Self::parse_dsh_token(&vars)?;
         let dsh_model = Self::optional_value(&vars, DSH_MODEL_VAR);
         let dsh_api_key = Self::parse_dsh_api_key(&vars)?;
+        let dsh_provider = match Self::optional_value(&vars, DSH_PROVIDER_VAR) {
+            Some(raw) => {
+                if raw.chars().count() > 128 || raw.chars().any(char::is_control) {
+                    return Err(AnalyzerError::Config(format!(
+                        "{DSH_PROVIDER_VAR} must be at most 128 chars without control characters"
+                    )));
+                }
+                Some(raw)
+            }
+            None => None,
+        };
+        let dsh_reasoning_effort = match Self::optional_value(&vars, DSH_REASONING_EFFORT_VAR) {
+            Some(raw) => match raw.as_str() {
+                "low" | "medium" | "high" | "max" => Some(raw),
+                other => {
+                    return Err(AnalyzerError::Config(format!(
+                        "{DSH_REASONING_EFFORT_VAR} must be low, medium, high, or max (got {other:?})"
+                    )));
+                }
+            },
+            None => None,
+        };
+        let dsh_context_window = Self::bounded_catalog_value(&vars, DSH_CONTEXT_WINDOW_VAR)?;
+        let dsh_max_tokens = Self::bounded_catalog_value(&vars, DSH_MAX_TOKENS_VAR)?;
+        if let (Some(window), Some(max_tokens)) = (dsh_context_window, dsh_max_tokens) {
+            if max_tokens > window {
+                return Err(AnalyzerError::Config(format!(
+                    "{DSH_MAX_TOKENS_VAR} must not exceed {DSH_CONTEXT_WINDOW_VAR} ({max_tokens} > {window})"
+                )));
+            }
+        }
         let dsh_preset = match Self::optional_value(&vars, DSH_PRESET_VAR) {
             Some(raw) => {
                 if raw.chars().count() > MAX_DSH_PRESET_CHARS || raw.chars().any(char::is_control) {
@@ -421,6 +476,10 @@ impl Config {
             dsh_token,
             dsh_model,
             dsh_api_key,
+            dsh_provider,
+            dsh_reasoning_effort,
+            dsh_context_window,
+            dsh_max_tokens,
             dsh_preset,
             tls_ca_cert,
             webhook_enabled,
@@ -598,6 +657,25 @@ impl Config {
             )));
         }
         Ok(Some(SecretToken::new(raw.clone())))
+    }
+
+    /// Optional positive catalog size (context window, max tokens),
+    /// bounded by [`MAX_DSH_CONTEXT_WINDOW`].
+    fn bounded_catalog_value(vars: &HashMap<String, String>, name: &str) -> Result<Option<u32>> {
+        let Some(raw) = Self::optional_value(vars, name) else {
+            return Ok(None);
+        };
+        let value: u64 = raw.parse().map_err(|_| {
+            AnalyzerError::Config(format!("{name} must be a positive integer (got {raw:?})"))
+        })?;
+        if value == 0 || value > MAX_DSH_CONTEXT_WINDOW {
+            return Err(AnalyzerError::Config(format!(
+                "{name} must be between 1 and {MAX_DSH_CONTEXT_WINDOW} (got {value})"
+            )));
+        }
+        u32::try_from(value)
+            .map(Some)
+            .map_err(|_| AnalyzerError::Config(format!("{name} exceeds the u32 range")))
     }
 
     /// Optional DSH bearer token, taken verbatim like the analyzer token

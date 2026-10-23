@@ -731,3 +731,73 @@ fn config_dsh_api_key_rejects_whitespace() {
         "names the variable: {err}"
     );
 }
+
+#[test]
+fn config_dsh_route_fields_parse() {
+    let config = parse(&[
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+        ("DUMP_ANALYZER_DSH_PROVIDER", "opencode-go"),
+        ("DUMP_ANALYZER_DSH_REASONING_EFFORT", "low"),
+        ("DUMP_ANALYZER_DSH_CONTEXT_WINDOW", "1000000"),
+        ("DUMP_ANALYZER_DSH_MAX_TOKENS", "131072"),
+    ]);
+    assert_eq!(config.dsh_provider.as_deref(), Some("opencode-go"));
+    assert_eq!(config.dsh_reasoning_effort.as_deref(), Some("low"));
+    assert_eq!(config.dsh_context_window, Some(1_000_000));
+    assert_eq!(config.dsh_max_tokens, Some(131_072));
+}
+
+#[test]
+fn config_dsh_route_fields_default_to_none() {
+    let config = parse(&[]);
+    assert_eq!(config.dsh_provider, None);
+    assert_eq!(config.dsh_reasoning_effort, None);
+    assert_eq!(config.dsh_context_window, None);
+    assert_eq!(config.dsh_max_tokens, None);
+}
+
+#[test]
+fn config_dsh_reasoning_effort_is_an_enum() {
+    let err = parse_err(&[("DUMP_ANALYZER_DSH_REASONING_EFFORT", "extreme")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_REASONING_EFFORT"),
+        "names the variable: {err}"
+    );
+}
+
+#[test]
+fn config_dsh_catalog_sizes_are_bounded_and_ordered() {
+    let err = parse_err(&[("DUMP_ANALYZER_DSH_CONTEXT_WINDOW", "0")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_CONTEXT_WINDOW"),
+        "names the variable: {err}"
+    );
+    let err = parse_err(&[("DUMP_ANALYZER_DSH_CONTEXT_WINDOW", "2000001")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_CONTEXT_WINDOW"),
+        "names the variable: {err}"
+    );
+    let err = parse_err(&[
+        ("DUMP_ANALYZER_DSH_CONTEXT_WINDOW", "1000"),
+        ("DUMP_ANALYZER_DSH_MAX_TOKENS", "1001"),
+    ]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_MAX_TOKENS"),
+        "names the variable: {err}"
+    );
+    let err = parse_err(&[("DUMP_ANALYZER_DSH_MAX_TOKENS", "abc")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_MAX_TOKENS"),
+        "names the variable: {err}"
+    );
+}
+
+#[test]
+fn config_dsh_provider_rejects_control_characters() {
+    let err = parse_err(&[("DUMP_ANALYZER_DSH_PROVIDER", "bad\u{0007}provider")]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_PROVIDER"),
+        "names the variable: {err}"
+    );
+}

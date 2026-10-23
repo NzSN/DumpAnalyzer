@@ -99,13 +99,20 @@ fn build_runner(config: &Config) -> Result<Arc<dyn ToolRunner>> {
                 config.dsh_api_key.as_ref(),
                 config.tls_ca_cert.as_deref(),
             )?;
+            let route = dump_analyzer::dsh_runner::DshRoute {
+                provider: config.dsh_provider.clone(),
+                model: config.dsh_model.clone(),
+                reasoning_effort: config.dsh_reasoning_effort.clone(),
+                context_window: config.dsh_context_window,
+                max_tokens: config.dsh_max_tokens,
+            };
             Arc::new(
                 dump_analyzer::dsh_runner::DshCdbRunner::new(
                     SshTransport::new(target),
                     Arc::new(api),
                     &config.dsh_preset,
                 )
-                .with_model(config.dsh_model.clone()),
+                .with_route(route),
             )
         }
     };
