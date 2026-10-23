@@ -15,6 +15,15 @@
 // The profile pins the model route, so a request `model` different from
 // DSH_ANALYZER_MODEL is rejected rather than silently redirected.
 //
+// A session-create body may carry "apiKey": the model provider credential
+// for that session's headless runs. The adapter injects it into the child
+// process environment as DSH_ANALYZER_API_KEY_ENV (default OPENCODE_API_KEY,
+// matching the analyzer profile's apiKeyEnv), holds it only in the in-memory
+// session record, and drops it at DELETE. It is never logged and never
+// appears in prompts, events, or responses. Without "apiKey", the launch
+// environment's own key applies (headless profile: process env, then
+// <cwd>/.env, then $DSH_HOME/.env).
+//
 // Environment:
 //   DSH_HOME                       dedicated harness home (required)
 //   DSH_ANALYZER_PROFILE           profile name (default: analyzer)
@@ -23,6 +32,8 @@
 //   DSH_ANALYZER_ADAPTER_TOKEN     optional bearer token
 //   DSH_ANALYZER_ADAPTER_ADDR      bind address (default: 127.0.0.1:4181)
 //   DSH_ANALYZER_MESSAGE_TIMEOUT_MS  per-message run cap (default: 170000)
+//   DSH_ANALYZER_API_KEY_ENV       child env var name for per-session keys
+//                                  (default: OPENCODE_API_KEY)
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -43,12 +54,13 @@ const ADDR = process.env.DSH_ANALYZER_ADAPTER_ADDR ?? "127.0.0.1:4181";
 const MESSAGE_TIMEOUT_MS = Number(process.env.DSH_ANALYZER_MESSAGE_TIMEOUT_MS ?? 170_000);
 const MAX_BODY = 1024 * 1024;
 const MAX_EVENTS = 256;
+const API_KEY_ENV = process.env.DSH_ANALYZER_API_KEY_ENV ?? "OPENCODE_API_KEY";
 
 // Dedicated empty working directory: no AGENTS.md, skills, or other
 // cwd-scoped content channels exist even if a profile change re-enabled one.
 const WORKSPACE = join(DSH_HOME, "workspace");
 
-/** @type {Map<string, {dshSessionId: string|null, events: unknown[], created: string, turns: number}>} */
+/** @type {Map<string, {dshSessionId: string|null, apiKey: string|null, events: unknown[], created: string, turns: number}>} */
 const sessions = new Map();
 
 // FIFO queue: one headless run at a time keeps the model gateway and the
@@ -90,13 +102,17 @@ function authorized(req) {
 
 // One headless turn: fresh process, prompt on stdin, NDJSON on stdout.
 // Returns { dshSessionId, text, events } or throws with a bounded message.
-function runTurn(dshSessionId, prompt) {
+// `apiKey`, when present, is injected as the provider key env var for this
+// child only; it is never written to argv, files, or logs.
+function runTurn(dshSessionId, prompt, apiKey) {
   return new Promise((resolve, reject) => {
     const args = ["--profile", PROFILE, "--json"];
     if (dshSessionId) args.push("--session-id", dshSessionId);
+    const env = { ...process.env, DSH_HOME };
+    if (apiKey) env[API_KEY_ENV] = apiKey;
     const child = spawn("dsh", args, {
       cwd: WORKSPACE,
-      env: { ...process.env, DSH_HOME },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     const events = [];
@@ -181,8 +197,16 @@ async function handle(req, res) {
       sendJson(res, 409, { error: `model is pinned to ${MODEL} by the analyzer profile` });
       return;
     }
+    let apiKey = null;
+    if (body.apiKey != null) {
+      if (typeof body.apiKey !== "string" || body.apiKey.length === 0 || body.apiKey.length > 4096 || /[\s\p{Cc}]/u.test(body.apiKey)) {
+        sendJson(res, 400, { error: "apiKey must be a non-empty printable string" });
+        return;
+      }
+      apiKey = body.apiKey;
+    }
     const id = `dshan-${randomUUID().replaceAll("-", "").slice(0, 24)}`;
-    sessions.set(id, { dshSessionId: null, events: [], created: new Date().toISOString(), turns: 0 });
+    sessions.set(id, { dshSessionId: null, apiKey, events: [], created: new Date().toISOString(), turns: 0 });
     sendJson(res, 200, { sessionId: id });
     return;
   }
@@ -198,7 +222,7 @@ async function handle(req, res) {
       sendJson(res, 400, { error: "prompt must be a non-empty string" });
       return;
     }
-    const result = await enqueue(() => runTurn(session.dshSessionId, body.prompt));
+    const result = await enqueue(() => runTurn(session.dshSessionId, body.prompt, session.apiKey));
     session.dshSessionId = result.dshSessionId ?? session.dshSessionId;
     session.events.push(...result.events);
     session.events = session.events.slice(0, MAX_EVENTS);

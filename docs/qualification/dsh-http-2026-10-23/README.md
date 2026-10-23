@@ -68,6 +68,21 @@ passes `assessment::validate`.
   acquisition was performed or implied by this receipt. Earlier receipts
   keep their own scope.
 
+## Addendum: per-session model key path (same day, same environment)
+
+After the initial gates, the model key source moved to analyzer-owned
+configuration: `DUMP_ANALYZER_DSH_API_KEY` (daemon env) → session-create
+body → adapter in-memory session record → headless child env
+(`OPENCODE_API_KEY`). Live evidence: with the adapter deliberately launched
+without `OPENCODE_API_KEY` in its environment, the provider run passed with
+the key supplied only via `DUMP_ANALYZER_DSH_LIVE_API_KEY` (session
+`dshan-0a6554b01acf4c59b0c8f406`, adopted 3,212-byte assessment, trajectory
+`8 events sha256:dd8b58b918bed528`, 24.6 s). Negative control: the same
+request without the key failed `MISSING_CREDENTIAL` for `OPENCODE_API_KEY`
+with adapter HTTP 500 → deterministic fallback. A wiremock test also asserts
+the key appears in the create body yet never in the prompt or the retained
+report evidence.
+
 ## Reproduce
 
 ```sh

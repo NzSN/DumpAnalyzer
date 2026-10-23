@@ -59,6 +59,7 @@ fn test_config(server: &MockServer) -> Config {
         dsh_base_url: None,
         dsh_token: None,
         dsh_model: None,
+        dsh_api_key: None,
         dsh_preset: "analyzer-triage".to_owned(),
         tls_ca_cert: None,
         webhook_enabled: false,

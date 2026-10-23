@@ -140,11 +140,17 @@ For the DSH provider (a confined, dedicated instance; see
 export DUMP_ANALYZER_RUNNER='dsh-http'
 export DUMP_ANALYZER_DSH_BASE_URL='http://127.0.0.1:4181'  # loopback; https required off-loopback
 export DUMP_ANALYZER_DSH_TOKEN=''           # optional scoped bearer token
+export DUMP_ANALYZER_DSH_API_KEY=''         # optional model key, forwarded per session
 export DUMP_ANALYZER_DSH_MODEL=''           # optional override
 export DUMP_ANALYZER_DSH_PRESET='analyzer-triage'  # default; served with no tools
 # Confinement: own DSH profile/state dir, loopback bind (or firewall + TLS),
 # egress limited to the model API. Use a distinct DUMP_ANALYZER_VERSION when
 # switching an existing deployment so earlier reports are preserved.
+# DUMP_ANALYZER_DSH_API_KEY is sent to the adapter once per session over the
+# token-protected channel; the adapter injects it as the provider key env of
+# each headless run and drops it at session prune. It is never persisted by
+# the daemon and never enters prompts, evidence, or reports. When unset, the
+# adapter's own launch-environment key (or $DSH_HOME/.env) applies.
 ```
 
 The supplied [systemd unit](deploy/systemd/dump-analyzer.service) can use

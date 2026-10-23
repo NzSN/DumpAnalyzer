@@ -18,7 +18,11 @@
 //! endpoint shapes live only here:
 //!
 //! * `POST /v1/analyzer-sessions` — body `{"preset": string, "model"?:
-//!   string}`; returns `{"sessionId": string}`.
+//!   string, "apiKey"?: string}`; returns `{"sessionId": string}`. The
+//!   optional `apiKey` is the model provider credential for the session's
+//!   headless runs: the adapter injects it into the child process
+//!   environment, holds it only in memory, and drops it at session prune.
+//!   It never enters prompts, evidence, logs, or reports.
 //! * `POST /v1/analyzer-sessions/{id}/messages` — body `{"prompt":
 //!   string}`; the server runs one zero-tool turn and returns `{"status":
 //!   "completed", "response": <string|object>, "model"?: string}`. A
@@ -98,6 +102,9 @@ pub struct HttpDshApi {
     http: Client,
     base_url: Url,
     authorization: Option<HeaderValue>,
+    /// Model API key forwarded per session create; held only as the secret
+    /// wrapper, never formatted into requests other than the create body.
+    api_key: Option<crate::config::SecretToken>,
 }
 
 impl HttpDshApi {
@@ -108,6 +115,17 @@ impl HttpDshApi {
     pub fn new(
         base_url: Url,
         token: Option<&crate::config::SecretToken>,
+        tls_ca_cert: Option<&Path>,
+    ) -> Result<Self> {
+        Self::new_with_api_key(base_url, token, None, tls_ca_cert)
+    }
+
+    /// Like [`Self::new`], additionally forwarding `api_key` to the adapter
+    /// at session create (`DUMP_ANALYZER_DSH_API_KEY`).
+    pub fn new_with_api_key(
+        base_url: Url,
+        token: Option<&crate::config::SecretToken>,
+        api_key: Option<&crate::config::SecretToken>,
         tls_ca_cert: Option<&Path>,
     ) -> Result<Self> {
         let authorization = match token {
@@ -157,6 +175,7 @@ impl HttpDshApi {
             http,
             base_url,
             authorization,
+            api_key: api_key.cloned(),
         })
     }
 
@@ -186,6 +205,9 @@ impl DshApi for HttpDshApi {
         let mut body = json!({"preset": preset});
         if let Some(model) = model {
             body["model"] = json!(model);
+        }
+        if let Some(api_key) = &self.api_key {
+            body["apiKey"] = json!(api_key.expose());
         }
         let response = self
             .request(reqwest::Method::POST, url)

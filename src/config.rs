@@ -58,6 +58,11 @@ const DSH_TOKEN_VAR: &str = "DUMP_ANALYZER_DSH_TOKEN";
 /// `DUMP_ANALYZER_DSH_MODEL`: optional model override for the `dsh-http`
 /// provider.
 const DSH_MODEL_VAR: &str = "DUMP_ANALYZER_DSH_MODEL";
+/// `DUMP_ANALYZER_DSH_API_KEY`: optional model API key forwarded to the
+/// DSH adapter at session create; the adapter injects it as the provider key
+/// for each headless run. When unset, the adapter's own launch-environment
+/// key is used.
+const DSH_API_KEY_VAR: &str = "DUMP_ANALYZER_DSH_API_KEY";
 /// `DUMP_ANALYZER_DSH_PRESET`: server-side zero-tool preset name; default
 /// `analyzer-triage`.
 const DSH_PRESET_VAR: &str = "DUMP_ANALYZER_DSH_PRESET";
@@ -208,6 +213,10 @@ pub struct Config {
     pub dsh_token: Option<SecretToken>,
     /// Optional model override for the `dsh-http` provider.
     pub dsh_model: Option<String>,
+    /// Optional model API key forwarded to the DSH adapter at session
+    /// create (redacts in `Debug`/`Display`). Never persisted, never echoed
+    /// into prompts, evidence, or reports.
+    pub dsh_api_key: Option<SecretToken>,
     /// Server-side zero-tool preset name; default `analyzer-triage`.
     pub dsh_preset: String,
     /// Optional path to a PEM certificate (or chain) to trust in addition to
@@ -297,6 +306,7 @@ impl Config {
         let dsh_base_url = Self::parse_dsh_base_url(&vars)?;
         let dsh_token = Self::parse_dsh_token(&vars)?;
         let dsh_model = Self::optional_value(&vars, DSH_MODEL_VAR);
+        let dsh_api_key = Self::parse_dsh_api_key(&vars)?;
         let dsh_preset = match Self::optional_value(&vars, DSH_PRESET_VAR) {
             Some(raw) => {
                 if raw.chars().count() > MAX_DSH_PRESET_CHARS || raw.chars().any(char::is_control) {
@@ -410,6 +420,7 @@ impl Config {
             dsh_base_url,
             dsh_token,
             dsh_model,
+            dsh_api_key,
             dsh_preset,
             tls_ca_cert,
             webhook_enabled,
@@ -570,6 +581,23 @@ impl Config {
             )));
         }
         Ok(Some(url))
+    }
+
+    /// Optional DSH model API key, taken verbatim like the analyzer token
+    /// (never trimmed, whitespace rejected, value never echoed).
+    fn parse_dsh_api_key(vars: &HashMap<String, String>) -> Result<Option<SecretToken>> {
+        let Some(raw) = vars.get(DSH_API_KEY_VAR) else {
+            return Ok(None);
+        };
+        if raw.is_empty() {
+            return Ok(None);
+        }
+        if raw.chars().any(|c| c.is_ascii_whitespace()) {
+            return Err(AnalyzerError::Config(format!(
+                "{DSH_API_KEY_VAR} must not contain whitespace (a single API key value without spaces)"
+            )));
+        }
+        Ok(Some(SecretToken::new(raw.clone())))
     }
 
     /// Optional DSH bearer token, taken verbatim like the analyzer token

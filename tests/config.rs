@@ -631,6 +631,7 @@ fn config_runner_dsh_http_parses_service_settings() {
     assert_eq!(config.dsh_token, Some(SecretToken::new("dsh-scoped-token")));
     assert_eq!(config.dsh_model.as_deref(), Some("deepseek-v4-flash"));
     assert_eq!(config.dsh_preset, "analyzer-triage-v2");
+    assert_eq!(config.dsh_api_key, None);
 }
 
 #[test]
@@ -692,9 +693,41 @@ fn config_dsh_defaults_and_preset_validation() {
     assert_eq!(config.dsh_token, None);
     assert_eq!(config.dsh_model, None);
     assert_eq!(config.dsh_preset, "analyzer-triage");
+    assert_eq!(config.dsh_api_key, None);
     let err = parse_err(&[("DUMP_ANALYZER_DSH_PRESET", "bad\u{0007}preset")]);
     assert!(
         err.contains("DUMP_ANALYZER_DSH_PRESET"),
+        "names the variable: {err}"
+    );
+}
+
+#[test]
+fn config_dsh_api_key_parses_and_redacts() {
+    let config = parse(&[
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+        ("DUMP_ANALYZER_DSH_API_KEY", "gateway-key-value"),
+    ]);
+    assert_eq!(
+        config.dsh_api_key,
+        Some(SecretToken::new("gateway-key-value"))
+    );
+    let rendered = format!("{config:?}");
+    assert!(
+        !rendered.contains("gateway-key-value"),
+        "Debug redacts the key"
+    );
+}
+
+#[test]
+fn config_dsh_api_key_rejects_whitespace() {
+    let err = parse_err(&[
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+        ("DUMP_ANALYZER_DSH_API_KEY", "not valid"),
+    ]);
+    assert!(
+        err.contains("DUMP_ANALYZER_DSH_API_KEY"),
         "names the variable: {err}"
     );
 }

@@ -432,12 +432,52 @@ async fn collection_failure_never_touches_the_service() {
     );
 }
 
+#[tokio::test]
+async fn api_key_is_forwarded_at_create_and_never_leaks() {
+    let server = MockServer::start().await;
+    mount_lifecycle(
+        &server,
+        ResponseTemplate::new(200).set_body_json(turn(candidate())),
+    )
+    .await;
+    let dir = tempfile::tempdir().expect("directory");
+    let request = request(dir.path(), BOUNDS);
+    let api = HttpDshApi::new_with_api_key(
+        Url::parse(&server.uri()).expect("wiremock URL"),
+        None,
+        Some(&SecretToken::new("live-gateway-key")),
+        None,
+    )
+    .expect("api");
+    let output = DshCdbRunner::new(FakeTransport::default(), Arc::new(api), "analyzer-triage")
+        .run(request)
+        .await
+        .expect("report");
+    let requests = server.received_requests().await.expect("requests");
+    let create = requests[0].body_json::<Value>().expect("create body");
+    assert_eq!(create["apiKey"], "live-gateway-key");
+    // The key never enters the prompt, the evidence, or the omissions.
+    let message = requests[1].body_json::<Value>().expect("message body");
+    let prompt = message["prompt"].as_str().expect("prompt");
+    assert!(
+        !prompt.contains("live-gateway-key"),
+        "key never enters the model-visible prompt"
+    );
+    let capture = output.capture.expect("capture");
+    let serialized = serde_json::to_string(&capture).expect("capture json");
+    assert!(
+        !serialized.contains("live-gateway-key"),
+        "key never enters the retained report evidence"
+    );
+}
+
 /// Live qualification against a real confined DSH analyzer service
 /// (deploy/dsh-adapter). Ignored by default; run explicitly:
 ///
 /// ```sh
 /// DUMP_ANALYZER_DSH_LIVE_BASE_URL=http://127.0.0.1:4181 \
 /// DUMP_ANALYZER_DSH_LIVE_TOKEN=<token> \
+/// DUMP_ANALYZER_DSH_LIVE_API_KEY=<gateway key> \  # optional per-session key
 /// cargo test --offline --test dsh_runner live_dsh -- --ignored --nocapture
 /// ```
 ///
@@ -451,6 +491,9 @@ async fn live_dsh_http_provider_qualification() {
     let token = std::env::var("DUMP_ANALYZER_DSH_LIVE_TOKEN")
         .ok()
         .map(SecretToken::new);
+    let api_key = std::env::var("DUMP_ANALYZER_DSH_LIVE_API_KEY")
+        .ok()
+        .map(SecretToken::new);
     let dir = tempfile::tempdir().expect("directory");
     let bounds = RunBounds {
         wall_timeout: Duration::from_secs(170),
@@ -458,9 +501,10 @@ async fn live_dsh_http_provider_qualification() {
     };
     let request = request(dir.path(), bounds);
     let expected = reference_capture(&request).await;
-    let api = HttpDshApi::new(
+    let api = HttpDshApi::new_with_api_key(
         Url::parse(&base).expect("live base URL"),
         token.as_ref(),
+        api_key.as_ref(),
         None,
     )
     .expect("DSH API client");

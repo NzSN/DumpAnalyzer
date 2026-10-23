@@ -34,6 +34,12 @@ profile. Deployment tool, not part of the Rust crate.
    bind, front it with TLS and a host firewall restricted to the analyzer;
    the adapter itself speaks plain HTTP.
 
+   Model key sources, in order: a per-session `apiKey` from the analyzer's
+   `DUMP_ANALYZER_DSH_API_KEY` (injected into each headless child as
+   `DSH_ANALYZER_API_KEY_ENV`, default `OPENCODE_API_KEY`; held in memory
+   only, dropped at session prune), then the adapter's launch environment,
+   then `$DSH_HOME/.env`.
+
 3. Point the analyzer at it:
 
    ```sh

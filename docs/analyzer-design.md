@@ -168,6 +168,11 @@ attribution. See [rich reports](rich-reports.md) for claim qualification rules.
 
 `dsh-http` runs the same collector and reasoning contract against a
 dedicated DeepSeek Harness HTTP service ([dsh_runner.rs](../src/dsh_runner.rs)).
+The model credential is analyzer-owned: `DUMP_ANALYZER_DSH_API_KEY` is
+forwarded once per session over the token-protected channel and injected by
+the adapter into each headless run's environment, never persisted and never
+entering prompts, evidence, or reports; without it, the adapter's own
+launch-environment key applies.
 The service is analyzer-owned and confined: loopback-bound (plain HTTP is
 accepted for loopback only, mirroring the ledger URL policy) or HTTPS with an
 optional scoped bearer token, serving a zero-tool preset

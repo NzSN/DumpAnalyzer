@@ -93,9 +93,10 @@ fn build_runner(config: &Config) -> Result<Arc<dyn ToolRunner>> {
                         .to_owned(),
                 )
             })?;
-            let api = dump_analyzer::dsh_runner::HttpDshApi::new(
+            let api = dump_analyzer::dsh_runner::HttpDshApi::new_with_api_key(
                 base_url,
                 config.dsh_token.as_ref(),
+                config.dsh_api_key.as_ref(),
                 config.tls_ca_cert.as_deref(),
             )?;
             Arc::new(
