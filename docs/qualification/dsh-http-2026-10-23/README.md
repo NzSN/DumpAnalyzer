@@ -88,8 +88,10 @@ report evidence.
 Route selection moved from profile-pinned to analyzer-configured:
 `DUMP_ANALYZER_DSH_PROVIDER` / `_DSH_MODEL` / `_DSH_REASONING_EFFORT` /
 `_DSH_CONTEXT_WINDOW` / `_DSH_MAX_TOKENS` flow through the session-create
-body; the adapter resolves them against its allowlisted route table
-([deploy/dsh-adapter/routes.json](../../../deploy/dsh-adapter/routes.json)),
+body; the adapter resolves them against its allowlisted route table (recorded
+then at `deploy/dsh-adapter/routes.json`; since moved to user-provided
+deployment configuration — the implementation ships only
+[routes.example.json](../../../deploy/dsh-adapter/routes.example.json)),
 pins the route per session, and drives it through a generated `--patch`
 overlay (0600, pruned with the session). Overlay semantics verified on the
 installed runtime: a patch entry replaces the target's config wholesale, so
@@ -109,6 +111,66 @@ Adapter boot check composed every allowlisted route's overlay before
 listening; zero overlay files remained after session prunes. Wiremock
 coverage added: route fields in the create body, effort in the evidence
 label, config enum/bounds/ordering validation.
+
+## Addendum 3: custom gateway route (claude-relay) — configuration evidence
+
+A second provider route was configured for an Anthropic-compatible relay
+(the same endpoint the `claude-cdb` provider uses through the Claude CLI; the
+operator's URL and provider label are redacted from this published record):
+`api: anthropic-messages`, model
+`deepseek-flash` (1,000,000/131,072), `apiKeyEnv: CLAUDE_RELAY_API_KEY`,
+`reasoningEffort: null` (the route takes no reasoning level). Verified
+evidence, adapter launched without any gateway key:
+
+- The adapter boot check composed **both** allowlisted route overlays.
+- Session create with `provider=claude-relay` succeeded; the generated
+  overlay carried the exact provider block (`api`, `baseURL`, `apiKeyEnv`,
+  model catalog) with JSON-quoted scalars; the overlay file was pruned with
+  the session.
+- A first probe failed `UNSUPPORTED_REASONING_EFFORT` (the route table had
+  inherited effort `max` for a model with no levels) — fixed by per-provider
+  `reasoningEffort` defaults with `null` semantics, then re-probed.
+- The message call then reached exactly the documented boundary:
+  `MISSING_CREDENTIAL: ... resolves the route's key variable, which is not set` →
+  adapter HTTP 500 → provider deterministic fallback. Session pruned.
+- **Not qualified**: no authenticated turn ran on this gateway. The
+  pre-existing `claude-auth.env` token was probed directly (both
+  `x-api-key` and `Authorization: Bearer` on `/api/v1/models` and
+  `/api/v1/messages`) and rejected with `Invalid API key format` — the
+  stored token is stale or format-mismatched; a valid gateway key remains
+  the operator's fill-in.
+
+## Addendum 4: service deployment (same day, same host)
+
+The route was deployed to the live user services after the operator filled
+the gateway key:
+
+- Binary: release build of the committed tree installed as
+  `~/.local/bin/dump-analyzer`, SHA-256
+  `4ae44473f7c3ecea30e91d3a97dc9e52fc48a7614f6531f45a50c2199bee76c1`;
+  previous binary kept as `dump-analyzer.bak-20261022`.
+- Adapter: `dump-analyzer-dsh-adapter.service` enabled and running (PID
+  452248 at receipt time), loopback `127.0.0.1:4181`, `routes=2`, boot check
+  composed both route overlays, unauthenticated probe → 401. Bearer token is
+  a generated local hex credential aligned across both env files (values
+  not recorded here).
+- Daemon env: `dsh-http`, route `claude-relay/deepseek-flash`, no reasoning
+  effort (the route takes none), version `0.2.0-dsh-20261023.1`. A
+  config-parse probe against the locked state store exited 1 (lock held),
+  proving the configuration parses.
+- Post-deploy live gate passed through the running services: provenance
+  `claude-relay/deepseek-flash`, adopted 3,657-byte assessment
+  (`Unknown`), session `dshan-e1110588863148c6a80df38e`, trajectory
+  `8 events sha256:8424cbb3ca1553b6`, 30.3 s.
+- Daemon restarted and running (PID 454532 at receipt time): boot
+  reconciliation clean, catalog scan 130 dumps, dashboard on
+  `127.0.0.1:4180`. Scheduler and write-back remain **off** (manual
+  operation only); the interactive `dsh.service` web UI is a separate
+  instance with its own home and was untouched.
+
+This deployment is a local single-host state record, not production
+rollout: no scheduling, no write-back, no Windows CDB/SSH acquisition was
+performed under the new provider at receipt time.
 
 ## Reproduce
 

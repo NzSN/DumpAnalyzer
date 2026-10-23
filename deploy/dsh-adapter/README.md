@@ -21,7 +21,9 @@ profile. Deployment tool, not part of the Rust crate.
    and self-editing plugin. The home must be dedicated to the analyzer —
    never share it with an interactive DSH instance.
 
-2. Run the adapter (loopback-only by default):
+2. Run the adapter (loopback-only by default) — directly, or as a user
+   service with [../systemd/dump-analyzer-dsh-adapter.service](../systemd/dump-analyzer-dsh-adapter.service)
+   (env template: [../systemd/dsh-adapter.env.example](../systemd/dsh-adapter.env.example)):
 
    ```sh
    DSH_HOME=/path/to/dsh-home \
@@ -44,8 +46,16 @@ profile. Deployment tool, not part of the Rust crate.
 The analyzer may select a route per session (`provider`, `model`,
 `reasoningEffort` `low|medium|high|max`, and catalog `contextWindow` /
 `maxTokens` for models the table does not list). Selectable providers are
-allowlisted in `routes.json` (path: `DSH_ANALYZER_ROUTES`); a request can
-never introduce a gateway the deployment did not configure. The selected
+allowlisted in a **user-provided** route table (`DSH_ANALYZER_ROUTES`, or
+`$XDG_CONFIG_HOME/dump-analyzer/dsh-routes.json`; the adapter ships only
+`routes.example.json` and refuses to start without a real table); a request
+can never introduce a gateway the deployment did not configure. Provider entries
+additionally carry `api` + `baseURL` for custom gateways (e.g.
+`anthropic-messages` / `https://gateway-b.example/api`), an optional
+per-provider `reasoningEffort` default (`null` declares the route takes no
+reasoning level and omits the control), and per-model `reasoningEfforts`
+wire mappings. See docs/dsh-http-guide.md, "Adding a custom gateway
+provider", for a worked entry. The selected
 route generates a `--patch` overlay (`$DSH_HOME/overlays/`, mode 0600,
 pruned with the session) overriding the profile's `agent-default-model`
 and, for `kind: "pi-ai"` providers, the complete provider block — overlays

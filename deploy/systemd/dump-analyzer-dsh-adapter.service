@@ -1,0 +1,57 @@
+# DSH analyzer adapter for the dsh-http provider (deploy/dsh-adapter).
+# Runs the confined DeepSeek Harness HTTP adapter as a user service next to
+# the DumpAnalyzer daemon. Install as
+# ~/.config/systemd/user/dump-analyzer-dsh-adapter.service, then
+# `systemctl --user enable --now dump-analyzer-dsh-adapter`.
+#
+# Prerequisites (docs/dsh-http-guide.md):
+#   1. A dedicated DSH home with the zero-tool analyzer profile installed
+#      (default below: %h/.local/state/dsh-analyzer). Never share it with an
+#      interactive DSH instance. Note the existing dsh.service runs the
+#      interactive web UI — a different instance with its own home.
+#   2. The adapter sources at %h/.local/libexec/dump-analyzer/dsh-adapter/.
+#   3. %h/.config/dump-analyzer/dsh-adapter.env (mode 0600) carrying at
+#      least DSH_ANALYZER_ADAPTER_TOKEN. The model API key normally arrives
+#      per session from the daemon (DUMP_ANALYZER_DSH_API_KEY); to use a
+#      service-side fallback instead, add OPENCODE_API_KEY (or the selected
+#      provider's apiKeyEnv) to that env file.
+[Unit]
+Description=DumpAnalyzer DSH analyzer adapter (dsh-http provider)
+# The daemon falls back to deterministic assessment without the adapter, so
+# this is a soft ordering, not a hard dependency.
+Before=dump-analyzer.service
+ConditionPathExists=%h/.config/dump-analyzer/dsh-adapter.env
+# The profile must be installed before first start (docs/dsh-http-guide.md).
+ConditionPathExists=%h/.local/state/dsh-analyzer/profiles/analyzer/cordis.patch.yml
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+WorkingDirectory=%h
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.config/dump-analyzer/dsh-adapter.env
+# Required values live in the env file; these defaults match the shipped
+# layout (adjust paths for another account layout):
+Environment=DSH_HOME=%h/.local/state/dsh-analyzer
+Environment=DSH_ANALYZER_ROUTES=%h/.config/dump-analyzer/dsh-routes.json
+Environment=DSH_ANALYZER_ADAPTER_ADDR=127.0.0.1:4181
+ExecStart=/usr/local/bin/node %h/.local/libexec/dump-analyzer/dsh-adapter/server.mjs
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+# Confinement: the adapter needs the DSH home (read/write, including the
+# headless profile state), its own sources (read-only), loopback for the
+# analyzer socket, and HTTPS egress to the model gateway only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/dsh-analyzer
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Egress restriction to the gateway alone belongs to the host firewall or a
+# network namespace; systemd address families cannot express per-host rules.
+
+[Install]
+WantedBy=default.target

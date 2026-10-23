@@ -43,20 +43,27 @@ cp deploy/dsh-adapter/analyzer-cordis.patch.yml \
 ```
 
 Use a persistent, owner-only directory in production (`/tmp` was the
-qualification home and is wiped on reboot). The patch pins the default route
-(`opencode-go` / `deepseek-v4.1-flash` / effort `max`); adjust it to your
-gateway before installing.
+qualification home and is wiped on reboot). The patch's baseline route is a placeholder
+(`gateway-a` / `example-model`) that every adapter run shadows with the
+session's resolved route; the real routes live in the route table (Step 2).
 
-## Step 2 — the route table
+## Step 2 — the route table (user-provided)
 
-The adapter's route table allowlists every selectable provider. A session
-request can only *select* among these routes — it can never introduce a
-gateway the deployment did not configure.
+The route table is **your deployment's configuration**, never shipped by the
+implementation: the adapter fails to start without one. Install the example
+and edit it into your real gateways:
 
 ```sh
-cp deploy/dsh-adapter/routes.json /srv/dsh-analyzer/routes.json
-$EDITOR /srv/dsh-analyzer/routes.json
+cp deploy/dsh-adapter/routes.example.json ~/.config/dump-analyzer/dsh-routes.json
+chmod 0600 ~/.config/dump-analyzer/dsh-routes.json   # endpoint URLs are infrastructure detail
+$EDITOR ~/.config/dump-analyzer/dsh-routes.json
 ```
+
+The table is configuration, so it lives in the config home (the DSH home is
+state: sessions, overlays, profile data). The adapter reads
+`$DSH_ANALYZER_ROUTES` or, by default,
+`$XDG_CONFIG_HOME/dump-analyzer/dsh-routes.json`. A session request can only *select* among these
+routes — it can never introduce a gateway the deployment did not configure.
 
 | Field | Meaning |
 | --- | --- |
@@ -74,6 +81,13 @@ DSH_ANALYZER_ADAPTER_TOKEN='<scoped bearer token>' \
   node deploy/dsh-adapter/server.mjs
 ```
 
+For a supervised deployment, install the supplied user unit
+[dump-analyzer-dsh-adapter.service](../deploy/systemd/dump-analyzer-dsh-adapter.service)
+with its env template
+[dsh-adapter.env.example](../deploy/systemd/dsh-adapter.env.example)
+(mode 0600); the daemon's `environment.example` carries the matching
+commented `dsh-http` block.
+
 At boot the adapter composes every allowlisted route's generated overlay and
 refuses to start on failure (`DSH_ANALYZER_SKIP_BOOT_CHECK=1` skips this
 check). It binds `127.0.0.1:4181` by default; for a non-loopback bind, front
@@ -84,11 +98,10 @@ itself speaks plain HTTP.
 | --- | --- | --- |
 | `DSH_HOME` | — (required) | Dedicated harness home. |
 | `DSH_ANALYZER_PROFILE` | `analyzer` | Profile name inside the home. |
-| `DSH_ANALYZER_ROUTES` | `<adapter>/routes.json` | Route table path. |
+| `DSH_ANALYZER_ROUTES` | `$XDG_CONFIG_HOME/dump-analyzer/dsh-routes.json` | Route table path; user-provided, required to boot. |
 | `DSH_ANALYZER_ADAPTER_TOKEN` | unset | Bearer token required on every route when set. |
 | `DSH_ANALYZER_ADAPTER_ADDR` | `127.0.0.1:4181` | Bind address; keep loopback unless proxied. |
 | `DSH_ANALYZER_PRESET` | `analyzer-triage` | The only accepted preset value. |
-| `DSH_ANALYZER_MODEL` | `deepseek-v4.1-flash` | Default-route model when no route table exists. |
 | `DSH_ANALYZER_MESSAGE_TIMEOUT_MS` | `170000` | Per-message headless run cap. |
 | `DSH_ANALYZER_API_KEY_ENV` | `OPENCODE_API_KEY` | Fallback key variable name. |
 | `DSH_ANALYZER_SKIP_BOOT_CHECK` | unset | `1` skips the route-composition check. |
@@ -138,6 +151,38 @@ export DUMP_ANALYZER_DSH_MODEL='new-gateway-model'
 export DUMP_ANALYZER_DSH_CONTEXT_WINDOW='1000000'
 export DUMP_ANALYZER_DSH_MAX_TOKENS='131072'
 ```
+
+### Adding a custom gateway provider
+
+A gateway the route table does not ship — e.g. an Anthropic-compatible relay
+— is one `dsh-routes.json` entry away (then restart the adapter; the boot
+check composes its overlay):
+
+```json
+"gateway-b": {
+  "kind": "pi-ai",
+  "api": "anthropic-messages",
+  "baseURL": "https://gateway-b.example/api",
+  "apiKeyEnv": "GATEWAY_B_API_KEY",
+  "reasoningEffort": null,
+  "models": {
+    "example-chat": {"contextWindow": 1000000, "maxTokens": 131072}
+  }
+}
+```
+
+- `api` is the wire protocol: `anthropic-messages`, `openai-completions`, or
+  `openai-responses`. `baseURL` is the endpoint root the protocol expects.
+- `reasoningEffort: null` declares the route takes no reasoning level (the
+  control is omitted from the generated overlay). Providers that do support
+  levels pin their default with a plain value, and individual models may
+  carry a `reasoningEfforts` wire mapping (emitted into the overlay).
+- Select it analyzer-side with `DUMP_ANALYZER_DSH_PROVIDER=gateway-b`;
+  the forwarded `DUMP_ANALYZER_DSH_API_KEY` is injected as `GATEWAY_B_API_KEY`.
+- Auth header note: `anthropic-messages` sends the key as `x-api-key`. A
+  gateway that insists on `Authorization: Bearer` exclusively can instead
+  declare a static `headers` map in the provider entry with a
+  `!!js process.env.GATEWAY_B_API_KEY` reference, so the key stays out of files.
 
 Reports record the route as `provider/model` in provenance and the effort in
 the assessment evidence label.
@@ -197,6 +242,9 @@ bounded assessment or an explicit omission, and the trajectory anchor
 | HTTP 400 asking for catalog numbers | unlisted model without sizes | set `DUMP_ANALYZER_DSH_CONTEXT_WINDOW` and `_MAX_TOKENS` |
 | HTTP 409/400 `model …` pin errors | stale adapter from before route selection | upgrade the adapter |
 | Omission containing `MISSING_CREDENTIAL` | no model key in any source | set `DUMP_ANALYZER_DSH_API_KEY`, the adapter launch env, or `$DSH_HOME/.env` |
+| HTTP 500 `UNSUPPORTED_REASONING_EFFORT` | the route's model takes no reasoning levels | set the provider's `reasoningEffort` to `null` in your `routes.json`, or declare the model's `reasoningEfforts` mapping |
+| Adapter start failure `no route table at …` | the table is user-provided and missing | install `dsh-routes.json` under the config home (see `routes.example.json`) or set `DSH_ANALYZER_ROUTES` |
+| HTTP 500 with gateway `Invalid API key format` | the key failed the gateway's format/policy check before any request | confirm the exact key with the gateway owner; for Bearer-only gateways see the auth header note above |
 | Omission containing `exceeded shared run wall timeout` | model turn outran the run budget | raise `DUMP_ANALYZER_RUN_WALL_TIMEOUT_MS` or lower the effort |
 | Report shows the deterministic assessment only | reasoning fallback engaged | read the completeness omission; the evidence is intact |
 

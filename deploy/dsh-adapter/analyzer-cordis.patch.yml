@@ -3,24 +3,28 @@
 # Dedicated DSH_HOME (/tmp/dsh-analyzer-home): state does not mix with the
 # interactive `web` profile under ~/.dsh. Headless one-shot runs only.
 
-# Pinned model route (gateway: pi-ai opencode-go; key from OPENCODE_API_KEY).
+# Baseline model route — a placeholder the operator replaces per deployment
+# (the adapter overrides it per session via a generated --patch overlay from
+# the user-provided route table; see routes.example.json).
 - id: agent-default-model
   name: "@deepseek-ai/dsh-agent-default-model"
   config:
-    provider: opencode-go
-    model: deepseek-v4.1-flash
+    provider: gateway-a
+    model: example-model
     reasoningEffort: max
 - id: llm-pi-ai
   name: "@deepseek-ai/dsh-llm-pi-ai"
   config:
     providers:
-      opencode-go:
-        apiKeyEnv: OPENCODE_API_KEY
+      gateway-a:
+        apiKeyEnv: GATEWAY_A_API_KEY
+        api: openai-completions
+        baseURL: https://gateway-a.example/v1
         models:
-          - id: deepseek-v4.1-flash
-            name: DeepSeek V4.1 Flash
-            contextWindow: 1000000
-            maxTokens: 384000
+          - id: example-model
+            name: Example Model
+            contextWindow: 262144
+            maxTokens: 32768
             input:
               - text
 

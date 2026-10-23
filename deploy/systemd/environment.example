@@ -14,6 +14,20 @@ DUMP_ANALYZER_RUNNER=cdb-ssh
 # DUMP_ANALYZER_CLAUDE_BIN=/home/lsz/.local/libexec/dump-analyzer/claude-with-settings.py
 # DUMP_ANALYZER_VERSION=0.2.0-claude-profile1
 # DUMP_ANALYZER_MAX_OUTPUT_BYTES=8388608
+# To enable evidence-only DSH assessment instead, run the confined adapter
+# (dump-analyzer-dsh-adapter.service) and configure a distinct report version:
+# DUMP_ANALYZER_RUNNER=dsh-http
+# DUMP_ANALYZER_DSH_BASE_URL=http://127.0.0.1:4181
+# DUMP_ANALYZER_DSH_TOKEN='replace-with-adapter-bearer-token'
+# DUMP_ANALYZER_DSH_API_KEY='replace-with-model-gateway-key'
+# Optional route selection (adapter route table allowlists providers):
+# DUMP_ANALYZER_DSH_PROVIDER=opencode-go
+# DUMP_ANALYZER_DSH_MODEL=deepseek-v4.1-flash
+# DUMP_ANALYZER_DSH_REASONING_EFFORT=max
+# DUMP_ANALYZER_DSH_CONTEXT_WINDOW=1000000
+# DUMP_ANALYZER_DSH_MAX_TOKENS=384000
+# DUMP_ANALYZER_DSH_PRESET=analyzer-triage
+# DUMP_ANALYZER_VERSION=0.2.0-dsh-profile1
 # The adapter reads ~/.claude/settings.json. If authentication comes from an
 # interactive shell, explicitly configure ANTHROPIC_AUTH_TOKEN or
 # ANTHROPIC_API_KEY in ~/.config/dump-analyzer/claude-auth.env (mode 0600).

@@ -37,8 +37,10 @@
 // Environment:
 //   DSH_HOME                       dedicated harness home (required)
 //   DSH_ANALYZER_PROFILE           profile name (default: analyzer)
-//   DSH_ANALYZER_MODEL             default-route model id (default: deepseek-v4.1-flash)
-//   DSH_ANALYZER_ROUTES            route table JSON path (default: <adapter>/routes.json)
+//   DSH_ANALYZER_ROUTES            route table JSON path (default:
+//                                  $XDG_CONFIG_HOME/dump-analyzer/
+//                                  dsh-routes.json; required — the table is
+//                                  user-provided configuration)
 //   DSH_ANALYZER_PRESET            only accepted preset (default: analyzer-triage)
 //   DSH_ANALYZER_ADAPTER_TOKEN     optional bearer token
 //   DSH_ANALYZER_ADAPTER_ADDR      bind address (default: 127.0.0.1:4181)
@@ -51,6 +53,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 const DSH_HOME = process.env.DSH_HOME;
 if (!DSH_HOME) {
@@ -58,7 +61,7 @@ if (!DSH_HOME) {
   process.exit(2);
 }
 const PROFILE = process.env.DSH_ANALYZER_PROFILE ?? "analyzer";
-const MODEL = process.env.DSH_ANALYZER_MODEL ?? "deepseek-v4.1-flash";
+
 const PRESET = process.env.DSH_ANALYZER_PRESET ?? "analyzer-triage";
 const TOKEN = process.env.DSH_ANALYZER_ADAPTER_TOKEN ?? null;
 const ADDR = process.env.DSH_ANALYZER_ADAPTER_ADDR ?? "127.0.0.1:4181";
@@ -66,8 +69,14 @@ const MESSAGE_TIMEOUT_MS = Number(process.env.DSH_ANALYZER_MESSAGE_TIMEOUT_MS ??
 const MAX_BODY = 1024 * 1024;
 const MAX_EVENTS = 256;
 const API_KEY_ENV = process.env.DSH_ANALYZER_API_KEY_ENV ?? "OPENCODE_API_KEY";
+// The route table is user-authored configuration, so it lives with the
+// config home (XDG), not in the DSH state home: DSH_ANALYZER_ROUTES, else
+// $XDG_CONFIG_HOME/dump-analyzer/dsh-routes.json (default
+// ~/.config/dump-analyzer/dsh-routes.json).
+const CONFIG_HOME =
+  process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
 const ROUTES_PATH =
-  process.env.DSH_ANALYZER_ROUTES ?? new URL("./routes.json", import.meta.url).pathname;
+  process.env.DSH_ANALYZER_ROUTES ?? join(CONFIG_HOME, "dump-analyzer", "dsh-routes.json");
 const EFFORTS = new Set(["low", "medium", "high", "max"]);
 const MAX_CATALOG_SIZE = 2_000_000;
 
@@ -80,12 +89,14 @@ async function loadRoutes(path) {
     }
     return table;
   } catch (err) {
-    if (err.code === "ENOENT" && !process.env.DSH_ANALYZER_ROUTES) {
-      // No table shipped next to the adapter: the pinned default only.
-      return {
-        default: { provider: "opencode-go", model: MODEL, reasoningEffort: "max" },
-        providers: { "opencode-go": { kind: "pi-ai", apiKeyEnv: API_KEY_ENV, models: {} } },
-      };
+    if (err.code === "ENOENT") {
+      // The route table is user-provided deployment configuration, never
+      // shipped by the adapter: install one (see routes.example.json) at the
+      // config path or point DSH_ANALYZER_ROUTES at it.
+      throw new Error(
+        `no route table at ${path}: install one (see routes.example.json) ` +
+          "or set DSH_ANALYZER_ROUTES",
+      );
     }
     throw new Error(`cannot load route table ${path}: ${err.message}`);
   }
@@ -102,8 +113,14 @@ function resolveRoute(body) {
   if (!provider) throw new RouteError(`provider ${String(providerId).slice(0, 128)} is not allowlisted`);
   const model = body.model ?? (providerId === ROUTES.default.provider ? ROUTES.default.model : null);
   if (!model) throw new RouteError(`model is required for provider ${providerId}`);
-  const effort = body.reasoningEffort ?? ROUTES.default.reasoningEffort;
-  if (!EFFORTS.has(effort)) throw new RouteError("reasoningEffort must be low, medium, high, or max");
+  // Provider entries may pin their own default effort, or null to declare
+  // the route takes no reasoning effort (omitted from the overlay).
+  const effort =
+    body.reasoningEffort ??
+    (provider.reasoningEffort === undefined ? ROUTES.default.reasoningEffort : provider.reasoningEffort);
+  if (effort !== null && !EFFORTS.has(effort)) {
+    throw new RouteError("reasoningEffort must be low, medium, high, or max");
+  }
   const catalog = provider.models?.[model];
   let contextWindow = body.contextWindow ?? catalog?.contextWindow ?? null;
   let maxTokens = body.maxTokens ?? catalog?.maxTokens ?? null;
@@ -129,6 +146,9 @@ function resolveRoute(body) {
     maxTokens,
     apiKeyEnv: provider.apiKeyEnv ?? API_KEY_ENV,
     kind: provider.kind ?? "pi-ai",
+    api: provider.api ?? null,
+    baseURL: provider.baseURL ?? null,
+    reasoningEfforts: catalog?.reasoningEfforts ?? null,
   };
 }
 
@@ -142,8 +162,10 @@ function overlayFor(route) {
     "  config:",
     `    provider: ${q(route.provider)}`,
     `    model: ${q(route.model)}`,
-    `    reasoningEffort: ${q(route.reasoningEffort)}`,
   ];
+  if (route.reasoningEffort !== null) {
+    lines.push(`    reasoningEffort: ${q(route.reasoningEffort)}`);
+  }
   if (route.kind === "pi-ai") {
     lines.push(
       "- id: llm-pi-ai",
@@ -151,6 +173,12 @@ function overlayFor(route) {
       "    providers:",
       `      ${q(route.provider)}:`,
       `        apiKeyEnv: ${q(route.apiKeyEnv)}`,
+    );
+    // Custom gateways declare their wire protocol and endpoint; catalog
+    // providers omit both and keep the shipped defaults.
+    if (route.api) lines.push(`        api: ${q(route.api)}`);
+    if (route.baseURL) lines.push(`        baseURL: ${q(route.baseURL)}`);
+    lines.push(
       "        models:",
       `          - id: ${q(route.model)}`,
       `            name: ${q(route.model)}`,
@@ -159,6 +187,14 @@ function overlayFor(route) {
       "            input:",
       "              - text",
     );
+    // Models that accept reasoning effort declare the wire mapping in the
+    // route table; routes without it omit the control entirely.
+    if (route.reasoningEfforts) {
+      lines.push("            reasoningEfforts:");
+      for (const [level, wire] of Object.entries(route.reasoningEfforts)) {
+        lines.push(`              ${q(level)}:${wire === null ? "" : ` ${q(wire)}`}`);
+      }
+    }
   }
   return lines.join("\n") + "\n";
 }
@@ -417,6 +453,6 @@ if (!process.env.DSH_ANALYZER_SKIP_BOOT_CHECK) {
 
 const [host, port] = ADDR.split(":");
 server.listen(Number(port), host, () => {
-  const marker = createHash("sha256").update(`${PROFILE}:${MODEL}:${PRESET}`).digest("hex").slice(0, 12);
+  const marker = createHash("sha256").update(`${PROFILE}:${ROUTES.default.provider}/${ROUTES.default.model}:${PRESET}`).digest("hex").slice(0, 12);
   console.log(`dsh-analyzer-adapter: ${ADDR} profile=${PROFILE} default=${ROUTES.default.provider}/${ROUTES.default.model}@${ROUTES.default.reasoningEffort} routes=${Object.keys(ROUTES.providers).length} preset=${PRESET} identity=${marker}`);
 });

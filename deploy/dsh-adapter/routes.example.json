@@ -1,0 +1,24 @@
+{
+  "default": {"provider": "gateway-a", "model": "example-model", "reasoningEffort": "max"},
+  "providers": {
+    "gateway-a": {
+      "kind": "pi-ai",
+      "api": "openai-completions",
+      "baseURL": "https://gateway-a.example/v1",
+      "apiKeyEnv": "GATEWAY_A_API_KEY",
+      "models": {
+        "example-model": {"contextWindow": 262144, "maxTokens": 32768}
+      }
+    },
+    "gateway-b": {
+      "kind": "pi-ai",
+      "api": "anthropic-messages",
+      "baseURL": "https://gateway-b.example/api",
+      "apiKeyEnv": "GATEWAY_B_API_KEY",
+      "reasoningEffort": null,
+      "models": {
+        "example-chat": {"contextWindow": 1000000, "maxTokens": 131072}
+      }
+    }
+  }
+}
