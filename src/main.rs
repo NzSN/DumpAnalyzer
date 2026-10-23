@@ -112,7 +112,8 @@ fn build_runner(config: &Config) -> Result<Arc<dyn ToolRunner>> {
                     Arc::new(api),
                     &config.dsh_preset,
                 )
-                .with_route(route),
+                .with_route(route)
+                .with_analysis_tools(config.dsh_tools),
             )
         }
     };

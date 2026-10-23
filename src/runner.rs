@@ -39,11 +39,12 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use crate::report::{
@@ -204,7 +205,7 @@ impl SshTransport {
     }
 
     /// Override the stdout/stderr read cap (the child is killed when a
-    /// stream reaches it).
+    /// combined stream output reaches it).
     pub fn with_output_cap(mut self, bytes: usize) -> Self {
         self.output_cap = bytes.max(1);
         self
@@ -356,61 +357,51 @@ impl ExecTransport for SshTransport {
     }
 }
 
-/// Read the child's stdout and stderr concurrently, each capped, then reap
-/// it (killing first when a stream hit the cap).
+/// Read stdout and stderr concurrently under one shared acquisition cap, then
+/// reap the child. Reads themselves are limited to the remaining budget; two
+/// individually short streams cannot together acquire more than `cap` bytes.
 async fn pump_child(
     child: &mut tokio::process::Child,
     cap: usize,
 ) -> io::Result<(Vec<u8>, Vec<u8>, ExitStatus, bool)> {
-    let stdout = child
+    let mut stdout = child
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("stdout pipe missing"))?;
-    let stderr = child
+    let mut stderr = child
         .stderr
         .take()
         .ok_or_else(|| io::Error::other("stderr pipe missing"))?;
 
-    let mut out_read = Box::pin(read_capped(stdout, cap));
-    let mut err_read = Box::pin(read_capped(stderr, cap));
-    // Kill as soon as either stream reaches the cap. Waiting for both first
-    // can deadlock when the other pipe belongs to a child waiting for input.
-    let ((stdout, stdout_capped), (stderr, stderr_capped)) = tokio::select! {
-        out = &mut out_read => {
-            let out = out?;
-            if out.1 {
-                let _ = child.kill().await;
-                return Ok((out.0, Vec::new(), child.wait().await?, true));
-            }
-            (out, err_read.await?)
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut out_open = true;
+    let mut err_open = true;
+    let mut out_buf = [0u8; 4096];
+    let mut err_buf = [0u8; 4096];
+    while out_open || err_open {
+        let remaining = cap.saturating_sub(out.len() + err.len());
+        if remaining == 0 {
+            // Do not wait for EOF from a process which may be waiting for input.
+            let _ = child.kill().await;
+            return Ok((out, err, child.wait().await?, true));
         }
-        err = &mut err_read => {
-            let err = err?;
-            if err.1 {
-                let _ = child.kill().await;
-                return Ok((Vec::new(), err.0, child.wait().await?, true));
+        let length = remaining.min(out_buf.len());
+        tokio::select! {
+            read = stdout.read(&mut out_buf[..length]), if out_open => {
+                let read = read?;
+                out_open = read != 0;
+                out.extend_from_slice(&out_buf[..read]);
             }
-            (out_read.await?, err)
+            read = stderr.read(&mut err_buf[..length]), if err_open => {
+                let read = read?;
+                err_open = read != 0;
+                err.extend_from_slice(&err_buf[..read]);
+            }
         }
-    };
-    let capped = stdout_capped || stderr_capped;
-    if capped {
-        let _ = child.kill().await;
     }
     let status = child.wait().await?;
-    Ok((stdout, stderr, status, capped))
-}
-
-/// Read at most `cap` bytes from a stream.
-async fn read_capped<R: AsyncRead + Unpin>(reader: R, cap: usize) -> io::Result<(Vec<u8>, bool)> {
-    let mut buf = Vec::new();
-    reader
-        .take(cap.saturating_add(1) as u64)
-        .read_to_end(&mut buf)
-        .await?;
-    let capped = buf.len() > cap;
-    buf.truncate(cap);
-    Ok((buf, capped))
+    Ok((out, err, status, false))
 }
 
 /// First non-empty line of `stderr` (else `stdout`), bounded for error text.
@@ -1314,7 +1305,7 @@ fn symbols_facts(parsed: &ParsedLog) -> Value {
 /// Bounded two-phase CDB acquisition over an [`ExecTransport`].
 #[derive(Debug)]
 pub struct SshCdbRunner<T: ExecTransport> {
-    transport: T,
+    transport: Arc<T>,
     remote_base: String,
     cdb_program: String,
 }
@@ -1324,7 +1315,7 @@ impl<T: ExecTransport> SshCdbRunner<T> {
     /// remote workspace root and `cdb` as the debugger program.
     pub fn new(transport: T) -> Self {
         Self {
-            transport,
+            transport: Arc::new(transport),
             remote_base: DEFAULT_REMOTE_BASE.to_string(),
             cdb_program: "cdb".to_string(),
         }
@@ -1341,6 +1332,61 @@ impl<T: ExecTransport> SshCdbRunner<T> {
     pub fn with_cdb_program(mut self, program: impl Into<String>) -> Self {
         self.cdb_program = program.into();
         self
+    }
+
+    /// Collect baseline evidence and retain the verified remote dump for a
+    /// bounded investigation. The caller must close the returned session after
+    /// reasoning; dropping it also schedules best-effort remote cleanup.
+    /// `request.bounds.wall_timeout` bounds baseline collection, while `deadline`
+    /// covers the complete analysis including follow-up queries.
+    pub async fn begin_session(
+        &self,
+        mut request: RunRequest,
+        deadline: tokio::time::Instant,
+    ) -> Result<(RunOutput, Arc<crate::analysis_tools::CdbSession<T>>)>
+    where
+        T: 'static,
+    {
+        let query_budget =
+            crate::analysis_tools::MAX_QUERY_OUTPUT_BYTES.min(request.bounds.max_output_bytes / 4);
+        request.bounds.max_output_bytes -= query_budget;
+        let plan = self.plan(&request)?;
+        let session = Arc::new(crate::analysis_tools::CdbSession::new(
+            Arc::clone(&self.transport),
+            plan.remote_dir.clone(),
+            plan.remote_dump.clone(),
+            self.cdb_program.clone(),
+            request.symbol_path.clone(),
+            deadline,
+            query_budget,
+        ));
+        let collection_deadline =
+            (tokio::time::Instant::now() + request.bounds.wall_timeout).min(deadline);
+        let result = tokio::time::timeout_at(collection_deadline, async {
+            let std_deadline = collection_deadline.into_std();
+            self.ensure_remote_dir(
+                &plan.remote_dir,
+                remaining_budget("create remote workspace", std_deadline)?,
+            )
+            .await?;
+            self.analyze(&request, &plan, std_deadline).await
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(AnalyzerError::Runner(
+                "run wall-time budget exhausted during staging or execution".into(),
+            ))
+        });
+        match result {
+            Ok(output) => {
+                session.initialize(output.capture.as_ref());
+                Ok((output, session))
+            }
+            Err(error) => {
+                session.close().await;
+                Err(error)
+            }
+        }
     }
 
     /// Validate the request, size-check the workspace, and plan remote paths.
@@ -2887,6 +2933,26 @@ mod process_tests {
                 .await
                 .expect("cap must terminate promptly")
                 .unwrap();
+        assert!(capped);
+    }
+    #[tokio::test]
+    async fn simultaneous_short_streams_share_one_acquisition_budget() {
+        let mut child = Command::new("sh")
+            .args(["-c", "printf '123456'; printf 'abcdef' >&2; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (stdout, stderr, _, capped) =
+            tokio::time::timeout(Duration::from_secs(1), pump_child(&mut child, 8))
+                .await
+                .expect(
+                    "combined cap must terminate promptly even though neither stream reached it",
+                )
+                .unwrap();
+        assert_eq!(stdout.len() + stderr.len(), 8);
+        assert!(!stdout.is_empty() && !stderr.is_empty());
         assert!(capped);
     }
     #[tokio::test]

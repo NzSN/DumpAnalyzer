@@ -80,6 +80,8 @@ const DSH_API_KEY_VAR: &str = "DUMP_ANALYZER_DSH_API_KEY";
 /// `DUMP_ANALYZER_DSH_PRESET`: server-side zero-tool preset name; default
 /// `analyzer-triage`.
 const DSH_PRESET_VAR: &str = "DUMP_ANALYZER_DSH_PRESET";
+/// Opt-in debugger tools for a co-located DSH adapter. Defaults to off.
+const DSH_TOOLS_VAR: &str = "DUMP_ANALYZER_DSH_TOOLS";
 /// Default DSH preset; the dedicated instance must serve it with no tools.
 const DEFAULT_DSH_PRESET: &str = "analyzer-triage";
 /// Bound on the preset name (carried in the JSON session-create body).
@@ -243,6 +245,9 @@ pub struct Config {
     pub dsh_max_tokens: Option<u32>,
     /// Server-side zero-tool preset name; default `analyzer-triage`.
     pub dsh_preset: String,
+    /// Permit the DSH reasoner to query this run's dump through bounded MCP tools.
+    /// Requires a co-located loopback adapter and its separate MCP opt-in.
+    pub dsh_tools: bool,
     /// Optional path to a PEM certificate (or chain) to trust in addition to
     /// the system roots — pins a self-signed DumpLedger TLS endpoint.
     pub tls_ca_cert: Option<PathBuf>,
@@ -378,6 +383,36 @@ impl Config {
                 "{DSH_BASE_URL_VAR} is required when {RUNNER_VAR}=dsh-http"
             )));
         }
+        let dsh_tools = match Self::optional_value(&vars, DSH_TOOLS_VAR).as_deref() {
+            None | Some("off") => false,
+            Some("on") => true,
+            Some(_) => {
+                return Err(AnalyzerError::Config(format!(
+                    "{DSH_TOOLS_VAR} must be on or off"
+                )));
+            }
+        };
+        if dsh_tools {
+            if runner != crate::types::RunnerKind::DshHttp {
+                return Err(AnalyzerError::Config(format!(
+                    "{DSH_TOOLS_VAR}=on requires DUMP_ANALYZER_RUNNER=dsh-http"
+                )));
+            }
+            if dsh_token.is_none() {
+                return Err(AnalyzerError::Config(format!(
+                    "{DSH_TOOLS_VAR}=on requires DUMP_ANALYZER_DSH_TOKEN"
+                )));
+            }
+            // The callback is private to this host. A remote adapter cannot
+            // reach it, and must never receive a run's local capability.
+            if !dsh_base_url.as_ref().is_some_and(|url| {
+                matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+            }) {
+                return Err(AnalyzerError::Config(format!(
+                    "{DSH_TOOLS_VAR}=on requires a loopback DSH adapter on the same host"
+                )));
+            }
+        }
         let tls_ca_cert = Self::optional_value(&vars, TLS_CA_CERT_VAR).map(PathBuf::from);
         let webhook_enabled = match Self::optional_value(&vars, WEBHOOK_VAR).as_deref() {
             None => false,
@@ -481,6 +516,7 @@ impl Config {
             dsh_context_window,
             dsh_max_tokens,
             dsh_preset,
+            dsh_tools,
             tls_ca_cert,
             webhook_enabled,
             webhook_admin_token,
@@ -622,7 +658,7 @@ impl Config {
         let scheme = url.scheme();
         let loopback = matches!(
             url.host_str(),
-            Some("127.0.0.1") | Some("::1") | Some("localhost")
+            Some("127.0.0.1") | Some("[::1]") | Some("localhost")
         );
         if scheme != "https" && !(scheme == "http" && loopback) {
             return Err(AnalyzerError::Config(format!(

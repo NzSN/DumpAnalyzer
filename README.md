@@ -181,6 +181,24 @@ Run bounds cover local staging/execution waits and captured output; cleanup has
 a separate two-second grace. Killing local SSH does not prove remote CDB
 termination. See the rich-report guide for the precise containment limits.
 
+### Optional MCP debugger investigation
+
+The `dsh-http` provider can optionally request additional evidence through six
+MCP tools: `list_threads`, `get_stack`, `get_registers`, `read_memory`,
+`disassemble`, and `get_module_symbols`. Enable `DUMP_ANALYZER_DSH_TOOLS=on`
+in the daemon and `DSH_ANALYZER_ALLOW_MCP=on` in its co-located adapter. This
+requires a matching adapter bearer token and a distinct
+`DUMP_ANALYZER_VERSION` for fresh reports. Both switches default to off.
+
+Each run owns an authenticated loopback MCP endpoint and a retained debugger
+workspace. Tools accept typed arguments for that dump only; general shell,
+filesystem, and web tools remain disabled. Queries have an eight-call budget,
+30-second per-query deadline within the original run deadline, and bounded
+output. Results, failures, and truncation become citable report evidence before
+the final assessment is accepted. Missing MCP discovery or failed reasoning
+preserves the deterministic assessment. See the
+[setup, limits and validation guide](docs/dsh-http-guide.md#optional-mcp-debugger-investigation).
+
 ## On-demand analysis
 
 The `Analyzer` component (`src/analyzer.rs`) is the typed capability

@@ -801,3 +801,38 @@ fn config_dsh_provider_rejects_control_characters() {
         "names the variable: {err}"
     );
 }
+
+#[test]
+fn analysis_tools_require_explicit_opt_in_and_a_local_dsh_provider() {
+    assert!(!parse(&[]).dsh_tools);
+    for host in ["127.0.0.1", "localhost", "[::1]"] {
+        let base = format!("http://{host}:4181");
+        let config = parse(&[
+            ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+            ("DUMP_ANALYZER_DSH_BASE_URL", &base),
+            ("DUMP_ANALYZER_DSH_TOKEN", "test-adapter-token"),
+            ("DUMP_ANALYZER_DSH_TOOLS", "on"),
+        ]);
+        assert!(config.dsh_tools);
+    }
+    for overrides in [
+        vec![("DUMP_ANALYZER_DSH_TOOLS", "yes")],
+        vec![("DUMP_ANALYZER_DSH_TOOLS", "on")],
+        vec![
+            ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+            ("DUMP_ANALYZER_DSH_BASE_URL", "https://remote.example"),
+            ("DUMP_ANALYZER_DSH_TOKEN", "test-adapter-token"),
+            ("DUMP_ANALYZER_DSH_TOOLS", "on"),
+        ],
+    ] {
+        assert!(parse_err(&overrides).contains("DUMP_ANALYZER_DSH_TOOLS"));
+    }
+    assert!(
+        parse_err(&[
+            ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+            ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+            ("DUMP_ANALYZER_DSH_TOOLS", "on"),
+        ])
+        .contains("DUMP_ANALYZER_DSH_TOKEN")
+    );
+}

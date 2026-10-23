@@ -156,6 +156,99 @@ is part of the capture profile: use a distinct `DUMP_ANALYZER_VERSION` per
 route on a live deployment so reports from different routes never share a
 job identity. The provider remains off by default (`cdb-ssh`).
 
+## Optional MCP debugger investigation
+
+The default mode assesses the initial deterministic capture. The optional
+investigation mode lets the reasoner ask for additional debugger evidence
+before final assessment. Use it with the adapter on the same host as the
+Rust daemon; the per-run MCP endpoint binds only `127.0.0.1` on an ephemeral
+port, even if the adapter's own URL uses another loopback address.
+
+```sh
+# Daemon environment (requires DUMP_ANALYZER_RUNNER=dsh-http):
+DUMP_ANALYZER_DSH_TOOLS=on
+DUMP_ANALYZER_DSH_TOKEN='<matching adapter bearer token>'
+DUMP_ANALYZER_VERSION='0.2.0-dsh-mcp-1'
+
+# Adapter environment:
+DSH_ANALYZER_ALLOW_MCP=on
+DSH_ANALYZER_ADAPTER_TOKEN='<matching adapter bearer token>'
+```
+
+Both switches default to off. The adapter's MCP mode requires authentication;
+the daemon rejects tools mode with another provider or a remote adapter.
+Choose a new analyzer version when enabling this capture profile so existing
+immutable reports are preserved and a new analysis is eligible. Installing
+the code alone does not enable the mode or restart either service.
+
+| Tool | Accepted arguments and limit |
+| --- | --- |
+| `list_threads` | None; returns CDB thread indexes. |
+| `get_stack` | Observed decimal CDB `thread_id`, optional `frames` (default 32, maximum 64). |
+| `get_registers` | Observed decimal CDB `thread_id`; initial saved thread context. |
+| `read_memory` | Literal hexadecimal `address`, `length` from 1 to 256 bytes. Missing dump memory remains explicit. |
+| `disassemble` | Literal hexadecimal `address`, `count` from 1 to 64 instructions. |
+| `get_module_symbols` | Exact baseline `module_id`, resolved by the host to its captured image base. Debugger labels do not establish matching PDB identity. |
+
+Thread indexes are the decimal indexes shown by CDB, not operating-system
+thread IDs. Stack/register queries describe that thread's initial saved
+context; the baseline exception context remains a separate section.
+Addresses are strings such as `0x7ff600001000`, preserving all 64 bits through
+JavaScript. Arguments cannot contain commands, expressions, filesystem paths,
+or a different dump identity. The host generates debugger commands and uses
+the same verified dump for every query.
+
+The collector retains its remote workspace while reasoning runs, then
+revokes MCP access before cleanup and report assembly. Each run has a unique
+bearer; endpoint credentials are passed to the adapter outside the prompt
+and injected into the DSH child environment, never written to its overlay or
+retained report. The adapter inserts only the fixed MCP client; general
+shell/filesystem/web and MCP resource tools remain disabled. Existing
+systemd restrictions still apply. MCP does not create a Windows sandbox.
+
+The shared run deadline still covers acquisition and reasoning, with 80%
+reserved as the initial collector's maximum. Investigation permits at most
+eight attempted queries, at most 30 seconds each, and reserves the smaller of
+64 KiB or one quarter of the configured output cap for query output. The
+remaining output allowance belongs to initial collection. Each retained
+query excerpt is capped at 8 KiB; the report's 32-evidence-entry cap includes
+baseline entries and reserves a slot for the final assessment. Cleanup keeps
+the existing separate best-effort grace; local SSH termination does not
+prove remote debugger termination.
+
+Every accepted query is recorded before returning its result, including
+failure, truncation, or cancellation. The final assessment may cite initial
+IDs and actual query IDs. The host validates those references against its
+owned capture; the model cannot replace baseline sections or authorize a
+confirmed underlying cause. Reasoning failures preserve the baseline and
+any evidence already acquired. Query evidence is held in the run's owned
+capture and persisted with the final report; it is not a separate durable
+per-query journal. The Rust side requires authenticated MCP
+tool discovery, because DSH can continue without an optional plugin that
+failed to activate. Accepting `analysisTools: true` in the adapter response
+alone is not proof of tool availability or tool use.
+
+Local verification commands:
+
+```sh
+cargo test --offline --locked --test analysis_tools --test analysis_mcp --test dsh_tools
+node --test deploy/dsh-adapter/server.test.mjs
+# Optional installed-SDK interoperability; see the test header for its path variable:
+cargo test --offline --locked --test analysis_mcp_sdk -- --ignored
+# Optional installed DSH runtime, actual adapter, local synthetic model/MCP fixtures:
+node tools/qualification/check_dsh_mcp.mjs
+```
+
+The normal suites use controlled debugger/model doubles and local sockets.
+The optional SDK test uses the installed MCP client, with fake tool results.
+The optional runtime script checks that DSH presents exactly the six tools,
+executes a synthetic memory read, carries its result into the next model
+request, returns a matching assessment, and prunes the session. Its model
+gateway and MCP server are local fixtures; no external provider is contacted.
+These checks do not establish Windows CDB acquisition, model-quality gains,
+or live deployment of this mode; earlier zero-tool qualification receipts
+retain their original scope.
+
 ## Route selection examples
 
 ```sh

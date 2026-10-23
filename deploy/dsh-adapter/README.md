@@ -16,7 +16,7 @@ profile. Deployment tool, not part of the Rust crate.
      /path/to/dsh-home/profiles/analyzer/cordis.patch.yml
    ```
 
-   The patch pins the model route (`opencode-go` / `deepseek-v4.1-flash`)
+   The patch supplies a placeholder model route (`gateway-a` / `example-model`)
    and disables every tool, skill, content-channel, subagent, telemetry,
    and self-editing plugin. The home must be dedicated to the analyzer —
    never share it with an interactive DSH instance.
@@ -71,9 +71,65 @@ on failure; `DSH_ANALYZER_SKIP_BOOT_CHECK=1` skips this.
    export DUMP_ANALYZER_DSH_TOKEN='<scoped token>'
    ```
 
+## Optional dump investigation tools
+
+The default remains evidence-only. Enable both ends explicitly to let the
+reasoner request additional debugger evidence from the current dump:
+
+```sh
+# DumpAnalyzer environment (~/.config/dump-analyzer/environment):
+DUMP_ANALYZER_DSH_TOOLS=on
+DUMP_ANALYZER_DSH_TOKEN='<scoped adapter token>'
+# Adapter environment (~/.config/dump-analyzer/dsh-adapter.env):
+DSH_ANALYZER_ALLOW_MCP=on
+DSH_ANALYZER_ADAPTER_TOKEN='<same scoped adapter token>'
+```
+
+MCP mode requires adapter authentication and refuses to start without a
+nonempty printable adapter token. Run the adapter on the same host as
+DumpAnalyzer. The analyzer creates an
+ephemeral loopback MCP bridge for one verified dump and supplies
+`analysisMcp: {"url":"http://127.0.0.1:<port>/mcp","token":"<run bearer>"}`
+in its session-create request. The adapter rejects this field unless enabled,
+rejects other hosts, paths, URL credentials and query parameters, and returns
+`analysisTools: true` when it accepts the configuration. This is a configuration
+acknowledgement; DumpAnalyzer separately requires authenticated discovery of
+the bridge's tool list before accepting a tool-enabled assessment. Retained
+debugger receipts establish which tools actually ran; discovery alone does
+not require a tool call when the initial capture already answers the question.
+
+A generated session overlay adds only `@deepseek-ai/dsh-mcp-client` under the
+`dump_analysis` namespace. MCP resource tools stay disabled, as do the base
+profile's shell, filesystem, web and other general tools. The persona permits
+only the dump tools and treats captures and tool output as untrusted evidence.
+The MCP bearer is injected into the child environment, read by a fixed `!!js`
+expression, and never written into the overlay. The bridge enforces the dump,
+argument, call, time and output limits; the adapter caps each MCP call at 30
+seconds and disables automatic reconnect. Use a distinct analyzer version
+when enabling tools so existing report identities remain reproducible.
+
+Deleting a session revokes queued work, kills its active child, waits for it
+to exit, and prunes the overlay and known persisted DSH session. Abandoned
+sessions expire after ten minutes; at most 64 sessions are retained. Child
+stdout is limited to 8 MiB during acquisition, stderr retention to 64 KiB,
+and retained events to 256 entries and 8 MiB. API keys and bearer tokens known
+to the adapter are redacted from returned text/events; stderr is not exposed.
+
+The installed DSH `0.2.1-rc.2` supports this overlay. Its MCP plugin's
+`failOnStartupError` rejects the plugin, but DSH may continue without that
+optional plugin. If tool discovery never succeeds, DumpAnalyzer records the
+missing capability and retains its deterministic fallback.
+
+Local tests use fake headless children and loopback HTTP only:
+
+```sh
+node --test deploy/dsh-adapter/server.test.mjs
+```
+
 ## Qualification status
 
 Bounded live qualification (contract, confinement, prune, one injection
 probe): [docs/qualification/dsh-http-2026-10-23](../../docs/qualification/dsh-http-2026-10-23/README.md).
 That receipt is dated evidence, not production readiness: per-message cost
 is one headless `dsh` boot plus one model turn, and runs are serialized.
+It predates the optional MCP mode and does not qualify live dump investigation.

@@ -53,6 +53,7 @@ use sha2::Digest;
 const JSON: &str = "application/json";
 use tokio::time::Instant;
 
+use crate::analysis_tools::AnalysisTools;
 use crate::reason::{self, runner_error};
 use crate::report::{ReportCapture, RootCause};
 use crate::runner::{ExecTransport, SshCdbRunner};
@@ -93,7 +94,7 @@ pub struct DshRoute {
 }
 
 /// One session-create request: preset plus the optional route.
-#[derive(Debug, serde::Serialize)]
+#[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DshSessionRequest<'a> {
     preset: &'a str,
@@ -101,6 +102,22 @@ struct DshSessionRequest<'a> {
     route: &'a DshRoute,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analysis_mcp: Option<McpRequest<'a>>,
+}
+
+/// A capability for exactly one local analysis run. Never included in prompts,
+/// evidence or trajectory labels; the bearer is redacted when formatted.
+#[derive(Clone, Debug)]
+pub struct DshAnalysisMcp {
+    pub url: String,
+    pub token: crate::config::SecretToken,
+}
+
+#[derive(serde::Serialize)]
+struct McpRequest<'a> {
+    url: &'a str,
+    token: &'a str,
 }
 
 /// One completed message turn from the DSH service.
@@ -131,6 +148,16 @@ pub trait DshApi: Send + Sync {
         route: &DshRoute,
         api_key: Option<&str>,
     ) -> Result<String>;
+    /// Opt-in capability handoff. An adapter must explicitly acknowledge it;
+    /// implementations supporting only the original contract fail closed.
+    async fn create_session_with_tools(
+        &self,
+        _preset: &str,
+        _route: &DshRoute,
+        _mcp: &DshAnalysisMcp,
+    ) -> Result<String> {
+        Err(runner_error("DSH adapter does not support analysis tools"))
+    }
     async fn send_message(&self, session_id: &str, prompt: &str) -> Result<DshTurn>;
     async fn trajectory_digest(&self, session_id: &str) -> Result<TrajectoryDigest>;
     async fn close_session(&self, session_id: &str) -> Result<()>;
@@ -181,6 +208,9 @@ impl HttpDshApi {
             None => None,
         };
         let mut builder = Client::builder()
+            // Session creation carries credentials and a private run capability.
+            // Never forward either body to a redirected endpoint.
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent(concat!("dump-analyzer/", env!("CARGO_PKG_VERSION")))
             .read_timeout(DSH_READ_TIMEOUT);
         if let Some(path) = tls_ca_cert {
@@ -237,6 +267,56 @@ impl HttpDshApi {
         }
         builder
     }
+
+    async fn create(
+        &self,
+        preset: &str,
+        route: &DshRoute,
+        api_key: Option<&str>,
+        mcp: Option<&DshAnalysisMcp>,
+    ) -> Result<String> {
+        if mcp.is_some()
+            && !matches!(
+                self.base_url.host_str(),
+                Some("127.0.0.1" | "localhost" | "[::1]")
+            )
+        {
+            return Err(runner_error(
+                "analysis MCP requires a co-located loopback DSH adapter",
+            ));
+        }
+        if mcp.is_some() && self.authorization.is_none() {
+            return Err(runner_error(
+                "analysis MCP requires an authenticated DSH adapter",
+            ));
+        }
+        let url = self.url(&["v1", "analyzer-sessions"])?;
+        let body = DshSessionRequest {
+            preset,
+            route,
+            api_key: api_key.or(self.api_key.as_ref().map(|key| key.expose())),
+            analysis_mcp: mcp.map(|mcp| McpRequest {
+                url: &mcp.url,
+                token: mcp.token.expose(),
+            }),
+        };
+        let response = self
+            .request(reqwest::Method::POST, url)
+            .header(CONTENT_TYPE, JSON)
+            .body(serde_json::to_vec(&body).map_err(|err| runner_error(err.to_string()))?)
+            .send()
+            .await
+            .map_err(|err| runner_error(format!("DSH session create failed: {err}")))?;
+        let value = json_response(response, CREATE_RESPONSE_CAP, "session create").await?;
+        let id = session_id(&value)?;
+        if mcp.is_some() && value.get("analysisTools").and_then(Value::as_bool) != Some(true) {
+            let _ = tokio::time::timeout(PRUNE_TIMEOUT, self.close_session(&id)).await;
+            return Err(runner_error(
+                "DSH adapter did not acknowledge analysis tools",
+            ));
+        }
+        Ok(id)
+    }
 }
 
 #[async_trait::async_trait]
@@ -247,21 +327,16 @@ impl DshApi for HttpDshApi {
         route: &DshRoute,
         api_key: Option<&str>,
     ) -> Result<String> {
-        let url = self.url(&["v1", "analyzer-sessions"])?;
-        let body = DshSessionRequest {
-            preset,
-            route,
-            api_key: api_key.or(self.api_key.as_ref().map(|key| key.expose())),
-        };
-        let response = self
-            .request(reqwest::Method::POST, url)
-            .header(CONTENT_TYPE, JSON)
-            .body(serde_json::to_vec(&body).map_err(|err| runner_error(err.to_string()))?)
-            .send()
-            .await
-            .map_err(|err| runner_error(format!("DSH session create failed: {err}")))?;
-        let value = json_response(response, CREATE_RESPONSE_CAP, "session create").await?;
-        session_id(&value)
+        self.create(preset, route, api_key, None).await
+    }
+
+    async fn create_session_with_tools(
+        &self,
+        preset: &str,
+        route: &DshRoute,
+        mcp: &DshAnalysisMcp,
+    ) -> Result<String> {
+        self.create(preset, route, None, Some(mcp)).await
     }
 
     async fn send_message(&self, session_id: &str, prompt: &str) -> Result<DshTurn> {
@@ -406,6 +481,7 @@ pub struct DshCdbRunner<T: ExecTransport> {
     api: Arc<dyn DshApi>,
     preset: String,
     route: DshRoute,
+    analysis_tools: bool,
 }
 
 impl<T: ExecTransport> DshCdbRunner<T> {
@@ -415,6 +491,7 @@ impl<T: ExecTransport> DshCdbRunner<T> {
             api,
             preset: preset.into(),
             route: DshRoute::default(),
+            analysis_tools: false,
         }
     }
     pub fn with_remote_base(mut self, base: impl Into<String>) -> Self {
@@ -432,6 +509,13 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         self
     }
 
+    /// Opt in to the six dump-scoped debugger tools. The default remains
+    /// the existing evidence-only reasoner contract.
+    pub fn with_analysis_tools(mut self, enabled: bool) -> Self {
+        self.analysis_tools = enabled;
+        self
+    }
+
     /// One isolated session per run: assessment prompt, at most one
     /// formatting-correction turn, best-effort trajectory anchor, and a
     /// prune attempt on every path. Returns the accepted cause, the
@@ -440,16 +524,38 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         &self,
         capture: &ReportCapture,
         deadline: Instant,
+        mcp: Option<&DshAnalysisMcp>,
     ) -> Result<(RootCause, Option<String>, String)> {
-        let prompt = reason::assessment_prompt(capture)?;
-        let session = tokio::time::timeout_at(
-            deadline,
-            self.api.create_session(&self.preset, &self.route, None),
-        )
+        let prompt = if mcp.is_some() {
+            reason::tool_assessment_prompt(capture)?
+        } else {
+            reason::assessment_prompt(capture)?
+        };
+        let session = tokio::time::timeout_at(deadline, async {
+            match mcp {
+                Some(mcp) => {
+                    self.api
+                        .create_session_with_tools(&self.preset, &self.route, mcp)
+                        .await
+                }
+                None => {
+                    self.api
+                        .create_session(&self.preset, &self.route, None)
+                        .await
+                }
+            }
+        })
         .await
         .map_err(|_| runner_error("DSH session create exceeded shared run wall timeout"))??;
+        let mut session_guard = DshSessionGuard {
+            api: Arc::clone(&self.api),
+            id: session.clone(),
+            closed: false,
+        };
         let assessed = tokio::time::timeout_at(deadline, async {
-            let outcome = self.assess_in_session(&session, &prompt).await;
+            let outcome = self
+                .assess_in_session(&session, &prompt, mcp.is_some())
+                .await;
             // The trajectory digest only anchors evidence; its failure is
             // tolerated and noted in the label.
             let digest = self.api.trajectory_digest(&session).await.ok();
@@ -458,12 +564,15 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         .await;
         // Export-then-prune: on timeout the exchange future was dropped, so
         // the prune runs here with its own small budget, never unbounded.
-        let _ = tokio::time::timeout(PRUNE_TIMEOUT, self.api.close_session(&session)).await;
+        session_guard.close().await;
         let (outcome, digest) =
             assessed.map_err(|_| runner_error("reasoner exceeded shared run wall timeout"))?;
         let (cause, model) = outcome?;
-        let mut label =
-            format!("bounded evidence-only DSH HTTP assessment (zero-tool session {session})");
+        let mut label = if mcp.is_some() {
+            format!("bounded DSH HTTP assessment with dump analysis MCP tools (session {session})")
+        } else {
+            format!("bounded evidence-only DSH HTTP assessment (zero-tool session {session})")
+        };
         if let Some(effort) = &self.route.reasoning_effort {
             label.push_str(&format!("; effort={effort}"));
         }
@@ -482,6 +591,7 @@ impl<T: ExecTransport> DshCdbRunner<T> {
         &self,
         session: &str,
         prompt: &str,
+        tools: bool,
     ) -> Result<(RootCause, Option<String>)> {
         let turn = self.api.send_message(session, prompt).await?;
         match decode_turn(&turn) {
@@ -489,10 +599,12 @@ impl<T: ExecTransport> DshCdbRunner<T> {
             Err(_) => {
                 // Correct only the response format once, inside the original
                 // deadline; no rejected model text is echoed back.
-                let corrected = self
-                    .api
-                    .send_message(session, reason::FORMAT_CORRECTION_PROMPT)
-                    .await?;
+                let correction = if tools {
+                    reason::tool_format_correction_prompt()
+                } else {
+                    reason::FORMAT_CORRECTION_PROMPT.to_owned()
+                };
+                let corrected = self.api.send_message(session, &correction).await?;
                 let cause = decode_turn(&corrected)?;
                 Ok((cause, corrected.model.or(turn.model)))
             }
@@ -500,8 +612,39 @@ impl<T: ExecTransport> DshCdbRunner<T> {
     }
 }
 
+struct DshSessionGuard {
+    api: Arc<dyn DshApi>,
+    id: String,
+    closed: bool,
+}
+
+impl DshSessionGuard {
+    async fn close(&mut self) {
+        if matches!(
+            tokio::time::timeout(PRUNE_TIMEOUT, self.api.close_session(&self.id)).await,
+            Ok(Ok(()))
+        ) {
+            self.closed = true;
+        }
+    }
+}
+
+impl Drop for DshSessionGuard {
+    fn drop(&mut self) {
+        if !self.closed {
+            let api = Arc::clone(&self.api);
+            let id = self.id.clone();
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    let _ = tokio::time::timeout(PRUNE_TIMEOUT, api.close_session(&id)).await;
+                });
+            }
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl<T: ExecTransport> ToolRunner for DshCdbRunner<T> {
+impl<T: ExecTransport + 'static> ToolRunner for DshCdbRunner<T> {
     async fn run(&self, request: RunRequest) -> Result<RunOutput> {
         let deadline = Instant::now() + request.bounds.wall_timeout;
         let mut collection = request.clone();
@@ -509,11 +652,17 @@ impl<T: ExecTransport> ToolRunner for DshCdbRunner<T> {
         // optional reasoning, rather than granting a second full run
         // timeout (mirrors the `claude-cdb` provider).
         collection.bounds.wall_timeout = request.bounds.wall_timeout.mul_f64(0.8);
-        let mut output = tokio::time::timeout_at(deadline, self.collector.run(collection))
-            .await
-            .map_err(|_| {
-                runner_error("deterministic collection exceeded shared run wall timeout")
-            })??;
+        let (mut output, session) = if self.analysis_tools {
+            let (output, session) = self.collector.begin_session(collection, deadline).await?;
+            (output, Some(session))
+        } else {
+            let output = tokio::time::timeout_at(deadline, self.collector.run(collection))
+                .await
+                .map_err(|_| {
+                    runner_error("deterministic collection exceeded shared run wall timeout")
+                })??;
+            (output, None)
+        };
         let capture = output.capture.get_or_insert_with(ReportCapture::default);
         capture.provenance.provider = "dsh-http".into();
         // The adapter reports the session's actual route as
@@ -530,8 +679,53 @@ impl<T: ExecTransport> ToolRunner for DshCdbRunner<T> {
         capture
             .provenance
             .analysis_revision
-            .push_str("reasoner=dsh-http-v1");
-        match self.reason(capture, deadline).await {
+            .push_str(if self.analysis_tools {
+                "reasoner=dsh-http-mcp-v1"
+            } else {
+                "reasoner=dsh-http-v1"
+            });
+        let outcome = if let Some(session) = session {
+            let tools: Arc<dyn AnalysisTools> = session.clone();
+            let outcome = match crate::analysis_mcp::McpServer::start(tools, deadline).await {
+                Ok(mut server) => {
+                    let mcp = DshAnalysisMcp {
+                        url: server.endpoint().to_owned(),
+                        token: crate::config::SecretToken::new(server.token()),
+                    };
+                    let outcome = self.reason(capture, deadline, Some(&mcp)).await;
+                    let discovered = server.tools_discovered();
+                    // Revoke callbacks before snapshotting evidence or removing
+                    // remote bytes. No query can race final report assembly.
+                    server.close().await;
+                    if outcome.is_ok() && !discovered {
+                        Err(runner_error(
+                            "DSH analysis MCP tool discovery did not complete",
+                        ))
+                    } else {
+                        outcome
+                    }
+                }
+                Err(err) => Err(err),
+            };
+            session.close().await;
+            let evidence = session.evidence().await;
+            for entry in &evidence {
+                if entry.truncated {
+                    capture.completeness.truncated = true;
+                }
+                if entry.status != crate::report::CaptureStatus::Present {
+                    capture.completeness.omissions.push(format!(
+                        "Analysis query {} was {:?}; inspect retained evidence for its limitation",
+                        entry.id, entry.status,
+                    ));
+                }
+            }
+            capture.evidence.extend(evidence);
+            outcome
+        } else {
+            self.reason(capture, deadline, None).await
+        };
+        match outcome {
             Ok((cause, observed_model, label)) => {
                 if let Some(actual_model) = observed_model {
                     capture.provenance.model = Some(actual_model);

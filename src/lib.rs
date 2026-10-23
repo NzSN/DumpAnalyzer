@@ -7,6 +7,8 @@
 #![forbid(unsafe_code)]
 
 pub mod agent;
+pub mod analysis_mcp;
+pub mod analysis_tools;
 pub mod analyzer;
 pub mod assessment;
 pub mod claude_runner;

@@ -28,6 +28,11 @@ DUMP_ANALYZER_RUNNER=cdb-ssh
 # DUMP_ANALYZER_DSH_MAX_TOKENS=384000
 # DUMP_ANALYZER_DSH_PRESET=analyzer-triage
 # DUMP_ANALYZER_VERSION=0.2.0-dsh-profile1
+# Optional bounded MCP investigation of the current dump (off by default).
+# Requires the adapter on this host and DSH_ANALYZER_ALLOW_MCP=on in
+# ~/.config/dump-analyzer/dsh-adapter.env; general DSH tools remain disabled.
+# DUMP_ANALYZER_DSH_TOOLS=on
+# DUMP_ANALYZER_VERSION=0.2.0-dsh-tools1
 # The adapter reads ~/.claude/settings.json. If authentication comes from an
 # interactive shell, explicitly configure ANTHROPIC_AUTH_TOKEN or
 # ANTHROPIC_API_KEY in ~/.config/dump-analyzer/claude-auth.env (mode 0600).

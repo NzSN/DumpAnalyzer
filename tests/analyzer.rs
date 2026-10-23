@@ -54,6 +54,7 @@ fn config_for(server: &MockServer) -> Config {
         dsh_context_window: None,
         dsh_max_tokens: None,
         dsh_preset: "analyzer-triage".to_owned(),
+        dsh_tools: false,
         tls_ca_cert: None,
         webhook_enabled: false,
         webhook_admin_token: None,
