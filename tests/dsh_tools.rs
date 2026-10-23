@@ -76,6 +76,8 @@ impl ExecTransport for Debugger {
 #[derive(Clone, Copy)]
 enum Mode {
     Valid,
+    Forensicator,
+    ForensicatorUnavailable,
     BadReference,
     InvalidHypothesis,
     Confirmed,
@@ -148,19 +150,42 @@ impl DshApi for Reasoner {
             .await;
             assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
             let tools = Self::rpc(&mcp, 2, "tools/list", json!({})).await;
-            assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 6);
-            let result = Self::rpc(
-                &mcp,
-                3,
-                "tools/call",
-                json!({"name":"read_memory", "arguments":{"address":"0x1000","length":8}}),
-            )
-            .await;
+            let forensicator = matches!(
+                self.mode,
+                Mode::Forensicator | Mode::ForensicatorUnavailable
+            );
+            assert_eq!(
+                tools["result"]["tools"].as_array().unwrap().len(),
+                if forensicator { 10 } else { 6 }
+            );
+            let query = if forensicator {
+                assert!(prompt.contains("Forensicator"));
+                json!({"name":"forensicator_inspect", "arguments":{}})
+            } else {
+                json!({"name":"read_memory", "arguments":{"address":"0x1000","length":8}})
+            };
+            let result = Self::rpc(&mcp, 3, "tools/call", query).await;
             assert!(result["error"].is_null(), "{result}");
             let evidence: Value =
                 serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap())
                     .unwrap();
-            assert!(evidence["text"].as_str().unwrap().contains("de ad be ef"));
+            if matches!(self.mode, Mode::ForensicatorUnavailable) {
+                assert_eq!(result["result"]["isError"], true);
+                return Err(AnalyzerError::Runner(
+                    "Forensicator unavailable in controlled test".into(),
+                ));
+            }
+            if forensicator {
+                assert_eq!(result["result"]["isError"], false);
+                assert!(
+                    evidence["command"]
+                        .as_str()
+                        .unwrap()
+                        .contains("Forensicator MCP inspect")
+                );
+            } else {
+                assert!(evidence["text"].as_str().unwrap().contains("de ad be ef"));
+            }
             evidence_id = evidence["id"].as_str().unwrap().to_owned();
             self.queried.notify_one();
         }
@@ -199,6 +224,115 @@ impl DshApi for Reasoner {
     async fn close_session(&self, _: &str) -> Result<()> {
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reasoner_can_discover_call_cite_and_persist_forensicator_evidence() {
+    use std::os::unix::fs::PermissionsExt;
+    for available in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("forensicator");
+        if available {
+            std::fs::write(&executable, include_str!("fixtures/forensicator-mcp.py")).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let debugger = Debugger::default();
+        let reasoner = Reasoner::new(if available {
+            Mode::Forensicator
+        } else {
+            Mode::ForensicatorUnavailable
+        });
+        let run = request(temp.path(), Duration::from_secs(5));
+        let baseline = SshCdbRunner::new(Debugger::default())
+            .run(run.clone())
+            .await
+            .unwrap()
+            .capture
+            .unwrap();
+        let output = DshCdbRunner::new(debugger.clone(), reasoner.clone(), "analyzer-triage")
+            .with_analysis_tools(true)
+            .with_forensicator(Some(executable))
+            .run(run)
+            .await
+            .unwrap();
+        let capture = output.capture.as_ref().unwrap();
+        assert_eq!(capture.exception, baseline.exception);
+        assert_eq!(capture.symbols, baseline.symbols);
+        assert_eq!(capture.root_cause.mechanism, baseline.root_cause.mechanism);
+        assert!(
+            capture
+                .provenance
+                .analysis_revision
+                .contains("forensicator=mcp-stdio-v1")
+        );
+        let evidence = capture.evidence.iter().find(|e| e.id == "query-1").unwrap();
+        assert!(evidence.command.contains("Forensicator MCP inspect"));
+        if available {
+            assert_eq!(capture.root_cause.evidence_refs, vec!["query-1"]);
+            assert_eq!(capture.root_cause.status, CauseStatus::Hypothesis);
+        } else {
+            assert_eq!(capture.root_cause.status, CauseStatus::Unknown);
+            assert_eq!(
+                evidence.status,
+                dump_analyzer::report::CaptureStatus::Failed
+            );
+            assert!(!capture.completeness.omissions.is_empty());
+        }
+        assert_eq!(debugger.queries.load(Ordering::SeqCst), 0);
+        assert!(debugger.cleaned.load(Ordering::SeqCst));
+        assert_eq!(reasoner.closes.load(Ordering::SeqCst), 1);
+        let config = Config::from_env(
+            [
+                (
+                    "DUMP_ANALYZER_BASE_URL".into(),
+                    "https://ledger.example.test".into(),
+                ),
+                (
+                    "DUMP_ANALYZER_VERSION".into(),
+                    "0.2.0-forensicator-test".into(),
+                ),
+                ("DUMP_ANALYZER_WRITE_BACK".into(), "off".into()),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        let identity = JobIdentity {
+            dump_id: "forensicator-fixture".into(),
+            input_sha256: "0".repeat(64),
+            kind: "triage".into(),
+            analyzer_version: config.version.clone(),
+        };
+        let db = temp.path().join("state.sqlite");
+        let store = Store::open(&db).unwrap();
+        let (stored, _) = dump_analyzer::verdict::prepare_report(
+            &store,
+            &identity,
+            &output,
+            &config,
+            ReportHandoff::None,
+        )
+        .unwrap();
+        let mcp = reasoner.mcp.lock().unwrap().clone().unwrap();
+        assert!(!stored.report_json.contains(mcp.token.expose()));
+        drop(store);
+        let restored = Store::open(db)
+            .unwrap()
+            .local_reports()
+            .get_rich(&identity)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            restored
+                .report
+                .capture
+                .evidence
+                .iter()
+                .find(|e| e.id == "query-1"),
+            Some(evidence)
+        );
+        assert!(reqwest::Client::new().post(&mcp.url).send().await.is_err());
     }
 }
 

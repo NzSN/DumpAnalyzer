@@ -482,6 +482,7 @@ pub struct DshCdbRunner<T: ExecTransport> {
     preset: String,
     route: DshRoute,
     analysis_tools: bool,
+    forensicator_bin: Option<std::path::PathBuf>,
 }
 
 impl<T: ExecTransport> DshCdbRunner<T> {
@@ -492,6 +493,7 @@ impl<T: ExecTransport> DshCdbRunner<T> {
             preset: preset.into(),
             route: DshRoute::default(),
             analysis_tools: false,
+            forensicator_bin: None,
         }
     }
     pub fn with_remote_base(mut self, base: impl Into<String>) -> Self {
@@ -513,6 +515,13 @@ impl<T: ExecTransport> DshCdbRunner<T> {
     /// the existing evidence-only reasoner contract.
     pub fn with_analysis_tools(mut self, enabled: bool) -> Self {
         self.analysis_tools = enabled;
+        self
+    }
+
+    /// Add Forensicator's native stdio MCP tools to the same dump-scoped
+    /// bridge. The executable is operator configuration, never model input.
+    pub fn with_forensicator(mut self, executable: Option<std::path::PathBuf>) -> Self {
+        self.forensicator_bin = executable;
         self
     }
 
@@ -652,7 +661,8 @@ impl<T: ExecTransport + 'static> ToolRunner for DshCdbRunner<T> {
         // optional reasoning, rather than granting a second full run
         // timeout (mirrors the `claude-cdb` provider).
         collection.bounds.wall_timeout = request.bounds.wall_timeout.mul_f64(0.8);
-        let (mut output, session) = if self.analysis_tools {
+        let tool_mode = self.analysis_tools || self.forensicator_bin.is_some();
+        let (mut output, session) = if tool_mode {
             let (output, session) = self.collector.begin_session(collection, deadline).await?;
             (output, Some(session))
         } else {
@@ -679,13 +689,23 @@ impl<T: ExecTransport + 'static> ToolRunner for DshCdbRunner<T> {
         capture
             .provenance
             .analysis_revision
-            .push_str(if self.analysis_tools {
+            .push_str(if self.forensicator_bin.is_some() {
+                "reasoner=dsh-http-mcp-v1;forensicator=mcp-stdio-v1"
+            } else if tool_mode {
                 "reasoner=dsh-http-mcp-v1"
             } else {
                 "reasoner=dsh-http-v1"
             });
         let outcome = if let Some(session) = session {
-            let tools: Arc<dyn AnalysisTools> = session.clone();
+            let tools: Arc<dyn AnalysisTools> = match &self.forensicator_bin {
+                Some(executable) => Arc::new(crate::forensicator::ForensicatorTools::new(
+                    session.clone(),
+                    executable.clone(),
+                    &request,
+                    deadline,
+                )),
+                None => session.clone(),
+            };
             let outcome = match crate::analysis_mcp::McpServer::start(tools, deadline).await {
                 Ok(mut server) => {
                     let mcp = DshAnalysisMcp {

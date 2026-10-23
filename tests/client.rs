@@ -66,6 +66,7 @@ fn test_config_with_token(base_url: Url, token: &str) -> Config {
         dsh_max_tokens: None,
         dsh_preset: "analyzer-triage".to_owned(),
         dsh_tools: false,
+        forensicator_bin: None,
         tls_ca_cert: None,
         webhook_enabled: false,
         webhook_admin_token: None,

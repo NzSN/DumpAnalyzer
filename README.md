@@ -199,6 +199,19 @@ the final assessment is accepted. Missing MCP discovery or failed reasoning
 preserves the deterministic assessment. See the
 [setup, limits and validation guide](docs/dsh-http-guide.md#optional-mcp-debugger-investigation).
 
+To also expose [Forensicator](https://github.com/NzSN/Forensicator), set
+`DUMP_ANALYZER_FORENSICATOR_BIN` to the absolute path of its built executable
+alongside the MCP settings above. `deploy/deploy.py` downloads and verifies
+the latest stable GitHub release into
+`~/.local/libexec/dump-analyzer/forensicator` by default; pin a version with
+`--forensicator-version v0.0.1` or skip with `--skip-forensicator`.
+The reasoner then discovers
+`forensicator_inspect`, `forensicator_analyze`, `forensicator_match`, and
+`forensicator_list_plugins` under the same `dump_analysis` namespace. The
+analyzer invokes `forensicator mcp` locally, supplies the verified dump, and
+retains results as citable evidence within the shared investigation budget.
+See [Forensicator setup and limits](docs/dsh-http-guide.md#forensicator-mcp-tools).
+
 ## On-demand analysis
 
 The `Analyzer` component (`src/analyzer.rs`) is the typed capability

@@ -34,10 +34,20 @@ under a staging directory for inspection:
 python3 deploy/deploy.py --dry-run                 # print the plan, change nothing
 python3 deploy/deploy.py --root /tmp/stage         # stage a tree under /tmp/stage
 python3 deploy/deploy.py                           # deploy to the real user layout
+python3 deploy/deploy.py --forensicator-version v0.0.1  # pin the native MCP release
+python3 deploy/deploy.py --skip-forensicator        # offline/custom binary deployment
 python3 deploy/deploy.py --skip-dsh                # daemon only, no adapter
 ```
 
-It builds the release binary (unless `--no-build`), backs up a replaced
+It downloads and verifies the latest stable Forensicator Linux x86-64 release
+by default, including an MCP initialization/discovery probe. A source checkout
+or Lean toolchain is not needed. `--forensicator-version` pins a release;
+`--skip-forensicator` and `--skip-dsh` suppress this download. The executable
+and release receipt live under `~/.local/libexec/dump-analyzer/`. Download or
+verification failure stops before installed files are changed; dry runs use
+no network. See [release deployment details](../deploy/README.md).
+
+It builds the DumpAnalyzer release binary (unless `--no-build`), backs up a replaced
 binary with a dated suffix, installs helper scripts, units, the adapter, and
 the confined DSH profile — and **never overwrites user configuration**:
 existing `environment`, `dsh-adapter.env`, `dsh-routes.json`, and an
@@ -248,6 +258,86 @@ gateway and MCP server are local fixtures; no external provider is contacted.
 These checks do not establish Windows CDB acquisition, model-quality gains,
 or live deployment of this mode; earlier zero-tool qualification receipts
 retain their original scope.
+
+### Forensicator MCP tools
+
+[NzSN/Forensicator](https://github.com/NzSN/Forensicator) supplies native
+Lean-based minidump inspection and analysis over stdio MCP. Install the
+published static release using `deploy/deploy.py` (the default), then
+add this to the DumpAnalyzer daemon's environment, in addition to the
+authenticated, co-located MCP configuration above:
+
+```sh
+DUMP_ANALYZER_DSH_TOOLS=on
+DUMP_ANALYZER_FORENSICATOR_BIN=/home/lsz/.local/libexec/dump-analyzer/forensicator
+DUMP_ANALYZER_VERSION=0.2.0-dsh-forensicator1
+```
+
+Use the absolute native executable, not `lake`, a shell command, or an MCP
+URL. The daemon launches it with the fixed argument `mcp`; no extra package,
+adapter overlay, or Forensicator HTTP listener is needed. With the variable
+unset, discovery exposes the existing six debugger tools. With it set,
+discovery also exposes these four tools in `dump_analysis` (for example,
+`mcp__dump_analysis__forensicator_inspect` in DSH):
+
+| Tool | Arguments and behavior |
+| --- | --- |
+| `forensicator_inspect` | `{}`; inspect the current dump's modules, system, annotations and crash diagnosis. |
+| `forensicator_list_plugins` | `{}`; discover analyzer names and descriptions from the installed Forensicator. |
+| `forensicator_analyze` | `{"plugins":["cause"]}`; explicitly select 1–8 analyzers. Optional `symbols` names an existing workspace-relative PDB directory. Empty or omitted plugin lists are rejected to avoid implicitly running the full pipeline. |
+| `forensicator_match` | For example, `{"pdbs":["fixture.pdb"]}`; select 1–16 existing workspace-relative PE/PDB files in `exes` and/or `pdbs`. Mismatch and unknown identities are forensic results, not execution errors. |
+
+For a source build, run `lake build` in the Forensicator checkout, use
+`deploy/deploy.py --skip-forensicator`, and point the variable at that
+checkout's `.lake/build/bin/forensicator` instead. Existing deployed config
+is preserved, so an earlier source-build path is not silently replaced.
+
+The host supplies the SHA-256-verified dump path; model arguments cannot
+override it or select an executable. Artifact paths cannot be absolute,
+contain traversal, or resolve outside the run workspace through symlinks.
+The standard pipeline stages the dump locally and fetches debugger symbols
+on Windows; it does **not** automatically stage local PE/PDB files for
+Forensicator. Artifact matching and optional PDB analysis therefore require
+artifacts already staged in the workspace by the caller. Missing files are
+explicit failed queries. No symbol download or TTD/proxy interface is added.
+
+Each Forensicator query opens a fresh stdio process, negotiates MCP
+`2025-11-25` (also accepts `2025-06-18` and `2024-11-05`), sends the initialized
+notification, discovers the four upstream tools, and calls one of them.
+The child receives a cleared environment and no analyzer, adapter, or model
+credentials. Its protocol stdout is bounded during acquisition; stderr is
+discarded. Success, failure, timeout, and cancellation all terminate and reap
+the child. These controls bound invocation and paths; they are not an OS
+sandbox for an operator-selected executable.
+
+Forensicator and CDB share the eight-attempt limit, original run deadline,
+30-second query deadline, evidence slots, and query-output allowance.
+Forensicator's MCP envelopes, discovery responses, and duplicate
+text/structured results also consume that output allowance. Retained result
+text is capped at 8 KiB, with truncation recorded explicitly. Large captures
+or expensive plugins can hit these limits; select focused plugins. Results
+retain Forensicator's confidence, evidence and unknown fields. They become
+host-owned `query-N` evidence before the reasoner sees them and do not
+overwrite the baseline exception, symbols, or deterministic mechanism.
+Missing executables and invalid MCP responses become failed evidence;
+unavailable reasoning preserves the deterministic assessment.
+
+The default tests use a controlled stdio peer and a controlled reasoner. The
+optional native test uses generated Windows x64 minidump/PDB files, calls all
+four tools through the HTTP bridge, and compares forensic reports with the
+native CLI. It needs Python 3 for the controlled fixtures and loopback TCP:
+
+```sh
+cargo test --offline --locked --test forensicator --test dsh_tools --test config
+FORENSICATOR_TEST_BIN=/absolute/path/to/Forensicator/.lake/build/bin/forensicator \
+  cargo test --offline --locked --test forensicator native_forensicator_mcp -- --ignored
+```
+
+These checks cover interoperability, retained citations, budget enforcement,
+cleanup and fallback. They do not qualify a live model, private dump corpus,
+or production rollout. Change the analyzer version when changing this
+capture profile or the Forensicator build, then restart the daemon through
+the normal deployment procedure.
 
 ## Route selection examples
 

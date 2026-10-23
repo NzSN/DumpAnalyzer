@@ -1,4 +1,4 @@
-//! One-run MCP bridge for bounded debugger investigation.
+//! One-run MCP bridge for bounded debugger and forensic investigation.
 //!
 //! This implements the JSON response variant of Streamable HTTP: no SSE,
 //! session IDs, arbitrary command surface, or persistent listener. A random
@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, timeout_at};
 
-use crate::analysis_tools::{AnalysisTools, tool_definitions};
+use crate::analysis_tools::AnalysisTools;
 use crate::report::CaptureStatus;
 use crate::types::{AnalyzerError, Result};
 
@@ -464,13 +464,13 @@ async fn dispatch(body: &[u8], context: &Context) -> (u16, Option<Value>) {
                     Some(rpc_error(id, -32602, "This tool list has no cursor")),
                 );
             }
-            json!({"tools":tool_definitions()})
+            json!({"tools":context.tools.definitions()})
         }
         "tools/call" => {
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return (200, Some(rpc_error(id, -32602, "Tool name is required")));
             };
-            if !tool_definitions().as_array().is_some_and(|tools| {
+            if !context.tools.definitions().as_array().is_some_and(|tools| {
                 tools
                     .iter()
                     .any(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
@@ -518,7 +518,7 @@ async fn dispatch(body: &[u8], context: &Context) -> (u16, Option<Value>) {
                     })
                 }
                 Err(_) => json!({
-                    "content":[{"type":"text", "text":"Debugger query failed or exceeded investigation limits. Use retained evidence or report the missing evidence."}],
+                    "content":[{"type":"text", "text":"Analysis query failed or exceeded investigation limits. Use retained evidence or report the missing evidence."}],
                     "isError":true
                 }),
             }

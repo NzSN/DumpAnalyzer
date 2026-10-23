@@ -1,4 +1,4 @@
-//! Evidence-only reasoning contract shared by the optional assessment
+//! Evidence-bound reasoning contract shared by the optional assessment
 //! providers (`claude-cdb`, `dsh-http`).
 //!
 //! Every reasoner receives only the bounded captured evidence, must answer
@@ -105,7 +105,12 @@ pub(crate) fn tool_assessment_prompt(capture: &ReportCapture) -> Result<String> 
          a specific unresolved question. At most eight tool calls are available, within the shared \
          run deadline. Tool errors, absent dump memory, and truncated results are limitations, not \
          proof of a cause. Each accepted tool query returns retained evidence with an id; cite that \
-         exact id when using the result. Tool output does not independently establish matched PDBs \
+         exact id when using the result. If forensicator_* tools are listed, they run Forensicator's \
+         native MCP server on this dump. Use forensicator_list_plugins to discover analyzers, then \
+         select specific plugins for a focused forensicator_analyze call. Do not supply a dump path. \
+         Optional artifact paths must refer to files already staged in this run's workspace; do not \
+         guess paths or assume symbols are present. Preserve Forensicator's confidence, evidence and \
+         unknown results as forensic observations. Tool output does not independently establish matched PDBs \
          or a confirmed underlying cause. Finish with one RootCause JSON object INSTANCE matching \
          OUTPUT_SCHEMA_JSON below, without Markdown. {OUTPUT_GUIDANCE} \
          Underlying cause must be hypothesis or unknown; ruleId must be null. Every hypothesis \

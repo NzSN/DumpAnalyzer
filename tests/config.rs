@@ -836,3 +836,35 @@ fn analysis_tools_require_explicit_opt_in_and_a_local_dsh_provider() {
         .contains("DUMP_ANALYZER_DSH_TOKEN")
     );
 }
+
+#[test]
+fn forensicator_requires_an_absolute_executable_and_the_existing_mcp_opt_in() {
+    assert_eq!(parse(&[]).forensicator_bin, None);
+    assert!(
+        parse_err(&[("DUMP_ANALYZER_FORENSICATOR_BIN", "/opt/forensicator")])
+            .contains("DUMP_ANALYZER_DSH_TOOLS")
+    );
+    let mut settings = vec![
+        ("DUMP_ANALYZER_RUNNER", "dsh-http"),
+        ("DUMP_ANALYZER_DSH_BASE_URL", "http://127.0.0.1:4181"),
+        ("DUMP_ANALYZER_DSH_TOKEN", "test-adapter-token"),
+        ("DUMP_ANALYZER_DSH_TOOLS", "on"),
+        (
+            "DUMP_ANALYZER_FORENSICATOR_BIN",
+            "/opt/Forensicator/.lake/build/bin/forensicator",
+        ),
+    ];
+    assert_eq!(
+        parse(&settings).forensicator_bin,
+        Some(std::path::PathBuf::from(settings[4].1))
+    );
+    for path in [
+        "forensicator",
+        "./forensicator",
+        "/opt/bin/forensi\ncator",
+        "/opt/bin/forensi\0cator",
+    ] {
+        settings[4].1 = path;
+        assert!(parse_err(&settings).contains("DUMP_ANALYZER_FORENSICATOR_BIN"));
+    }
+}

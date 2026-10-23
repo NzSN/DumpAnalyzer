@@ -6,6 +6,7 @@ under a staging directory (e.g. --root /tmp/stage for inspection):
 
   <root>/.local/bin/dump-analyzer                    release binary
   <root>/.local/libexec/dump-analyzer/...            helper scripts, adapter
+  <root>/.local/libexec/dump-analyzer/forensicator    verified GitHub release
   <root>/.config/systemd/user/*.service              user units
   <root>/.config/dump-analyzer/                      environment, dsh-adapter.env,
                                                      dsh-routes.json (user config)
@@ -18,16 +19,19 @@ enables, or restarts services; it prints the remaining manual steps.
 
 Usage:
   python3 deploy/deploy.py [--root DIR] [--no-build] [--skip-dsh] [--dry-run]
-                           [--force-config]
+                           [--force-config] [--skip-forensicator]
+                           [--forensicator-version latest|TAG]
 """
 
 import argparse
 import os
 from pathlib import Path
-import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
+
+from forensicator_release import ReleaseError, install_release, prepare_release
 
 REPO = Path(__file__).resolve().parent.parent
 SYSTEMD = REPO / "deploy" / "systemd"
@@ -48,7 +52,7 @@ class Plan:
     def run(self, description, fn):
         print(f"  {'would ' if self.dry_run else ''}{description}")
         if not self.dry_run:
-            fn()
+            return fn()
 
     def install(self, source, target, mode):
         def apply():
@@ -85,7 +89,11 @@ def main(argv=None):
     parser.add_argument("--no-build", action="store_true",
                         help="reuse the existing target/release binary")
     parser.add_argument("--skip-dsh", action="store_true",
-                        help="deploy only the daemon; skip the DSH adapter, its unit, and profile")
+                        help="deploy only the daemon; skip the DSH adapter, its profile, and Forensicator")
+    parser.add_argument("--skip-forensicator", action="store_true",
+                        help="skip the GitHub release download (offline/custom executable deployment)")
+    parser.add_argument("--forensicator-version", default="latest", metavar="TAG",
+                        help="Forensicator release tag to pin; default is the latest stable release")
     parser.add_argument("--force-config", action="store_true",
                         help="overwrite existing user configuration (default keeps it)")
     parser.add_argument("--dry-run", action="store_true",
@@ -95,8 +103,19 @@ def main(argv=None):
     if os.geteuid() == 0:
         print("refusing to run as root: the units are user services", file=sys.stderr)
         return 2
+    try:
+        if args.dry_run:
+            return deploy(args, None)
+        with tempfile.TemporaryDirectory(prefix="dump-analyzer-deploy-") as temporary:
+            return deploy(args, Path(temporary))
+    except (ReleaseError, OSError, subprocess.SubprocessError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+
+def deploy(args, temporary):
     home = Path.home()
-    root = args.root if args.root else None
+    root = args.root.expanduser().resolve() if args.root else None
 
     def at(relative):
         """Map a real-layout absolute path into the staging root.
@@ -118,16 +137,27 @@ def main(argv=None):
         "units": at(home / ".config/systemd/user"),
         "config": at(home / ".config/dump-analyzer"),
         "dsh_home": at(home / ".local/state/dsh-analyzer"),
+        "forensicator": at(home / ".local/libexec/dump-analyzer/forensicator"),
     }
     plan = Plan(args.dry_run)
     print(f"deploy root: {root if root else '(live user layout)'}")
+
+    # Fetch and qualify before changing installed files. Dry runs never make
+    # network requests, invoke a release binary, or create temporary files.
+    with_forensicator = not args.skip_dsh and not args.skip_forensicator
+    prepared = None
+    if with_forensicator:
+        prepared = plan.run(
+            f"fetch Forensicator {args.forensicator_version} from GitHub; verify SHA-256 and probe native MCP",
+            lambda: prepare_release(args.forensicator_version, temporary / "forensicator"),
+        )
 
     # 1. Release binary -------------------------------------------------
     binary = REPO / "target/release/dump-analyzer"
     if not args.no_build:
         def build():
-            subprocess.run(["cargo", "build", "--release", "--offline"], cwd=REPO, check=True)
-        plan.run("cargo build --release --offline", build)
+            subprocess.run(["cargo", "build", "--release", "--offline", "--locked"], cwd=REPO, check=True)
+        plan.run("cargo build --release --offline --locked", build)
     if not binary.exists() and not args.dry_run:
         print("error: release binary missing; build first or drop --no-build", file=sys.stderr)
         return 1
@@ -144,6 +174,11 @@ def main(argv=None):
                          lambda: shutil.copy2(paths["bin"], backup))
         plan.install(binary, paths["bin"], 0o755)
 
+    if with_forensicator:
+        tag = prepared.receipt["tag"] if prepared else args.forensicator_version
+        plan.run(f"install Forensicator {tag} -> {paths['forensicator']} (mode 755) and release receipt",
+                 lambda: install_release(prepared, paths["forensicator"]))
+
     # 2. Helper scripts and units --------------------------------------
     plan.install(SYSTEMD / "prepare-state.py", paths["libexec"] / "prepare-state.py", 0o755)
     plan.install(SYSTEMD / "claude-with-settings.py",
@@ -155,7 +190,9 @@ def main(argv=None):
     if env_target.exists() and not args.force_config:
         plan.note(f"kept existing {env_target}")
     else:
-        plan.write(env_target, load_template(SYSTEMD / "environment.example", {}), 0o600)
+        plan.write(env_target, load_template(SYSTEMD / "environment.example", {
+            "/home/lsz/.local/libexec/dump-analyzer/forensicator": str(paths["forensicator"]),
+        }), 0o600)
 
     # 4. DSH adapter (optional) -----------------------------------------
     if not args.skip_dsh:
@@ -206,6 +243,12 @@ def main(argv=None):
     print("\nremaining manual steps:")
     print("  1. fill secrets in ~/.config/dump-analyzer/environment and dsh-adapter.env")
     print("     (and edit dsh-routes.json: it ships placeholder gateways only)")
+    if with_forensicator:
+        print("     To enable Forensicator in the DSH reasoner, set in the daemon environment:")
+        print("       DUMP_ANALYZER_DSH_TOOLS=on")
+        print(f"       DUMP_ANALYZER_FORENSICATOR_BIN={paths['forensicator']}")
+        print("     Enable DSH_ANALYZER_ALLOW_MCP=on in dsh-adapter.env with matching adapter tokens.")
+        print("     Choose a distinct DUMP_ANALYZER_VERSION when changing the Forensicator build.")
     if not args.skip_dsh:
         print("  2. systemctl --user enable --now dump-analyzer-dsh-adapter")
         print("  3. systemctl --user restart dump-analyzer")

@@ -113,7 +113,8 @@ fn build_runner(config: &Config) -> Result<Arc<dyn ToolRunner>> {
                     &config.dsh_preset,
                 )
                 .with_route(route)
-                .with_analysis_tools(config.dsh_tools),
+                .with_analysis_tools(config.dsh_tools)
+                .with_forensicator(config.forensicator_bin.clone()),
             )
         }
     };

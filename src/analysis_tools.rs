@@ -24,6 +24,10 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[async_trait]
 pub trait AnalysisTools: Send + Sync {
+    /// Only capabilities actually configured for this run are advertised.
+    fn definitions(&self) -> Value {
+        tool_definitions()
+    }
     /// Execute and retain an accepted query before exposing its result.
     async fn call(&self, name: &str, arguments: Value) -> Result<Evidence>;
     /// Snapshot only the additional evidence; baseline entries are unchanged.
@@ -82,12 +86,88 @@ pub fn tool_definitions() -> Value {
 
 #[derive(Default)]
 struct SessionState {
-    evidence: Vec<Evidence>,
-    attempts: usize,
     threads: BTreeSet<u16>,
     modules: BTreeMap<String, u64>,
+}
+
+#[derive(Default)]
+struct BudgetState {
+    evidence: Vec<Evidence>,
+    attempts: usize,
     available_slots: usize,
     output_remaining: usize,
+}
+
+/// Shared by debugger and Forensicator queries: adding a backend must not
+/// multiply the run's call, retained-output, or evidence-slot allowance.
+pub(crate) struct QueryBudget {
+    state: Mutex<BudgetState>,
+    pub(crate) serial: AsyncMutex<()>,
+    pub(crate) cancel: Notify,
+    closed: AtomicBool,
+}
+
+impl QueryBudget {
+    fn new(output_budget: usize) -> Self {
+        Self {
+            state: Mutex::new(BudgetState {
+                output_remaining: output_budget,
+                ..Default::default()
+            }),
+            serial: AsyncMutex::new(()),
+            cancel: Notify::new(),
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    fn initialize(&self, capture: &ReportCapture) {
+        self.state.lock().expect("query budget").available_slots = MAX_EVIDENCE
+            .saturating_sub(capture.evidence.len() + 1)
+            .min(MAX_QUERY_CALLS);
+    }
+
+    /// Invalid arguments consume an attempt too. Call while holding serial.
+    pub(crate) fn attempt(&self) -> Result<()> {
+        let mut state = self.state.lock().expect("query budget");
+        if self.closed.load(Ordering::Acquire)
+            || state.attempts >= MAX_QUERY_CALLS
+            || state.evidence.len() >= state.available_slots
+            || state.output_remaining == 0
+        {
+            return Err(AnalyzerError::Runner(
+                "Investigation budget exhausted".into(),
+            ));
+        }
+        state.attempts += 1;
+        Ok(())
+    }
+
+    /// Reserve before awaiting so cancellation retains a failed receipt.
+    pub(crate) fn reserve(&self, command: String, max_bytes: usize) -> (usize, Evidence, usize) {
+        let mut state = self.state.lock().expect("query budget");
+        let index = state.evidence.len();
+        let output_cap = state.output_remaining.min(max_bytes);
+        state.output_remaining -= output_cap;
+        let evidence = Evidence {
+            id: format!("query-{}", index + 1),
+            command,
+            status: CaptureStatus::Failed,
+            error: Some("Analysis query cancelled before completion".into()),
+            ..Evidence::default()
+        };
+        state.evidence.push(evidence.clone());
+        (index, evidence, output_cap)
+    }
+
+    pub(crate) fn finish(&self, index: usize, evidence: Evidence, unused_bytes: usize) {
+        let mut state = self.state.lock().expect("query budget");
+        state.output_remaining += unused_bytes;
+        state.evidence[index] = evidence;
+    }
+
+    pub(crate) fn evidence(&self) -> Vec<Evidence> {
+        self.state.lock().expect("query budget").evidence.clone()
+    }
 }
 
 /// One dump's capability; the transport and pinned path are never model input.
@@ -99,10 +179,8 @@ pub struct CdbSession<T: ExecTransport + 'static> {
     symbol_path: String,
     deadline: tokio::time::Instant,
     state: Mutex<SessionState>,
-    serial: AsyncMutex<()>,
-    closed: AtomicBool,
+    budget: Arc<QueryBudget>,
     cleaned: AtomicBool,
-    cancel: Notify,
 }
 
 impl<T: ExecTransport + 'static> CdbSession<T> {
@@ -123,23 +201,16 @@ impl<T: ExecTransport + 'static> CdbSession<T> {
             cdb_program,
             symbol_path,
             deadline,
-            state: Mutex::new(SessionState {
-                output_remaining: output_budget,
-                ..Default::default()
-            }),
-            serial: AsyncMutex::new(()),
-            closed: AtomicBool::new(false),
+            state: Mutex::new(SessionState::default()),
+            budget: Arc::new(QueryBudget::new(output_budget)),
             cleaned: AtomicBool::new(false),
-            cancel: Notify::new(),
         }
     }
 
     pub(crate) fn initialize(&self, capture: Option<&ReportCapture>) {
         let mut state = self.state.lock().expect("session state");
         if let Some(capture) = capture {
-            state.available_slots = MAX_EVIDENCE
-                .saturating_sub(capture.evidence.len() + 1)
-                .min(MAX_QUERY_CALLS);
+            self.budget.initialize(capture);
             for evidence in &capture.evidence {
                 if matches!(
                     evidence.id.as_str(),
@@ -156,12 +227,16 @@ impl<T: ExecTransport + 'static> CdbSession<T> {
         }
     }
 
+    pub(crate) fn query_budget(&self) -> Arc<QueryBudget> {
+        Arc::clone(&self.budget)
+    }
+
     /// Revoke immediately, cancel the active query, and remove remote artifacts.
     /// Idempotent; dropping a cancelled close future retries cleanup via Drop.
     pub async fn close(&self) {
-        self.closed.store(true, Ordering::Release);
-        self.cancel.notify_one();
-        let _serial = self.serial.lock().await;
+        self.budget.closed.store(true, Ordering::Release);
+        self.budget.cancel.notify_one();
+        let _serial = self.budget.serial.lock().await;
         if !self.cleaned.load(Ordering::Acquire) {
             cleanup(Arc::clone(&self.transport), self.remote_dir.clone()).await;
             self.cleaned.store(true, Ordering::Release);
@@ -362,43 +437,20 @@ impl Query {
 #[async_trait]
 impl<T: ExecTransport + 'static> AnalysisTools for CdbSession<T> {
     async fn call(&self, name: &str, arguments: Value) -> Result<Evidence> {
-        let _serial = self.serial.lock().await;
-        if self.closed.load(Ordering::Acquire) || tokio::time::Instant::now() >= self.deadline {
+        let _serial = self.budget.serial.lock().await;
+        if tokio::time::Instant::now() >= self.deadline {
             return Err(AnalyzerError::Runner(
                 "Debugger investigation is closed or expired".into(),
             ));
         }
-        let (query, index, command, id, output_cap) = {
-            let mut state = self.state.lock().expect("session state");
-            if state.attempts >= MAX_QUERY_CALLS
-                || state.evidence.len() >= state.available_slots
-                || state.output_remaining == 0
-            {
-                return Err(AnalyzerError::Runner(
-                    "Debugger investigation budget exhausted".into(),
-                ));
-            }
-            // Invalid requests consume an attempt too. Never retain the raw,
-            // unvalidated argument body or interpolate it into diagnostics.
-            state.attempts += 1;
-            let query = Query::parse(name, arguments)?;
-            let (command, normalized) = query.command(&state)?;
-            let index = state.evidence.len();
-            let id = format!("query-{}", index + 1);
-            let output_cap = state.output_remaining.min(MAX_SECTION_BYTES);
-            // Reserve acquisition bytes before awaiting: cancellation and timeouts
-            // cannot refund unobserved bytes or erase the attempt from evidence.
-            state.output_remaining -= output_cap;
-            state.evidence.push(Evidence {
-                id: id.clone(),
-                command: format!("{name} {normalized}; CDB: {command}"),
-                status: CaptureStatus::Failed,
-                text: String::new(),
-                truncated: false,
-                error: Some("Debugger query cancelled before completion".into()),
-            });
-            (query, index, command, id, output_cap)
-        };
+        self.budget.attempt()?;
+        let query = Query::parse(name, arguments)?;
+        let (command, normalized) = query.command(&self.state.lock().expect("session state"))?;
+        let (index, mut evidence, output_cap) = self.budget.reserve(
+            format!("{name} {normalized}; CDB: {command}"),
+            MAX_SECTION_BYTES,
+        );
+        let id = &evidence.id;
         let script = format!(
             ".sympath {}\n.echo DA_QUERY_BEGIN:{id}\n{command}\n.echo DA_QUERY_END:{id}\nq\n",
             self.symbol_path
@@ -420,11 +472,10 @@ impl<T: ExecTransport + 'static> AnalysisTools for CdbSession<T> {
         );
         let response = tokio::select! {
             biased;
-            _ = self.cancel.notified() => None,
+            _ = self.budget.cancel.notified() => None,
             result = execution => Some(result),
         };
-        let mut state = self.state.lock().expect("session state");
-        let mut evidence = state.evidence[index].clone();
+        let mut unused_bytes = 0;
         match response {
             None => {}
             Some(Err(_)) => {
@@ -436,7 +487,7 @@ impl<T: ExecTransport + 'static> AnalysisTools for CdbSession<T> {
             }
             Some(Ok(Ok(output))) => {
                 let actual = output.stdout.len().saturating_add(output.stderr.len());
-                state.output_remaining += output_cap.saturating_sub(actual);
+                unused_bytes = output_cap.saturating_sub(actual);
                 let mut bytes = output.stdout;
                 bytes.truncate(output_cap);
                 let remaining = output_cap - bytes.len();
@@ -485,16 +536,20 @@ impl<T: ExecTransport + 'static> AnalysisTools for CdbSession<T> {
                     evidence.error = None;
                 }
                 if matches!(query, Query::Threads) {
-                    state.threads.extend(thread_indexes(&evidence.text));
+                    self.state
+                        .lock()
+                        .expect("session state")
+                        .threads
+                        .extend(thread_indexes(&evidence.text));
                 }
             }
         }
-        state.evidence[index] = evidence.clone();
+        self.budget.finish(index, evidence.clone(), unused_bytes);
         Ok(evidence)
     }
 
     async fn evidence(&self) -> Vec<Evidence> {
-        self.state.lock().expect("session state").evidence.clone()
+        self.budget.evidence()
     }
 }
 

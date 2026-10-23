@@ -33,6 +33,12 @@ DUMP_ANALYZER_RUNNER=cdb-ssh
 # ~/.config/dump-analyzer/dsh-adapter.env; general DSH tools remain disabled.
 # DUMP_ANALYZER_DSH_TOOLS=on
 # DUMP_ANALYZER_VERSION=0.2.0-dsh-tools1
+# Optional Forensicator stdio MCP tools alongside the debugger tools above.
+# deploy.py fetches and verifies the NzSN/Forensicator GitHub release by default.
+# Pin with --forensicator-version v0.0.1; --skip-forensicator uses your own binary.
+# Requires DUMP_ANALYZER_DSH_TOOLS=on; no additional adapter setting is needed.
+# DUMP_ANALYZER_FORENSICATOR_BIN=/home/lsz/.local/libexec/dump-analyzer/forensicator
+# DUMP_ANALYZER_VERSION=0.2.0-dsh-forensicator1
 # The adapter reads ~/.claude/settings.json. If authentication comes from an
 # interactive shell, explicitly configure ANTHROPIC_AUTH_TOKEN or
 # ANTHROPIC_API_KEY in ~/.config/dump-analyzer/claude-auth.env (mode 0600).

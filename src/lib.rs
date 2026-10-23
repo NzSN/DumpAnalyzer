@@ -16,6 +16,7 @@ pub mod client;
 pub mod config;
 pub mod dsh_runner;
 pub mod explorer;
+pub mod forensicator;
 pub mod http;
 mod reason;
 pub mod report;

@@ -108,6 +108,16 @@ argument, call, time and output limits; the adapter caps each MCP call at 30
 seconds and disables automatic reconnect. Use a distinct analyzer version
 when enabling tools so existing report identities remain reproducible.
 
+The same endpoint can expose Forensicator's four native stdio MCP tools.
+Set `DUMP_ANALYZER_FORENSICATOR_BIN` in the **daemon** environment to the
+absolute built executable, with `DUMP_ANALYZER_DSH_TOOLS=on`. DumpAnalyzer
+launches `forensicator mcp` and publishes the `forensicator_*` tools through
+the existing namespace, retaining their evidence and enforcing the shared
+budget. `deploy/deploy.py` fetches the verified GitHub release into
+`~/.local/libexec/dump-analyzer/forensicator` by default; use its absolute
+path in the daemon environment. The adapter needs no second MCP server or dump-file mount. See
+[Forensicator setup](../../docs/dsh-http-guide.md#forensicator-mcp-tools).
+
 Deleting a session revokes queued work, kills its active child, waits for it
 to exit, and prunes the overlay and known persisted DSH session. Abandoned
 sessions expire after ten minutes; at most 64 sessions are retained. Child

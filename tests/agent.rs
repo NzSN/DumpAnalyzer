@@ -286,6 +286,7 @@ fn test_config(server: &MockServer, state_dir: &Path, byte_cache_max_bytes: u64)
         dsh_max_tokens: None,
         dsh_preset: "analyzer-triage".to_owned(),
         dsh_tools: false,
+        forensicator_bin: None,
         tls_ca_cert: None,
         webhook_enabled: false,
         webhook_admin_token: None,

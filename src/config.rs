@@ -82,6 +82,8 @@ const DSH_API_KEY_VAR: &str = "DUMP_ANALYZER_DSH_API_KEY";
 const DSH_PRESET_VAR: &str = "DUMP_ANALYZER_DSH_PRESET";
 /// Opt-in debugger tools for a co-located DSH adapter. Defaults to off.
 const DSH_TOOLS_VAR: &str = "DUMP_ANALYZER_DSH_TOOLS";
+/// Absolute native Forensicator executable; unset disables its MCP tools.
+const FORENSICATOR_BIN_VAR: &str = "DUMP_ANALYZER_FORENSICATOR_BIN";
 /// Default DSH preset; the dedicated instance must serve it with no tools.
 const DEFAULT_DSH_PRESET: &str = "analyzer-triage";
 /// Bound on the preset name (carried in the JSON session-create body).
@@ -248,6 +250,9 @@ pub struct Config {
     /// Permit the DSH reasoner to query this run's dump through bounded MCP tools.
     /// Requires a co-located loopback adapter and its separate MCP opt-in.
     pub dsh_tools: bool,
+    /// Optional native `forensicator` executable (launched with `mcp`).
+    /// Requires DSH tools; the current verified dump is supplied by the host.
+    pub forensicator_bin: Option<PathBuf>,
     /// Optional path to a PEM certificate (or chain) to trust in addition to
     /// the system roots — pins a self-signed DumpLedger TLS endpoint.
     pub tls_ca_cert: Option<PathBuf>,
@@ -413,6 +418,21 @@ impl Config {
                 )));
             }
         }
+        let forensicator_bin = Self::optional_value(&vars, FORENSICATOR_BIN_VAR)
+            .map(|raw| {
+                if !PathBuf::from(&raw).is_absolute() || raw.chars().any(char::is_control) {
+                    return Err(AnalyzerError::Config(format!(
+                        "{FORENSICATOR_BIN_VAR} must be an absolute executable path without control characters"
+                    )));
+                }
+                if !dsh_tools {
+                    return Err(AnalyzerError::Config(format!(
+                        "{FORENSICATOR_BIN_VAR} requires {DSH_TOOLS_VAR}=on"
+                    )));
+                }
+                Ok(PathBuf::from(raw))
+            })
+            .transpose()?;
         let tls_ca_cert = Self::optional_value(&vars, TLS_CA_CERT_VAR).map(PathBuf::from);
         let webhook_enabled = match Self::optional_value(&vars, WEBHOOK_VAR).as_deref() {
             None => false,
@@ -517,6 +537,7 @@ impl Config {
             dsh_max_tokens,
             dsh_preset,
             dsh_tools,
+            forensicator_bin,
             tls_ca_cert,
             webhook_enabled,
             webhook_admin_token,
