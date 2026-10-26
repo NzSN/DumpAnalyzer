@@ -54,8 +54,6 @@ fn test_config_with_token(base_url: Url, token: &str) -> Config {
         symbol_cache_dir: None,
         http_addr: None,
         runner: dump_analyzer::types::RunnerKind::CdbSsh,
-        claude_bin: "claude".to_string(),
-        claude_model: None,
         dsh_base_url: None,
         dsh_token: None,
         dsh_model: None,

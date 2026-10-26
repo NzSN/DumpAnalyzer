@@ -78,14 +78,6 @@ fn build_runner(config: &Config) -> Result<Arc<dyn ToolRunner>> {
         dump_analyzer::types::RunnerKind::CdbSsh => {
             Arc::new(SshCdbRunner::new(SshTransport::new(target)))
         }
-        dump_analyzer::types::RunnerKind::ClaudeCdb => Arc::new(
-            dump_analyzer::claude_runner::ClaudeCdbRunner::new(
-                SshTransport::new(target),
-                target,
-                &config.claude_bin,
-            )
-            .with_model(config.claude_model.clone()),
-        ),
         dump_analyzer::types::RunnerKind::DshHttp => {
             let base_url = config.dsh_base_url.clone().ok_or_else(|| {
                 AnalyzerError::Config(

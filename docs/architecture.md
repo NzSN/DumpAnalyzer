@@ -1,5 +1,7 @@
 # DumpAnalyzer architecture
 
+**Current providers:** `cdb-ssh` and `dsh-http`. The `claude-cdb` provider was removed on 2026-10-26; the diagrams below retain the inspected 2026-10-20 architecture. See [current provider configuration](../README.md#tool-runner-providers).
+
 Source revision: `6a19ea297bb219509c994780c96bdd6ce6c4bfab` · inspected 2026-10-20.
 
 These diagrams describe the implemented source at the revision above. They show logical process and storage boundaries, rather than asserting a live deployment configuration. Open [the rendered diagrams](architecture.html) for zoom controls. The report contract is described in [rich reports](rich-reports.md); historical canary evidence is kept separately in [the qualification record](../tests/fixtures/report-v2/qualification/README.md).

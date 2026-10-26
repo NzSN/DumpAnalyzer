@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<String> = std::env::args().collect();
     if arguments.len() < 4 || arguments.len() > 6 {
-        return Err("usage: rich-report-canary <local-dump> <symbol-path> <new-report.json> [ssh-target] [cdb-ssh|claude-cdb]".into());
+        return Err("usage: rich-report-canary <local-dump> <symbol-path> <new-report.json> [ssh-target] [cdb-ssh]".into());
     }
     let dump_path = std::path::PathBuf::from(&arguments[1]);
     let destination = std::path::PathBuf::from(&arguments[3]);
@@ -35,12 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspace = tempfile::tempdir()?;
     let runner: Arc<dyn ToolRunner> = match provider {
         "cdb-ssh" => Arc::new(SshCdbRunner::new(SshTransport::new(target))),
-        "claude-cdb" => Arc::new(dump_analyzer::claude_runner::ClaudeCdbRunner::new(
-            SshTransport::new(target),
-            target,
-            "claude",
-        )),
-        _ => return Err("provider must be cdb-ssh or claude-cdb".into()),
+        _ => return Err("provider must be cdb-ssh".into()),
     };
     let output = runner
         .run(RunRequest {

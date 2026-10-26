@@ -8,13 +8,7 @@ DUMP_ANALYZER_TLS_CA_CERT=/home/lsz/.config/dump-analyzer/ledger-ca.pem
 DUMP_ANALYZER_STATE_DIR=/home/lsz/.local/state/dump-analyzer
 DUMP_ANALYZER_SSH_TARGET=win10
 DUMP_ANALYZER_RUNNER=cdb-ssh
-# To enable evidence-only Claude assessment, install claude-with-settings.py
-# under ~/.local/libexec/dump-analyzer/ and configure a distinct report version:
-# DUMP_ANALYZER_RUNNER=claude-cdb
-# DUMP_ANALYZER_CLAUDE_BIN=/home/lsz/.local/libexec/dump-analyzer/claude-with-settings.py
-# DUMP_ANALYZER_VERSION=0.2.0-claude-profile1
-# DUMP_ANALYZER_MAX_OUTPUT_BYTES=8388608
-# To enable evidence-only DSH assessment instead, run the confined adapter
+# To enable evidence-only DSH assessment, run the confined adapter
 # (dump-analyzer-dsh-adapter.service) and configure a distinct report version:
 # DUMP_ANALYZER_RUNNER=dsh-http
 # DUMP_ANALYZER_DSH_BASE_URL=http://127.0.0.1:4181
@@ -39,9 +33,6 @@ DUMP_ANALYZER_RUNNER=cdb-ssh
 # Requires DUMP_ANALYZER_DSH_TOOLS=on; no additional adapter setting is needed.
 # DUMP_ANALYZER_FORENSICATOR_BIN=/home/lsz/.local/libexec/dump-analyzer/forensicator
 # DUMP_ANALYZER_VERSION=0.2.0-dsh-forensicator1
-# The adapter reads ~/.claude/settings.json. If authentication comes from an
-# interactive shell, explicitly configure ANTHROPIC_AUTH_TOKEN or
-# ANTHROPIC_API_KEY in ~/.config/dump-analyzer/claude-auth.env (mode 0600).
 # Single quotes preserve the Windows backslash literally in EnvironmentFile.
 DUMP_ANALYZER_SYMBOL_CACHE_DIR='C:\symcache'
 DUMP_ANALYZER_HTTP_ADDR=127.0.0.1:4180

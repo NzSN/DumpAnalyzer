@@ -22,23 +22,25 @@ controlled 2026-10-15 native acquisition and delivery evidence.
 
 The maintained report contract is `src/report.rs`: schema version 2,
 canonical JSON and a digest independent of the compact v1 projection. Both
-`cdb-ssh` and `claude-cdb` use deterministic capture; the latter adds a
-bounded evidence-only reasoner through a host that denies every tool request.
-`tests/claude_runner.rs` uses fake host processes by default. The separately
-ignored live reasoner test is not covered by those fake-host results. See
+`cdb-ssh` and `dsh-http` use deterministic capture; the latter adds a
+bounded reasoner through the DSH adapter. `tests/dsh_runner.rs` uses fake
+HTTP responses to check reasoning, validation and deterministic fallback. See
 the [rich-report guide](../../../docs/rich-reports.md) for limits, provider
 behavior and dated qualification boundaries.
 
 Focused offline checks, from the repository root:
 
 ```sh
-cargo test --offline --locked --test report --test runner --test symbols --test assessment --test claude_runner
+cargo test --offline --locked --test report --test runner --test symbols --test assessment --test dsh_runner
 ```
 
 This runs the selected test binaries with their default ignored-test policy;
-it does not invoke the isolated SSH/CDB canary or the ignored live reasoner.
+it does not invoke the isolated SSH/CDB canary or a live model service.
 
-## Configured reasoner qualification — 2026-10-20
+## Historical configured reasoner qualification — 2026-10-20
+
+The `claude-cdb` provider and its live test have been removed. The following
+records the former implementation.
 
 After the documentation review, a separately authorized run explicitly
 selected the ignored evidence-only reasoner test at source/test revision

@@ -181,8 +181,6 @@ def deploy(args, temporary):
 
     # 2. Helper scripts and units --------------------------------------
     plan.install(SYSTEMD / "prepare-state.py", paths["libexec"] / "prepare-state.py", 0o755)
-    plan.install(SYSTEMD / "claude-with-settings.py",
-                 paths["libexec"] / "claude-with-settings.py", 0o755)
     plan.install(SYSTEMD / "dump-analyzer.service", paths["units"] / "dump-analyzer.service", 0o644)
 
     # 3. Daemon environment template (never clobber user config) --------

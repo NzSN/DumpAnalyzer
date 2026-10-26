@@ -389,20 +389,13 @@ fn config_http_addr_custom_and_malformed() {
 fn config_runner_defaults_to_cdb_ssh() {
     let config = parse(&[]);
     assert_eq!(config.runner, dump_analyzer::types::RunnerKind::CdbSsh);
-    assert_eq!(config.claude_bin, "claude");
-    assert_eq!(config.claude_model, None);
 }
 
 #[test]
-fn config_runner_claude_cdb() {
-    let config = parse(&[
-        ("DUMP_ANALYZER_RUNNER", "claude-cdb"),
-        ("DUMP_ANALYZER_CLAUDE_BIN", "/opt/claude/bin/claude"),
-        ("DUMP_ANALYZER_CLAUDE_MODEL", "opus"),
-    ]);
-    assert_eq!(config.runner, dump_analyzer::types::RunnerKind::ClaudeCdb);
-    assert_eq!(config.claude_bin, "/opt/claude/bin/claude");
-    assert_eq!(config.claude_model.as_deref(), Some("opus"));
+fn config_runner_rejects_removed_claude_provider() {
+    let err = parse_err(&[("DUMP_ANALYZER_RUNNER", "claude-cdb")]);
+    assert!(err.contains("DUMP_ANALYZER_RUNNER"), "{err}");
+    assert!(err.contains("must be cdb-ssh or dsh-http"), "{err}");
 }
 
 #[test]

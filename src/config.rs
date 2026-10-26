@@ -43,13 +43,8 @@ const HTTP_ADDR_VAR: &str = "DUMP_ANALYZER_HTTP_ADDR";
 /// Default status-UI bind: loopback only.
 const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:4180";
 /// `DUMP_ANALYZER_RUNNER`: tool-runner provider (`cdb-ssh` default,
-/// `claude-cdb`, `dsh-http`).
+/// `dsh-http`).
 const RUNNER_VAR: &str = "DUMP_ANALYZER_RUNNER";
-/// `DUMP_ANALYZER_CLAUDE_BIN`: claude CLI executable for the `claude-cdb`
-/// provider; default `claude` (PATH lookup).
-const CLAUDE_BIN_VAR: &str = "DUMP_ANALYZER_CLAUDE_BIN";
-/// `DUMP_ANALYZER_CLAUDE_MODEL`: optional model override for the provider.
-const CLAUDE_MODEL_VAR: &str = "DUMP_ANALYZER_CLAUDE_MODEL";
 /// `DUMP_ANALYZER_DSH_BASE_URL`: base URL of the dedicated DSH analyzer
 /// service; required when `DUMP_ANALYZER_RUNNER=dsh-http`.
 const DSH_BASE_URL_VAR: &str = "DUMP_ANALYZER_DSH_BASE_URL";
@@ -216,11 +211,6 @@ pub struct Config {
     pub http_addr: Option<std::net::SocketAddr>,
     /// Tool-runner provider wired at boot; default `cdb-ssh`.
     pub runner: crate::types::RunnerKind,
-    /// claude CLI executable for the `claude-cdb` provider; default `claude`
-    /// (PATH lookup).
-    pub claude_bin: String,
-    /// Optional model override for the `claude-cdb` provider.
-    pub claude_model: Option<String>,
     /// Base URL of the dedicated DSH analyzer service (`dsh-http`
     /// provider): absolute `https://` (loopback `http` accepted for a
     /// co-located confined instance), without credentials, query, or
@@ -332,11 +322,6 @@ impl Config {
         let symbol_cache_dir = Self::optional_value(&vars, SYMBOL_CACHE_DIR_VAR);
         let http_addr = Self::parse_http_addr(&vars)?;
         let runner = Self::parse_runner(&vars)?;
-        let claude_bin = match Self::optional_value(&vars, CLAUDE_BIN_VAR) {
-            Some(raw) => raw,
-            None => "claude".to_owned(),
-        };
-        let claude_model = Self::optional_value(&vars, CLAUDE_MODEL_VAR);
         let dsh_base_url = Self::parse_dsh_base_url(&vars)?;
         let dsh_token = Self::parse_dsh_token(&vars)?;
         let dsh_model = Self::optional_value(&vars, DSH_MODEL_VAR);
@@ -525,8 +510,6 @@ impl Config {
             symbol_cache_dir,
             http_addr,
             runner,
-            claude_bin,
-            claude_model,
             dsh_base_url,
             dsh_token,
             dsh_model,
@@ -579,10 +562,9 @@ impl Config {
         match Self::optional_value(vars, RUNNER_VAR).as_deref() {
             None => Ok(crate::types::RunnerKind::CdbSsh),
             Some("cdb-ssh") => Ok(crate::types::RunnerKind::CdbSsh),
-            Some("claude-cdb") => Ok(crate::types::RunnerKind::ClaudeCdb),
             Some("dsh-http") => Ok(crate::types::RunnerKind::DshHttp),
             Some(other) => Err(AnalyzerError::Config(format!(
-                "{RUNNER_VAR} must be cdb-ssh, claude-cdb, or dsh-http (got {other:?})"
+                "{RUNNER_VAR} must be cdb-ssh or dsh-http (got {other:?})"
             ))),
         }
     }

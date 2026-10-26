@@ -14,10 +14,9 @@ Rust crate — `cargo` builds only `src/`.
 | [test_deploy.py](test_deploy.py) | Offline release integrity, MCP probe, staging and configuration-preservation tests. |
 | [systemd/dump-analyzer.service](systemd/dump-analyzer.service) | Daemon user unit. |
 | [systemd/dump-analyzer-dsh-adapter.service](systemd/dump-analyzer-dsh-adapter.service) | DSH adapter user unit (confined; `dsh-http` provider only). |
-| [systemd/environment.example](systemd/environment.example) | Daemon environment template with commented provider blocks (`cdb-ssh`, `claude-cdb`, `dsh-http`). |
+| [systemd/environment.example](systemd/environment.example) | Daemon environment template with commented provider blocks (`cdb-ssh`, `dsh-http`). |
 | [systemd/dsh-adapter.env.example](systemd/dsh-adapter.env.example) | Adapter environment template (bearer token, optional service-side key fallback). |
 | [systemd/prepare-state.py](systemd/prepare-state.py) | `ExecStartPre`: private state directory and demonstrably-stale lock removal. |
-| [systemd/claude-with-settings.py](systemd/claude-with-settings.py) | `claude-cdb` adapter launching the Claude CLI with connection/model settings and tool restrictions. |
 | [dsh-adapter/](dsh-adapter/README.md) | `dsh-http` sidecar: the HTTP adapter (`server.mjs`), the zero-tool analyzer profile patch, and the route-table example. |
 
 ## Install

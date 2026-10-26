@@ -659,7 +659,7 @@ impl<T: ExecTransport + 'static> ToolRunner for DshCdbRunner<T> {
         let mut collection = request.clone();
         // Reserve part of the shared budget for collector cleanup and
         // optional reasoning, rather than granting a second full run
-        // timeout (mirrors the `claude-cdb` provider).
+        // timeout.
         collection.bounds.wall_timeout = request.bounds.wall_timeout.mul_f64(0.8);
         let tool_mode = self.analysis_tools || self.forensicator_bin.is_some();
         let (mut output, session) = if tool_mode {

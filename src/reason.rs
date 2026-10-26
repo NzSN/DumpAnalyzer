@@ -1,5 +1,4 @@
-//! Evidence-bound reasoning contract shared by the optional assessment
-//! providers (`claude-cdb`, `dsh-http`).
+//! Evidence-bound reasoning contract for the optional `dsh-http` assessment provider.
 //!
 //! Every reasoner receives only the bounded captured evidence, must answer
 //! with one bounded [`RootCause`] JSON object whose causal references cite

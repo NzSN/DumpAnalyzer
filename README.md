@@ -103,13 +103,6 @@ The agent's analysis backend is selected with `DUMP_ANALYZER_RUNNER`:
   Successful refinement can
   upgrade an initially failed essential capture to `completed` when the refined
   result qualifies; optional-stage failure does not downgrade the baseline.
-- **`claude-cdb`**: the same deterministic collector runs first, then a
-  persistent, isolated Claude host assesses bounded captured evidence
-  (`src/claude_runner.rs`). Tools and MCP servers are disabled; every tool
-  request is denied. An invalid assessment format gets one correction turn
-  within the same time and output limits. Unavailable or still-invalid reasoning
-  leaves the captured report readable, with a deterministic assessment and an
-  explicit omission.
 - **`dsh-http`**: the same deterministic collector runs first, then a
   dedicated DeepSeek Harness (DSH) HTTP service assesses bounded captured
   evidence (`src/dsh_runner.rs`). The service is a separate analyzer-owned
@@ -130,13 +123,6 @@ mechanism from the underlying cause. Full capture is retained while deriving
 the compact v1 projection; both are persisted transactionally before delivery.
 The default analyzer version is now `0.2.0`; legacy
 reports remain readable and require a new version for detailed reanalysis.
-
-```sh
-export DUMP_ANALYZER_RUNNER='claude-cdb'
-export DUMP_ANALYZER_CLAUDE_BIN='claude'        # default; PATH lookup
-export DUMP_ANALYZER_CLAUDE_MODEL=''            # optional override
-# claude itself needs its own auth (subscription or API key) on this host.
-```
 
 For the DSH provider (a confined, dedicated instance; see
 [analyzer-design](docs/analyzer-design.md)):
@@ -162,19 +148,6 @@ export DUMP_ANALYZER_DSH_MAX_TOKENS=''      # <= context window
 # the daemon and never enters prompts, evidence, or reports. When unset, the
 # adapter's own launch-environment key (or $DSH_HOME/.env) applies.
 ```
-
-The supplied [systemd unit](deploy/systemd/dump-analyzer.service) can use
-[claude-with-settings.py](deploy/systemd/claude-with-settings.py) as
-`DUMP_ANALYZER_CLAUDE_BIN`. Install the adapter under
-`~/.local/libexec/dump-analyzer/`; it imports connection and model settings from
-`~/.claude/settings.json` and launches `~/.local/bin/claude` with the provider's
-tool restrictions intact. The unit optionally reads
-`~/.config/dump-analyzer/claude-auth.env` for `ANTHROPIC_AUTH_TOKEN` or
-`ANTHROPIC_API_KEY`; keep that file mode `0600`. Systemd does not source an
-interactive shell's `.zshrc`. Model aliases follow the configured gateway, and
-reports record the model reported by the CLI. Use a distinct
-`DUMP_ANALYZER_VERSION` when switching an existing deployment to this provider
-so earlier deterministic reports are preserved and new requests run the model.
 
 Both providers require `DUMP_ANALYZER_SSH_TARGET` (the Windows analysis box).
 Run bounds cover local staging/execution waits and captured output; cleanup has
@@ -341,9 +314,8 @@ python3 tools/mbt/gen_traces.py            # explicit corpus regeneration
 ```
 
 Without `MIRROR_BIN`, the MBT test returns early and the ordinary test run does
-not establish replay coverage. Live TLS and Claude tests require their explicit
+not establish replay coverage. Live TLS tests require their explicit
 ignored-test flags and environment prerequisites; see the qualification guide.
-This documentation refresh did not run tests or contact live services.
 
 ## Server dependencies
 

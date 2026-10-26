@@ -44,8 +44,6 @@ fn test_config(server: &MockServer) -> Config {
         symbol_cache_dir: None,
         http_addr: None,
         runner: dump_analyzer::types::RunnerKind::CdbSsh,
-        claude_bin: "claude".to_string(),
-        claude_model: None,
         dsh_base_url: None,
         dsh_token: None,
         dsh_model: None,

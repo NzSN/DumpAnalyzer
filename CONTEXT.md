@@ -45,7 +45,6 @@ _Avoid_: attempt, session
 
 **Tool-runner provider**:
 The selected agent backend implementation: `cdb-ssh` (deterministic script),
-`claude-cdb` (a local claude CLI host assesses bounded captured evidence),
 or `dsh-http` (a dedicated DeepSeek Harness HTTP service does the same).
 Selected by `DUMP_ANALYZER_RUNNER`.
 _Avoid_: plugin, worker

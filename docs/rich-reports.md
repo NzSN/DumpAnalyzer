@@ -1,5 +1,9 @@
 # Rich reports and operator workflow
 
+The supported providers are `cdb-ssh` and `dsh-http`. The `claude-cdb` provider
+and its live test have been removed; dated qualification sections below
+describe the former implementation.
+
 Source revision: `6a19ea297bb219509c994780c96bdd6ce6c4bfab`, inspected 2026-10-20. The implementation sections describe that source review, which made no live debugger, model or service calls. A later, explicitly authorized [2026-10-20 qualification](qualification/live-reasoner-2026-10-20/README.md) at checkout `f269ce82d2ac28e9ba77f7f393ffc231e639a164` passed the configured CLI/gateway reasoner subgate. Its CLI-reported model was `deepseek-flash`; this is not an Anthropic Claude model qualification. The separate 2026-10-15 qualification and deployment receipts remain historical evidence and do not establish the current deployed binary or service state.
 
 The [2026-10-20 production rollout checkpoint](qualification/production-rollout-2026-10-20/README.md) records completed analyzer/companion deployment and preserved databases. After the user explicitly approved the exact selected report and destination, the [production canary](qualification/production-canary-2026-10-20/README.md) passed publication, idempotent replay, exact readback, publisher-store reopen and native backend restart durability. **P6 production rollout and the bounded selected-report canary are complete at this checkpoint.** Global scheduling and write-back remain off. The earlier rejected action did not publish a report, and its dated receipt remains unchanged.
@@ -11,7 +15,7 @@ verified dump bytes → offline essential CDB pass → optional symbol CDB pass
                                                ↓
                                   deterministic assessment
                                                ↓
-                    optional Claude host: evidence-only narrative / hypotheses
+                    optional DSH assessment: evidence-only narrative / hypotheses
                                                ↓
                          canonical CrashReportV2 + SHA-256 digest
                                                ↓
@@ -34,7 +38,7 @@ Refinement failure, timeout, an exhausted output budget or missing structured re
 
 Deterministic collection precedes reasoning. The underlying cause can be `unknown` even when the immediate fault mechanism is `confirmed`. The first mechanism rule verifies a simple register-indirect MOV read against the saved exception address, operation, registers and faulting instruction. It does not establish pointer lifetime, corruption origin or source ownership. No confirmed-origin rule is currently implemented. A model cannot create one by supplying valid citations or a rule name.
 
-The optional `claude-cdb` adapter uses the same deterministic collector, then an isolated duplex stream-JSON host with no enabled tools or MCP servers. Its reviewed policy denies every tool request. Model, transport, timeout or validation failure retains the deterministic report and records the missing reasoning stage. Model output cannot replace the captured exception, context, stack, symbols or checked mechanism.
+The optional `dsh-http` provider uses the same deterministic collector, then a dedicated DSH HTTP adapter for bounded reasoning. The default profile has no tools; optional bounded MCP investigation is described in the [DSH guide](dsh-http-guide.md). Model, transport, timeout or validation failure retains the deterministic report and records the missing reasoning stage. Model output cannot replace the captured exception, context, stack, symbols or checked mechanism.
 
 ## Identity and preservation
 
@@ -194,5 +198,5 @@ On 2026-10-15, the [local deployment receipt](local-deployment-2026-10-15.md) re
 | Existing rich report reuse and legacy identity refusal | [src/analyzer.rs](../src/analyzer.rs), `PipelineAnalyzer::analyze`. |
 | Version restriction, boot recovery and independent delivery cadence | [src/scheduler.rs](../src/scheduler.rs), `run`, `scheduler_loop` and `replay_loop`. |
 | Atomic local report handoff and durable delivery state | [src/state.rs](../src/state.rs) and [src/verdict.rs](../src/verdict.rs). |
-| Evidence-only Claude host and deny-all policy | [src/claude_runner.rs](../src/claude_runner.rs). |
+| Bounded DSH reasoning and assessment validation | [src/dsh_runner.rs](../src/dsh_runner.rs), [src/reason.rs](../src/reason.rs). |
 | Detail, evidence and manual-action HTTP behavior | [src/http.rs](../src/http.rs). |

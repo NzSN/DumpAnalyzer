@@ -1,5 +1,10 @@
 # Documentation guide
 
+Supported tool-runner providers are `cdb-ssh` and `dsh-http`; see
+[provider configuration](../README.md#tool-runner-providers). The source-pinned
+architecture diagrams and dated qualification records retain references to the
+removed `claude-cdb` provider.
+
 Reviewed against DumpAnalyzer source `6a19ea297bb219509c994780c96bdd6ce6c4bfab`
 on 2026-10-20. These guides describe the checked-out implementation; they do
 not establish which binary or settings a running service currently uses.

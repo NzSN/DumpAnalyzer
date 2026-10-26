@@ -23,11 +23,10 @@ and Settings panels, manual dump/case/customer analysis, token storage, and
 catalog rescan. Browsing never starts analysis. The HTTP surface is optional;
 its failure is logged without stopping the pipeline.
 
-The three providers share deterministic capture. `cdb-ssh` returns its
-assessment; `claude-cdb` additionally asks a local Claude CLI host to assess
-bounded captured evidence, and `dsh-http` asks a dedicated DeepSeek Harness
-HTTP service the same way. Neither reasoner drives CDB or receives tools. No
-provider ingests symbols into DumpLedger. Full canonical evidence is durable local data, rather
+Both providers share deterministic capture. `cdb-ssh` returns its
+assessment; `dsh-http` additionally asks a dedicated DeepSeek Harness
+HTTP service to assess bounded captured evidence. Optional bounded MCP
+investigation is described below. No provider ingests symbols into DumpLedger. Full canonical evidence is durable local data, rather
 than a transient workspace artifact or only the compact server verdict.
 
 ## Vocabulary and identity
@@ -79,7 +78,7 @@ for that environment's checkpoint and rollback, not a portable provisioning reci
 | [scheduler.rs](../src/scheduler.rs) | State lock, recovery, configured-version claims, feed supervision and delivery loop |
 | [agent.rs](../src/agent.rs) | Fetch/cache verification, workspace lifecycle, execution and retry classification |
 | [runner.rs](../src/runner.rs), [symbols.rs](../src/symbols.rs) | CDB capture/refinement and independent module/PDB identity evidence |
-| [claude_runner.rs](../src/claude_runner.rs), [assessment.rs](../src/assessment.rs) | Isolated evidence-only reasoning and deterministic assessment fallback |
+| [assessment.rs](../src/assessment.rs) | Deterministic assessment and reasoning validation |
 | [dsh_runner.rs](../src/dsh_runner.rs), [reason.rs](../src/reason.rs) | DSH HTTP adapter client and the shared evidence-only reasoning contract |
 | [report.rs](../src/report.rs), [verdict.rs](../src/verdict.rs) | Canonical report, compact projection, publication and reconciliation |
 | [state.rs](../src/state.rs) | SQLite migrations, jobs, settled identities, cursors, secrets, cache and reports |
@@ -158,15 +157,11 @@ qualifies. Loaded-PDB quality uses dump CodeView and independent PDB Info-stream
 GUID/age evidence: a debugger `(pdb symbols)` label alone does not establish a
 match. Probe omissions and stack/module truncation remain visible limitations.
 
-`claude-cdb` first runs that collector, reserving a portion of the shared wall
-budget for optional reasoning. Its isolated host disables tools and MCP servers
-and denies every tool request. Malformed output, unavailable reasoning or a
-reasoning timeout preserves readable deterministic evidence/assessment and an
-omission. The assessment distinguishes immediate mechanism from underlying
-cause; captured evidence does not automatically establish original-incident
+`dsh-http` runs that collector, reserving part of the shared wall budget for
+optional reasoning. The assessment distinguishes immediate mechanism from
+underlying cause; captured evidence does not automatically establish original-incident
 attribution. See [rich reports](rich-reports.md) for claim qualification rules.
-
-`dsh-http` runs the same collector and reasoning contract against a
+It uses the bounded reasoning contract against a
 dedicated DeepSeek Harness HTTP service ([dsh_runner.rs](../src/dsh_runner.rs)).
 The model credential is analyzer-owned: `DUMP_ANALYZER_DSH_API_KEY` is
 forwarded once per session over the token-protected channel and injected by
@@ -294,7 +289,7 @@ non-sensitive just because the original dump is not served by the dashboard.
 Default configured bounds are 10 minutes of runner wall time, 1 MiB captured
 output, 2 GiB workspace allowance and 10 GiB byte cache. Runner deadlines cover
 local staging/execution waits; remote cleanup has a separate two-second
-best-effort grace. Local SSH/SCP/Claude children are terminated on cancellation
+best-effort grace. Local SSH/SCP children are terminated on cancellation
 or applicable bounds. Killing SSH does not prove remote CDB termination.
 Workspace checks are not a continuous remote disk quota, and cleanup is not a
 guarantee that every remote artifact was removed. These are resource controls,
@@ -332,7 +327,9 @@ Windows CDB/PDB availability, service deployment and companion v2 availability
 require their own environment checks. Do not infer those passes from source
 review or the narrower reasoner qualification below.
 
-### Configured reasoner subgate (2026-10-20)
+### Historical configured reasoner subgate (2026-10-20)
+
+The `claude-cdb` provider has been removed. This dated receipt describes the former implementation.
 
 The explicitly authorized [2026-10-20 receipt](qualification/live-reasoner-2026-10-20/README.md)
 records the ignored live reasoner test passing 1/1 in 16.45 seconds at source/test
