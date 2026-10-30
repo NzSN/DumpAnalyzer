@@ -238,9 +238,7 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
         if buf.len() > MAX_HEAD_BYTES + MAX_BODY_BYTES {
             return write_response(
                 &mut stream,
-                400,
-                "application/json; charset=utf-8",
-                br#"{"error":"request_too_large"}"#,
+                &json_response(400, json!({"error":"request_too_large"})),
             )
             .await;
         }
@@ -274,9 +272,7 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
     if content_length > MAX_BODY_BYTES {
         return write_response(
             &mut stream,
-            400,
-            "application/json; charset=utf-8",
-            br#"{"error":"request_too_large"}"#,
+            &json_response(400, json!({"error":"request_too_large"})),
         )
         .await;
     }
@@ -291,9 +287,7 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
         if buf.len() > MAX_HEAD_BYTES + MAX_BODY_BYTES {
             return write_response(
                 &mut stream,
-                400,
-                "application/json; charset=utf-8",
-                br#"{"error":"request_too_large"}"#,
+                &json_response(400, json!({"error":"request_too_large"})),
             )
             .await;
         }
@@ -309,13 +303,7 @@ async fn handle_connection(mut stream: TcpStream, context: &UiContext) -> std::i
         body,
     };
     let response = route(&request, context).await;
-    write_response(
-        &mut stream,
-        response.status,
-        response.content_type,
-        &response.body,
-    )
-    .await
+    write_response(&mut stream, &response).await
 }
 
 /// Minimal request-line parse: `METHOD SP PATH SP HTTP/1.x CRLF`. Anything
@@ -346,14 +334,46 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 struct Response {
     status: u16,
     content_type: &'static str,
+    headers: &'static [(&'static str, &'static str)],
     body: Vec<u8>,
 }
+
+/// Strict Content-Security-Policy for every HTML response: the shell and the
+/// result pages may only load same-origin CSS/JS; inline SVG and `data:` images
+/// are allowed. Inline styles, inline scripts and inline event handlers are
+/// forbidden — the dashboard keeps all presentation in `src/ui/app.css` and
+/// all behaviour in `src/ui/dashboard.js`.
+const HTML_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
+     img-src 'self' data:; font-src 'self'; connect-src 'self'; \
+     form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const HTML_HEADERS: &[(&str, &str)] = &[("content-security-policy", HTML_CSP)];
 
 fn json_response(status: u16, value: Json) -> Response {
     Response {
         status,
         content_type: "application/json; charset=utf-8",
+        headers: &[],
         body: serde_json::to_vec_pretty(&value).expect("json serialization cannot fail"),
+    }
+}
+
+/// HTML response with the strict CSP headers (dashboard shell and result pages).
+fn html_response(status: u16, body: impl Into<Vec<u8>>) -> Response {
+    Response {
+        status,
+        content_type: "text/html; charset=utf-8",
+        headers: HTML_HEADERS,
+        body: body.into(),
+    }
+}
+
+/// Static asset response (CSS/JS embedded in the binary at compile time).
+fn asset_response(content_type: &'static str, body: &'static str) -> Response {
+    Response {
+        status: 200,
+        content_type,
+        headers: &[],
+        body: body.as_bytes().to_vec(),
     }
 }
 
@@ -436,11 +456,16 @@ async fn route(request: &Request, context: &UiContext) -> Response {
     }
     let path = request.path.split(['?', '#']).next().unwrap_or("/");
     match (request.method.as_str(), path) {
-        ("GET", "/") => Response {
-            status: 200,
-            content_type: "text/html; charset=utf-8",
-            body: DASHBOARD_HTML.as_bytes().to_vec(),
-        },
+        ("GET", "/") => html_response(200, DASHBOARD_HTML),
+        // Static dashboard assets are embedded at compile time; the strict CSP
+        // allows them because they are same-origin.
+        ("GET", "/assets/gentelella.css") => {
+            asset_response("text/css; charset=utf-8", GENTELELLA_CSS)
+        }
+        ("GET", "/assets/app.css") => asset_response("text/css; charset=utf-8", APP_CSS),
+        ("GET", "/assets/dashboard.js") => {
+            asset_response("text/javascript; charset=utf-8", DASHBOARD_JS)
+        }
         ("GET", "/api/capabilities") => json_response(
             200,
             json!({
@@ -679,11 +704,7 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                 return json_response(400, json!({ "error": "invalid_request" }));
             };
             let outcome = store_token(context, token).await;
-            Response {
-                status: 200,
-                content_type: "text/html; charset=utf-8",
-                body: store_token_result_page(outcome).into_bytes(),
-            }
+            html_response(200, store_token_result_page(outcome))
         }
         ("POST", "/-/analyze-case") | ("POST", "/-/analyze-customer") => {
             if !authorized(context, request.authorization.as_deref()) {
@@ -723,11 +744,7 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                 AnalysisScope::Customer(id.clone())
             };
             let outcome = analyze_scope(context, &scope).await;
-            Response {
-                status: 200,
-                content_type: "text/html; charset=utf-8",
-                body: scope_result_page(&scope, outcome).into_bytes(),
-            }
+            html_response(200, scope_result_page(&scope, outcome))
         }
         ("POST", "/-/analyze-form") => {
             let form = parse_form(&request.body);
@@ -741,11 +758,7 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                 return json_response(400, json!({ "error": "invalid_request" }));
             };
             let outcome = analyze(context, dump_id).await;
-            Response {
-                status: 200,
-                content_type: "text/html; charset=utf-8",
-                body: analyze_result_page(dump_id, outcome).into_bytes(),
-            }
+            html_response(200, analyze_result_page(dump_id, outcome))
         }
         ("POST", "/-/rescan") => {
             if !authorized(context, request.authorization.as_deref()) {
@@ -771,11 +784,7 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                 return json_response(401, json!({ "error": "unauthenticated" }));
             }
             let outcome = rescan(context).await;
-            Response {
-                status: 200,
-                content_type: "text/html; charset=utf-8",
-                body: rescan_result_page(outcome).into_bytes(),
-            }
+            html_response(200, rescan_result_page(outcome))
         }
         ("GET", "/-/rescan") => json_response(405, json!({ "error": "method_not_allowed" })),
         ("GET", _) => json_response(404, json!({ "error": "not_found" })),
@@ -850,17 +859,16 @@ fn store_token_error_json(err: &StoreTokenError) -> Response {
 }
 
 fn store_token_result_page(outcome: std::result::Result<(), StoreTokenError>) -> String {
-    let mut html = String::from(HTML_HEAD);
-    html.push_str("<header><h1>Store analyzer token</h1></header><section class=\"card\">");
+    let mut body = String::new();
     match outcome {
-        Ok(()) => html.push_str(
-            "<p><span class=\"badge green\">stored</span> the token is the daemon's \
+        Ok(()) => body.push_str(
+            "<p><span class=\"status status-green\">stored</span> the token is the daemon's \
              latest-used credential and is used by action forms immediately and by the \
              pipeline from the next boot.</p>",
         ),
         Err(err) => {
-            html.push_str(&format!(
-                "<p><span class=\"badge red\">not stored</span> {}</p>",
+            body.push_str(&format!(
+                "<p><span class=\"status status-red\">not stored</span> {}</p>",
                 escape(&match err {
                     StoreTokenError::Invalid => "malformed token".to_string(),
                     StoreTokenError::Rejected => "the ledger rejected this token".to_string(),
@@ -869,10 +877,8 @@ fn store_token_result_page(outcome: std::result::Result<(), StoreTokenError>) ->
             ));
         }
     }
-    html.push_str("<p><a href=\"/\">back to status</a></p></section></body></html>");
-    html
+    result_page("Store analyzer token", &body)
 }
-
 async fn analyze(context: &UiContext, dump_id: &str) -> std::result::Result<Report, AnalyzeError> {
     let Some(analyzer) = &context.analyzer else {
         return Err(AnalyzeError::Terminal(AnalyzerError::State(
@@ -921,52 +927,57 @@ fn scope_result_page(
     scope: &AnalysisScope,
     outcome: std::result::Result<ScopeReport, AnalyzeError>,
 ) -> String {
-    let mut html = String::from(HTML_HEAD);
-    html.push_str("<header><h1>Scope analysis</h1></header><section>");
+    let mut body = String::new();
     match outcome {
         Ok(report) => {
-            html.push_str(&format!(
-                "<p><b>{}</b>: {} considered, {} reported, {} skipped</p>",
+            body.push_str(&format!(
+                "<p><strong>{}</strong>: {} considered, {} reported, {} skipped</p>",
                 escape(&report.scope),
                 report.considered,
                 report.reports.len(),
                 report.skipped.len()
             ));
-            html.push_str("<table><thead><tr><th>Dump</th><th>Outcome</th><th>Summary</th></tr></thead><tbody>");
+            body.push_str(
+                "<div class=\"table-responsive\"><table class=\"table\">\
+                 <thead><tr><th scope=\"col\">Dump</th><th scope=\"col\">Outcome</th>\
+                 <th scope=\"col\">Summary</th></tr></thead><tbody>",
+            );
             for r in &report.reports {
                 let outcome_str = match r.outcome {
                     crate::types::ReportOutcome::Completed => "completed",
                     crate::types::ReportOutcome::Failed => "failed",
                 };
-                html.push_str(&format!(
-                    "<tr><td class=\"mono\">{}</td><td><span class=\"{}\">{}</span></td><td>{}</td></tr>",
+                body.push_str(&format!(
+                    "<tr><td class=\"mono\">{}</td><td><span class=\"status {}\">{}</span></td><td>{}</td></tr>",
                     escape(&r.identity.dump_id),
-                    if outcome_str == "completed" { "badge green" } else { "badge red" },
+                    if outcome_str == "completed" {
+                        "status-green"
+                    } else {
+                        "status-red"
+                    },
                     outcome_str,
                     escape(&r.summary),
                 ));
             }
             for skip in &report.skipped {
-                html.push_str(&format!(
-                    "<tr><td class=\"mono\">{}</td><td><span class=\"badge gray\">skipped</span></td><td class=\"muted\">{}</td></tr>",
+                body.push_str(&format!(
+                    "<tr><td class=\"mono\">{}</td><td><span class=\"status status-muted\">skipped</span></td><td class=\"muted\">{}</td></tr>",
                     escape(&skip.dump_id),
                     escape(&skip.reason),
                 ));
             }
-            html.push_str("</tbody></table>");
+            body.push_str("</tbody></table></div>");
         }
         Err(err) => {
-            html.push_str(&format!(
-                "<p><span class=\"badge red\">error</span> {}: {}</p>",
+            body.push_str(&format!(
+                "<p><span class=\"status status-red\">error</span> {}: {}</p>",
                 escape(&scope.describe()),
                 escape(&err.to_string()),
             ));
         }
     }
-    html.push_str("<p><a href=\"/\">back to status</a></p></section></body></html>");
-    html
+    result_page("Scope analysis", &body)
 }
-
 /// Constant-time comparison of a presented bearer token against the
 /// configured token's digest.
 fn ct_token(context: &UiContext, presented: &str) -> bool {
@@ -1022,27 +1033,24 @@ async fn rescan(context: &UiContext) -> Result<u64> {
 /// an `Authorization` header, so the form presents the token and posts to
 /// `/-/rescan-form`; same pattern as `/-/analyze-form`).
 fn rescan_result_page(outcome: Result<u64>) -> String {
-    let mut html = String::from(HTML_HEAD);
-    html.push_str("<header><h1>Catalog rescan</h1></header><section>");
+    let mut body = String::new();
     match outcome {
         Ok(inserted) => {
-            html.push_str(&format!(
-                "<p><span class=\"badge green\">ok</span> \
+            body.push_str(&format!(
+                "<p><span class=\"status status-green\">ok</span> \
                  <span class=\"mono\">inserted: {inserted}</span></p>\
                  <p>{inserted} new job(s) scheduled from the catalog.</p>"
             ));
         }
         Err(err) => {
-            html.push_str(&format!(
-                "<p><span class=\"badge red\">error</span></p><p>{}</p>",
+            body.push_str(&format!(
+                "<p><span class=\"status status-red\">error</span></p><p>{}</p>",
                 escape(&err.to_string()),
             ));
         }
     }
-    html.push_str("<p><a href=\"/\">back to status</a></p></section></body></html>");
-    html
+    result_page("Catalog rescan", &body)
 }
-
 /// The JSON body contract of `POST /-/analyze`: exactly `{"dumpId": "..."}`.
 fn parse_json_dump_id(body: &[u8]) -> Option<String> {
     #[derive(serde::Deserialize)]
@@ -1129,8 +1137,7 @@ fn analyze_result_page(
     dump_id: &str,
     outcome: std::result::Result<Report, AnalyzeError>,
 ) -> String {
-    let mut html = String::from(HTML_HEAD);
-    html.push_str("<header><h1>On-demand analysis</h1></header><section>");
+    let mut body = String::new();
     match outcome {
         Ok(report) => {
             let outcome_str = match report.outcome {
@@ -1142,12 +1149,13 @@ fn analyze_result_page(
                 .as_ref()
                 .map(|f| serde_json::to_string_pretty(f).unwrap_or_default())
                 .unwrap_or_else(|| "{}".to_string());
-            html.push_str(&format!(
-                "<p><span class=\"{}\">{}</span> <span class=\"mono\">{}</span></p>                 <p>{}</p><pre class=\"mono\">{}</pre>",
+            body.push_str(&format!(
+                "<p><span class=\"status {}\">{}</span> <span class=\"mono\">{}</span></p>\
+                 <p>{}</p><pre class=\"mono evidence-pre\">{}</pre>",
                 if outcome_str == "completed" {
-                    "badge green"
+                    "status-green"
                 } else {
-                    "badge red"
+                    "status-red"
                 },
                 outcome_str,
                 escape(dump_id),
@@ -1156,24 +1164,17 @@ fn analyze_result_page(
             ));
         }
         Err(err) => {
-            html.push_str(&format!(
-                "<p><span class=\"badge red\">error</span> <span class=\"mono\">{}</span></p><p>{}</p>",
+            body.push_str(&format!(
+                "<p><span class=\"status status-red\">error</span> <span class=\"mono\">{}</span></p><p>{}</p>",
                 escape(dump_id),
                 escape(&err.to_string()),
             ));
         }
     }
-    html.push_str("<p><a href=\"/\">back to status</a></p></section></body></html>");
-    html
+    result_page("On-demand analysis", &body)
 }
-
-async fn write_response(
-    stream: &mut TcpStream,
-    status: u16,
-    content_type: &str,
-    body: &[u8],
-) -> std::io::Result<()> {
-    let reason = match status {
+async fn write_response(stream: &mut TcpStream, response: &Response) -> std::io::Result<()> {
+    let reason = match response.status {
         200 => "OK",
         400 => "Bad Request",
         404 => "Not Found",
@@ -1181,12 +1182,21 @@ async fn write_response(
         500 => "Internal Server Error",
         _ => "Status",
     };
-    let head = format!(
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\ncache-control: no-store\r\n\r\n",
-        body.len()
+    let mut head = format!(
+        "HTTP/1.1 {} {reason}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\ncache-control: no-store\r\nx-content-type-options: nosniff\r\n",
+        response.status,
+        response.content_type,
+        response.body.len()
     );
+    for (name, value) in response.headers {
+        head.push_str(name);
+        head.push_str(": ");
+        head.push_str(value);
+        head.push_str("\r\n");
+    }
+    head.push_str("\r\n");
     stream.write_all(head.as_bytes()).await?;
-    stream.write_all(body).await?;
+    stream.write_all(&response.body).await?;
     stream.flush().await
 }
 
@@ -1331,51 +1341,49 @@ fn escape(text: &str) -> String {
 }
 
 /// The status dashboard: a static shell that live-updates via `/api/*`.
-/// Served verbatim; no server-side data is ever embedded in it.
-const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+/// Served verbatim; no server-side data is ever embedded in it. The shell,
+/// the vendored Gentelella base stylesheet, the DumpAnalyzer app layer and the
+/// behaviour script are separate same-origin assets so the strict CSP can
+/// forbid inline code and inline styles.
+const DASHBOARD_HTML: &str = include_str!("ui/dashboard.html");
+const GENTELELLA_CSS: &str = include_str!("ui/gentelella.css");
+const APP_CSS: &str = include_str!("ui/app.css");
+const DASHBOARD_JS: &str = include_str!("ui/dashboard.js");
 
-const HTML_HEAD: &str = r#"<!doctype html>
-<html lang="en"><head>
+/// Gentelella-styled public page for the browser form POST result routes.
+///
+/// It links the same static assets as the dashboard and embeds no credentials:
+/// callers pass already-escaped body markup for the result card.
+fn result_page(title: &str, body: &str) -> String {
+    format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="5">
-<title>DumpAnalyzer status</title>
-<style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; }
-  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0 auto;
-         max-width: 1080px; padding: 1.5rem; background: #f7f8fa; color: #1c2430; }
-  header h1 { margin: 0; font-size: 1.4rem; }
-  .version { color: #667; font-size: 0.9rem; font-weight: normal; }
-  .muted { color: #667; }
-  .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; }
-  .cards { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
-  .card { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px;
-          padding: 0.6rem 1rem; min-width: 110px; }
-  .card-num { font-size: 1.3rem; font-weight: 600; }
-  .card-label { font-size: 0.75rem; color: #667; }
-  table { width: 100%; border-collapse: collapse; background: #fff;
-          border: 1px solid #e3e6ea; border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 0.45rem 0.7rem; font-size: 0.85rem;
-           border-bottom: 1px solid #eef1f4; }
-  th { background: #f0f2f5; font-size: 0.75rem; text-transform: uppercase;
-       letter-spacing: 0.04em; color: #556; }
-  section { margin-bottom: 1.5rem; }
-  h2 { font-size: 1rem; }
-  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
-           font-size: 0.75rem; font-weight: 600; }
-  .badge.gray { background: #eceff3; color: #556; }
-  .badge.blue { background: #e2ecfd; color: #1a56c4; }
-  .badge.amber { background: #fdf0d5; color: #9a6200; }
-  .badge.purple { background: #efe2fd; color: #6a24b8; }
-  .badge.green { background: #dcf5e3; color: #18743c; }
-  .badge.dark { background: #d9dee5; color: #334; }
-  .badge.red { background: #fde2e1; color: #b3261e; }
-  footer a { color: #1a56c4; }
-  form.inline { display: inline; }
-</style>
-</head><body>
-"#;
+<meta name="theme-color" content="#f5f7fb">
+<title>{title} · DumpAnalyzer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%231abb9c'/%3E%3Cpath d='M18 7 27 11v7c0 6-3.6 9.5-9 11.5C12.6 27.5 9 24 9 18v-7l9-4Z' fill='none' stroke='%2304231c' stroke-width='1.8'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/gentelella.css">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="app-root public-page">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="auth-topbar">
+<a class="auth-brand" href="/" aria-label="DumpAnalyzer dashboard"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><path d="M18 3 31 8v9c0 8.4-5.2 13.4-13 16C10.2 30.4 5 25.4 5 17V8l13-5Z" fill="currentColor" opacity=".18"/><path d="M18 6.6 27.6 10v7c0 6.2-3.6 10.1-9.6 12.6C12 27.1 8.4 23.2 8.4 17v-7L18 6.6Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M13 15.2h10M13 19h10M13 22.8h6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="brand-name">DumpAnalyzer <small>Crash analysis daemon</small></span></a>
+</header>
+<main id="content" class="auth-page" tabindex="-1">
+<section class="auth-card" aria-labelledby="result-title">
+<h1 class="auth-title" id="result-title">{title}</h1>
+<div class="result-body">{body}</div>
+<p class="auth-footer"><a class="btn btn-outline btn-sm" href="/">Back to dashboard</a></p>
+</section>
+</main>
+</body>
+</html>
+"##
+    )
+}
 
 #[cfg(test)]
 mod tests {

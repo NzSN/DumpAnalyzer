@@ -27,6 +27,8 @@ Documentation map ([full index](docs/README.md)):
 - [Report fixture inventory](tests/fixtures/report-v2/README.md) and
   [qualification fixtures](tests/fixtures/report-v2/qualification/README.md)
   record reproducible evidence and its limits.
+- [Operator dashboard](docs/dashboard.md) covers the Gentelella-based web
+  dashboard: template provenance, asset routes, CSP, layout, and tests.
 - [DSH HTTP provider guide](docs/dsh-http-guide.md) covers the optional
   `dsh-http` backend: adapter deployment, route selection, credentials, and
   its dated live-qualification scope.
@@ -255,22 +257,32 @@ The dashboard has separate **Queue**, **Dumps**, **Reports**, and **Settings**
 panels. Queue shows current analysis work. Dumps navigates from customers to
 cases to a page of dumps. Reports has search, outcome/delivery filters, and
 lazy full detail with stack, exception/context, assessment and evidence.
-Settings holds credentials, manual actions, and
-diagnostics. The listener binds to loopback by default:
+Settings holds credentials, manual actions, and diagnostics.
+
+The 2026-10-30 redesign builds the operator surface on the
+[Gentelella v4 admin template](https://github.com/ColorlibHQ/gentelella) (same
+design language as DumpLedger): grouped sidebar with a desktop icon rail and a
+mobile drawer, topbar with a live daemon status chip and theme select, Gentelella
+cards/tables/status pills, and light/dark tokens. Full design, template
+provenance, asset routes, and CSP details: [operator dashboard](docs/dashboard.md).
+The shell (`src/ui/dashboard.html`) is served with three same-origin static
+assets (`src/ui/gentelella.css`, `src/ui/app.css`, `src/ui/dashboard.js`) under a
+strict `default-src 'none'` CSP that forbids inline styles, scripts and
+handlers. The listener binds to loopback by default:
 
 ```sh
 export DUMP_ANALYZER_HTTP_ADDR='127.0.0.1:4180'   # default; empty disables
 ```
 
 `http://127.0.0.1:4180/` is the dashboard: a static shell
-(`src/dashboard.html`) with direct links `#queue`, `#dumps`, `#reports`, and
+(`src/ui/dashboard.html`) with direct links `#queue`, `#dumps`, `#reports`, and
 `#settings`. Navigation preserves scope, filters, and page selection, including
 browser Back/Forward. Only the visible list is loaded: the queue polls every
 5 seconds, and the selected Dumps or Reports panel every 15 seconds. Both
 browser lists show 25 rows per page; hidden panels make no list requests.
-Daemon status uses lightweight counts. The System/Light/Dark theme is retained.
-No server data is embedded in the shell; rendered catalog/report text is
-client-escaped. Read endpoints are unauthenticated, and action token fallback
+Daemon status uses lightweight counts. The System/Light/Dark theme is retained
+and persisted per browser. No server data is embedded in the shell; rendered
+catalog/report text is client-escaped. Read endpoints are unauthenticated, and action token fallback
 allows callers to act without presenting a credential. Keep the listener on a
 trusted local boundary; a non-loopback deployment needs an access-control layer.
 CDB runs on the designated analysis box with bounded local waits/output and

@@ -18,6 +18,7 @@ its own source revision and narrower execution scope.
 | [Project README](../README.md) | Build, configuration, providers, operator actions, dashboard, and model-based tests. |
 | [Architecture](architecture.md) · [interactive diagrams](architecture.html) | Process boundaries, startup and scheduling, immutable report identity, capture, persistence, delivery, and lazy detail. |
 | [Analyzer design](analyzer-design.md) | Component contracts, storage, recovery, trust boundaries, and formal-model scope. |
+| [Operator dashboard](dashboard.md) | Gentelella-based dashboard: template provenance, asset routes, CSP, layout/behaviour, accessibility, and tests. |
 | [Rich reports](rich-reports.md) · [HTML](rich-reports.html) | Typed evidence, deterministic assessment, symbol qualification, canonical report storage, detail APIs, and full-delivery states. |
 | [Analysis triggers](trigger-paths.html) | Discovery, automatic claims, recovery, manual requests, report reuse, rescan, and delivery. |
 | [DSH HTTP provider guide](dsh-http-guide.md) | `dsh-http` setup, adapter deployment, route selection, credentials, verification, and operations. |

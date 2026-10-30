@@ -130,14 +130,39 @@ async fn http_dashboard_and_json_api() {
         .expect("reqwest client");
 
     // The dashboard is a static shell; all data flows through /api/*.
-    let html = client
-        .get(format!("{base}/"))
-        .send()
-        .await
-        .expect("GET /")
-        .text()
-        .await
-        .expect("body");
+    let response = client.get(format!("{base}/")).send().await.expect("GET /");
+    assert_eq!(response.status(), 200);
+    let headers = response.headers();
+    assert_eq!(
+        headers
+            .get("content-security-policy")
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            "default-src 'none'; script-src 'self'; style-src 'self'; \
+             img-src 'self' data:; font-src 'self'; connect-src 'self'; \
+             form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        ),
+        "strict CSP on the dashboard"
+    );
+    assert_eq!(
+        headers
+            .get("x-content-type-options")
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/html; charset=utf-8")
+    );
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let html = response.text().await.expect("body");
     assert!(html.contains("<title>DumpAnalyzer</title>"), "shell title");
     assert!(html.contains(r#"id="jobs""#), "jobs container");
     assert!(html.contains("Work queue"), "queue heading");
@@ -151,8 +176,105 @@ async fn http_dashboard_and_json_api() {
             "{panel} navigation"
         );
     }
-    assert!(html.contains("No active jobs."), "queue empty state");
-    assert!(html.contains("/api/capabilities"), "capabilities probe");
+    assert!(html.contains(r#"id="actions-card""#), "actions card");
+    assert!(html.contains(r#"id="theme-select""#), "theme select");
+    assert!(html.contains(r#"id="sidebar""#), "sidebar landmark");
+    assert!(html.contains(r#"id="sidebar-toggle""#), "sidebar toggle");
+    assert!(html.contains("Skip to content"), "skip link");
+    assert!(
+        html.contains(r#"href="/assets/gentelella.css""#),
+        "vendored Gentelella stylesheet"
+    );
+    assert!(html.contains(r#"href="/assets/app.css""#), "app stylesheet");
+    assert!(
+        html.contains(r#"src="/assets/dashboard.js""#),
+        "behaviour script"
+    );
+    // The shell is static markup only: no inline CSS, no inline script body,
+    // no inline event handlers (the CSP forbids all three).
+    assert!(!html.contains("<style"), "no inline style element");
+    assert!(!html.contains(" style="), "no inline style attribute");
+    assert_eq!(html.matches("<script").count(), 1, "one external script");
+    assert!(!html.contains("<script>"), "no inline script");
+    for handler in [
+        "onclick=",
+        "onchange=",
+        "onsubmit=",
+        "onload=",
+        "onerror=",
+        "onkeydown=",
+    ] {
+        assert!(!html.contains(handler), "no inline handler {handler}");
+    }
+    // No external fetches: only the inline SVG namespace declaration may carry
+    // an `http://` string (it is an XML namespace identifier, not a request).
+    for external in ["src=\"http", "href=\"http", "url(http", "url(https"] {
+        assert!(
+            !html.contains(external),
+            "no external asset reference {external}"
+        );
+    }
+
+    // The static assets are embedded in the binary and served same-origin.
+    let stylesheet = client
+        .get(format!("{base}/assets/gentelella.css"))
+        .send()
+        .await
+        .expect("gentelella.css");
+    assert_eq!(stylesheet.status(), 200);
+    assert_eq!(
+        stylesheet
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/css; charset=utf-8")
+    );
+    let stylesheet = stylesheet.text().await.expect("gentelella.css body");
+    assert!(
+        stylesheet.starts_with("/*! Gentelella v4 admin template"),
+        "vendored template banner"
+    );
+    assert!(stylesheet.contains("--primary:"), "template tokens present");
+
+    let app = client
+        .get(format!("{base}/assets/app.css"))
+        .send()
+        .await
+        .expect("app.css");
+    assert_eq!(app.status(), 200);
+    assert_eq!(
+        app.headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/css; charset=utf-8")
+    );
+    assert!(!app.text().await.expect("app.css body").is_empty());
+
+    let script = client
+        .get(format!("{base}/assets/dashboard.js"))
+        .send()
+        .await
+        .expect("dashboard.js");
+    assert_eq!(script.status(), 200);
+    assert_eq!(
+        script
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/javascript; charset=utf-8")
+    );
+    let script = script.text().await.expect("dashboard.js body");
+    assert!(script.contains("const esc ="), "escaping helper present");
+    assert!(script.contains("/api/capabilities"), "capabilities probe");
+    assert!(script.contains("/api/status"), "status poll");
+    assert!(!script.contains("style="), "no inline styles generated");
+
+    let unknown_asset = client
+        .get(format!("{base}/assets/nope.css"))
+        .send()
+        .await
+        .expect("unknown asset");
+    assert_eq!(unknown_asset.status(), 404);
 
     assert!(
         !html.contains("never-me-in-output"),
@@ -1057,10 +1179,31 @@ async fn http_rescan_form_runs_and_renders_count() {
         .await
         .expect("post");
     assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/html; charset=utf-8")
+    );
+    assert!(
+        response
+            .headers()
+            .get("content-security-policy")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("script-src 'self'")),
+        "result page carries the strict CSP"
+    );
     let html = response.text().await.expect("body");
     assert!(html.contains("Catalog rescan"));
     assert!(html.contains("inserted: 0"), "count rendered: {html}");
     assert!(!html.contains("never-me-in-output"), "token never rendered");
+    // The result page uses the same Gentelella assets and no inline CSS.
+    assert!(html.contains(r#"href="/assets/gentelella.css""#));
+    assert!(html.contains(r#"href="/assets/app.css""#));
+    assert!(!html.contains("<style"), "no inline styles on result pages");
+    assert!(!html.contains(" style="), "no inline style attributes");
+    assert!(html.contains("Back to dashboard"));
 
     // Wrong form token → 401, and the ledger is not touched again.
     let denied = client

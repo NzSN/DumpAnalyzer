@@ -83,7 +83,7 @@ for that environment's checkpoint and rollback, not a portable provisioning reci
 | [report.rs](../src/report.rs), [verdict.rs](../src/verdict.rs) | Canonical report, compact projection, publication and reconciliation |
 | [state.rs](../src/state.rs) | SQLite migrations, jobs, settled identities, cursors, secrets, cache and reports |
 | [analyzer.rs](../src/analyzer.rs) | Synchronous manual `DumpId -> IO Report` capability and scope batches |
-| [http.rs](../src/http.rs), [explorer.rs](../src/explorer.rs), [dashboard.html](../src/dashboard.html) | Local actions, paged catalog/report views and UI |
+| [http.rs](../src/http.rs), [explorer.rs](../src/explorer.rs), [dashboard.html](../src/ui/dashboard.html), [app.css](../src/ui/app.css), [dashboard.js](../src/ui/dashboard.js) | Local actions, paged catalog/report views, and the Gentelella-based dashboard shell/assets |
 
 The state directory is authoritative for local evidence and credentials. It is
 not a disposable catalog index: deleting `analyzer.sqlite` loses canonical
@@ -285,6 +285,10 @@ The token is plaintext in SQLite, redacted by `SecretToken` formatting and
 excluded from symbol paths. Protect state and backups as sensitive dump-derived
 data. Reports contain bounded excerpts and metadata; avoid treating them as
 non-sensitive just because the original dump is not served by the dashboard.
+
+The dashboard HTML is served with a strict Content-Security-Policy
+(`default-src 'none'`, same-origin CSS/JS only, no inline styles or scripts) and
+its CSS/JS are separate embedded assets; see [operator dashboard](dashboard.md).
 
 Default configured bounds are 10 minutes of runner wall time, 1 MiB captured
 output, 2 GiB workspace allowance and 10 GiB byte cache. Runner deadlines cover

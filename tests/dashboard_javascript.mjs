@@ -5,7 +5,9 @@ import vm from "node:vm";
 
 // Execute the real pure rendering helpers, without starting the dashboard or
 // requiring a browser. This checks retained-evidence handling and HTML escaping.
-const page = readFileSync(new URL("../src/dashboard.html", import.meta.url), "utf8");
+// The dashboard behaviour moved to a same-origin asset so the HTML can run
+// under a strict CSP; these helpers remain the DOM-free pure block in it.
+const page = readFileSync(new URL("../src/ui/dashboard.js", import.meta.url), "utf8");
 const escape = page.split("\n").find(line => line.startsWith("const esc ="));
 const helpers = page.slice(page.indexOf("function statusLabel("), page.indexOf("function cancelDetailRequest("));
 assert.ok(escape && helpers.includes("function javascriptStackMarkup("));

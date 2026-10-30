@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f5f7fb">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%231abb9c'/%3E%3Cpath d='M18 7 27 11v7c0 6-3.6 9.5-9 11.5C12.6 27.5 9 24 9 18v-7l9-4Z' fill='none' stroke='%2304231c' stroke-width='1.8'/%3E%3C/svg%3E">
+<title>DumpAnalyzer</title>
+<link rel="stylesheet" href="/assets/gentelella.css">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="app-root operator-page">
+  <aside id="sidebar" class="sidebar" aria-label="Primary navigation">
+    <a class="sidebar-brand" href="/" aria-label="DumpAnalyzer dashboard">
+      <span class="brand-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 36 36" aria-hidden="true" focusable="false"><path d="M18 3 31 8v9c0 8.4-5.2 13.4-13 16C10.2 30.4 5 25.4 5 17V8l13-5Z" fill="currentColor" opacity=".18"/><path d="M18 6.6 27.6 10v7c0 6.2-3.6 10.1-9.6 12.6C12 27.1 8.4 23.2 8.4 17v-7L18 6.6Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M13 15.2h10M13 19h10M13 22.8h6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+      <span class="brand-name">DumpAnalyzer <small>Crash analysis daemon</small></span>
+    </a>
+    <nav class="sidebar-nav" aria-label="Dashboard panels">
+      <div class="nav-group">
+        <div class="nav-label">Operations</div>
+        <a class="nav-link active" data-panel="queue" href="#queue" aria-current="page" data-rail-label="Queue">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <span class="nav-text">Queue</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Evidence</div>
+        <a class="nav-link" data-panel="dumps" href="#dumps" data-rail-label="Dumps">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+          <span class="nav-text">Dumps</span>
+        </a>
+        <a class="nav-link" data-panel="reports" href="#reports" data-rail-label="Reports">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></svg>
+          <span class="nav-text">Reports</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">System</div>
+        <a class="nav-link" data-panel="settings" href="#settings" data-rail-label="Settings">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.1.4.33.75.65 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
+          <span class="nav-text">Settings</span>
+        </a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <span class="avatar" aria-hidden="true">DA</span>
+        <div class="sidebar-user-info">
+          <div class="name">Local daemon</div>
+          <div class="role">Loopback boundary</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <div id="sidebar-backdrop" class="sidebar-backdrop" hidden aria-hidden="true"></div>
+  <main id="content" class="main" tabindex="-1">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-pressed="false" aria-label="Collapse sidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+          <a href="#queue">DumpAnalyzer</a>
+          <span class="sep" aria-hidden="true">›</span>
+          <span class="current" id="topbar-crumb" aria-current="page">Queue</span>
+        </nav>
+      </div>
+      <div class="topbar-right">
+        <span class="topbar-status" id="status-chip">
+          <span id="live-dot" class="dot" role="img" aria-label="Connecting to daemon"></span>
+          <span class="status-text" id="live-text">Connecting…</span>
+          <span class="mono ver" id="ver"></span>
+        </span>
+        <span class="mono topbar-base" id="base"></span>
+        <span class="topbar-updated" id="updated" title="Last successful status update"></span>
+        <select id="theme-select" class="theme-select" aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+    </header>
+    <div class="page-wrapper">
+
+      <section class="panel" id="panel-queue" aria-labelledby="queue-heading">
+        <div class="page-header">
+          <div class="page-header-row">
+            <div>
+              <div class="page-pretitle">Operations</div>
+              <h1 class="page-title" id="queue-heading" tabindex="-1">Work queue</h1>
+              <p class="page-subtitle">Claimed, running, and reporting work. Find available dumps in <a href="#dumps" data-panel="dumps">Dumps explorer</a>.</p>
+            </div>
+          </div>
+        </div>
+        <div class="stats-grid" id="stats"></div>
+        <section class="card" aria-labelledby="pipeline-heading">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="pipeline-heading">Queue pipeline</h2>
+              <p class="card-subtitle">Active jobs by processing phase</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="pipeline" id="pipeline" role="img" aria-label="No active jobs"></div>
+            <div class="pipeline-key" id="pipeline-key"></div>
+          </div>
+        </section>
+        <section class="card" aria-labelledby="jobs-heading">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="jobs-heading">Active jobs</h2>
+              <p class="card-subtitle">Claimed, running, and reporting work</p>
+            </div>
+            <label class="filter-field search-field job-search" for="job-filter">
+              <span class="visually-hidden">Filter jobs</span>
+              <input class="form-control" type="search" id="job-filter" placeholder="Dump ID or kind">
+            </label>
+          </div>
+          <div class="card-body">
+            <div class="chips" id="phase-chips" role="group" aria-label="Filter by phase"></div>
+            <p class="result-status" id="jobs-status" role="status">Loading jobs…</p>
+          </div>
+          <div class="table-responsive" role="region" aria-label="Active jobs" tabindex="0">
+            <table class="table">
+              <caption class="visually-hidden">Active jobs</caption>
+              <thead><tr><th scope="col">Dump</th><th scope="col">Kind</th><th scope="col">Phase</th><th scope="col">Attempts</th><th scope="col">Updated</th></tr></thead>
+              <tbody id="jobs"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel" id="panel-dumps" aria-labelledby="explorer-heading" hidden>
+        <div class="page-header">
+          <div class="page-header-row">
+            <div>
+              <div class="page-pretitle">Evidence</div>
+              <h1 class="page-title" id="explorer-heading" tabindex="-1">Dumps explorer</h1>
+              <p class="page-subtitle">Browse customers, choose a case, then select a dump to analyze.</p>
+            </div>
+          </div>
+        </div>
+        <section class="card" id="explorer-card" aria-labelledby="browse-heading">
+          <div class="card-header">
+            <nav aria-label="Dump location">
+              <ol id="dump-breadcrumbs" class="breadcrumbs"></ol>
+            </nav>
+            <div class="card-options" id="explorer-action"></div>
+          </div>
+          <div class="card-body">
+            <div class="toolbar">
+              <label class="filter-field search-field" for="dump-filter">Search this scope<input class="form-control" type="search" id="dump-filter" placeholder="Customer, case, dump ID, or filename"></label>
+            </div>
+            <p class="result-status" id="explorer-status" role="status">Choose Dumps to load the catalog.</p>
+            <div class="toast" id="explorer-toast" role="status"></div>
+            <h3 id="browse-heading" tabindex="-1">Customers</h3>
+            <div id="explorer-list" aria-busy="false"></div>
+          </div>
+          <div class="pager">
+            <span class="muted" id="dump-range"></span>
+            <div class="pager-controls">
+              <button class="btn btn-outline btn-sm" type="button" id="dump-prev" disabled>Previous</button>
+              <button class="btn btn-outline btn-sm" type="button" id="dump-next" disabled>Next</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel" id="panel-reports" aria-labelledby="reports-heading" hidden>
+        <div class="page-header">
+          <div class="page-header-row">
+            <div>
+              <div class="page-pretitle">Evidence</div>
+              <h1 class="page-title" id="reports-heading" tabindex="-1">Local reports</h1>
+              <p class="page-subtitle">Search analysis results and inspect captured crash evidence.</p>
+            </div>
+          </div>
+        </div>
+        <section class="card" id="reports-list-view" aria-labelledby="reports-filter-heading">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="reports-filter-heading">Report filters</h2>
+              <p class="card-subtitle">Search local analysis results by dump, outcome, or delivery state</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="toolbar">
+              <label class="filter-field search-field" for="report-filter">Search reports<input class="form-control" type="search" id="report-filter" placeholder="Dump ID, kind, or summary"></label>
+              <label class="filter-field" for="report-outcome">Outcome<select class="form-control" id="report-outcome"><option value="all">All outcomes</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label>
+              <label class="filter-field" for="report-delivery">Delivery<select class="form-control" id="report-delivery"><option value="all">All delivery states</option><option value="pending">Pending</option><option value="posted">Posted</option></select></label>
+            </div>
+            <p class="result-status" id="reports-status" role="status">Choose Reports to load results.</p>
+          </div>
+          <div class="table-responsive" role="region" aria-label="Local reports" tabindex="0">
+            <table class="table">
+              <caption class="visually-hidden">Local reports</caption>
+              <thead><tr><th scope="col">Dump</th><th scope="col">Outcome</th><th scope="col">Delivery</th><th scope="col">Created</th><th scope="col">Summary</th></tr></thead>
+              <tbody id="reports"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <span class="muted" id="report-range"></span>
+            <div class="pager-controls">
+              <button class="btn btn-outline btn-sm" type="button" id="report-prev" disabled>Previous</button>
+              <button class="btn btn-outline btn-sm" type="button" id="report-next" disabled>Next</button>
+            </div>
+          </div>
+        </section>
+        <div class="report-detail" id="report-detail-view" hidden>
+          <div class="toolbar">
+            <a class="btn btn-outline btn-sm" id="report-detail-back" href="#reports">← Back to reports</a>
+            <button class="btn btn-outline btn-sm" id="report-download" type="button" disabled>Download JSON</button>
+          </div>
+          <h2 id="report-detail-heading" tabindex="-1">Report detail</h2>
+          <p class="result-status" id="report-detail-status" role="status"></p>
+          <button class="btn btn-outline btn-sm" id="report-detail-retry" type="button" hidden>Retry report</button>
+          <div class="report-detail" id="report-detail-content" aria-busy="false"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-settings" aria-labelledby="settings-heading" hidden>
+        <div class="page-header">
+          <div class="page-header-row">
+            <div>
+              <div class="page-pretitle">System</div>
+              <h1 class="page-title" id="settings-heading" tabindex="-1">Settings</h1>
+              <p class="page-subtitle">Manage credentials, run actions, and inspect daemon diagnostics.</p>
+            </div>
+          </div>
+        </div>
+        <section class="card" id="token-card" aria-labelledby="token-heading">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="token-heading">Analyzer token</h2>
+              <p class="card-subtitle">The credential used for on-demand analysis</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="toolbar">
+              <label class="filter-field" for="new-token">New analyzer token<input class="form-control" type="password" id="new-token" placeholder="Paste token" autocomplete="off"></label>
+              <button class="btn btn-primary" id="store-token-btn" type="button">Store token</button>
+            </div>
+            <p class="hint">Probed against the ledger before storing. Actions can use it immediately; the pipeline uses it from the next boot.</p>
+            <div class="toast" id="token-toast" role="status"></div>
+          </div>
+        </section>
+        <section class="card" id="actions-card" aria-labelledby="actions-heading" hidden>
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="actions-heading">Actions</h2>
+              <p class="card-subtitle">Run analysis directly from the dashboard</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <p class="hint">Actions use the daemon's stored analyzer token.</p>
+            <div class="actions-grid">
+              <div id="act-dump">
+                <h3>Analyze dump</h3>
+                <form data-act="dump">
+                  <label class="filter-field">Dump ID<input class="form-control" name="id" placeholder="dump_…" required></label>
+                  <button class="btn btn-primary" type="submit">Run</button>
+                </form>
+              </div>
+              <div id="act-case">
+                <h3>Analyze case</h3>
+                <form data-act="case">
+                  <label class="filter-field">Case ID<input class="form-control" name="id" placeholder="case_…" required></label>
+                  <button class="btn btn-primary" type="submit">Run</button>
+                </form>
+                <div class="hint">Every available dump of the case · sequential · cap 64</div>
+              </div>
+              <div id="act-customer">
+                <h3>Analyze customer</h3>
+                <form data-act="customer">
+                  <label class="filter-field">Customer ID or display name<input class="form-control" name="id" placeholder="customer_… or display name" required></label>
+                  <button class="btn btn-primary" type="submit">Run</button>
+                </form>
+                <div class="hint">Every available dump of the customer · sequential · cap 64</div>
+              </div>
+              <div id="act-rescan">
+                <h3>Rescan catalog</h3>
+                <form data-act="rescan">
+                  <button class="btn btn-outline" type="submit">Rescan now</button>
+                </form>
+                <div class="hint">Re-reads the catalog and discovers newly available dumps.</div>
+              </div>
+            </div>
+            <div class="toast" id="toast" role="status"></div>
+          </div>
+        </section>
+        <section class="card" aria-labelledby="diagnostics-heading">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="diagnostics-heading">Diagnostics</h2>
+              <p class="card-subtitle">Daemon configuration and live listener state</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <dl class="diagnostics" id="diagnostics"><dt>Status</dt><dd>Loading…</dd></dl>
+          </div>
+        </section>
+      </section>
+
+      <footer class="footer">Queue updates every 5 s · selected catalog or report list updates every 15 s · report detail loads on selection</footer>
+    </div>
+  </main>
+</div>
+<script src="/assets/dashboard.js" defer></script>
+</body>
+</html>
