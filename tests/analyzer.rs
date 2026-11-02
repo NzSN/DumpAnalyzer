@@ -266,6 +266,63 @@ async fn analyze_happy_path_returns_the_report() {
 }
 
 #[tokio::test]
+async fn reanalyze_forces_fresh_identities_and_preserves_report_history() {
+    let server = MockServer::start().await;
+    mount_detail(&server, detail_json("available", Some(&content_sha()))).await;
+    mount_content(&server).await;
+
+    let config = config_for(&server);
+    let (_dir, store) = store();
+    let client = dump_analyzer::client::LedgerClient::new(&config).expect("client");
+    let runner = Arc::new(FakeRunner {
+        queue: Mutex::new(vec![
+            Ok(good_output()),
+            Ok(good_output()),
+            Ok(good_output()),
+        ]),
+    });
+    let analyzer = PipelineAnalyzer::new(client, store.clone(), config, runner.clone());
+
+    let original = analyzer.analyze(DUMP_ID).await.expect("original report");
+    let original_digest = store
+        .local_reports()
+        .get_rich(&original.identity)
+        .expect("original stored report")
+        .expect("original rich report")
+        .digest;
+    let first = analyzer.reanalyze(DUMP_ID).await.expect("first reanalysis");
+    let second = analyzer
+        .reanalyze(DUMP_ID)
+        .await
+        .expect("second reanalysis");
+
+    assert_ne!(first.identity, original.identity);
+    assert_ne!(second.identity, original.identity);
+    assert_ne!(first.identity, second.identity);
+    for identity in [&first.identity, &second.identity] {
+        assert!(identity.analyzer_version.starts_with("0.1.0-r"));
+        assert!(identity.analyzer_version.encode_utf16().count() <= 64);
+        assert!(
+            store
+                .local_reports()
+                .get_rich(identity)
+                .expect("reanalysis stored report")
+                .is_some()
+        );
+    }
+    assert_eq!(
+        store
+            .local_reports()
+            .get_rich(&original.identity)
+            .expect("original retained")
+            .expect("original rich report")
+            .digest,
+        original_digest
+    );
+    assert!(runner.queue.lock().expect("queue").is_empty());
+}
+
+#[tokio::test]
 async fn manual_execution_is_visible_until_report_completion() {
     let fixture = BlockingAnalysis::new(false).await;
     let analyzer = fixture.analyzer.clone();

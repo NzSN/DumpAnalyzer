@@ -517,6 +517,13 @@ impl dump_analyzer::analyzer::Analyzer for FakeAnalyzer {
     ) -> Result<dump_analyzer::analyzer::ScopeReport, dump_analyzer::analyzer::AnalyzeError> {
         unreachable!("single-dump tests never call analyze_scope")
     }
+
+    async fn reanalyze(
+        &self,
+        dump_id: &str,
+    ) -> Result<dump_analyzer::analyzer::Report, dump_analyzer::analyzer::AnalyzeError> {
+        self.analyze(dump_id).await
+    }
 }
 
 fn canned_report() -> dump_analyzer::analyzer::Report {
@@ -673,6 +680,42 @@ async fn analyze_error_mapping() {
         ui.shutdown.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(5), ui.task).await;
     }
+}
+
+#[tokio::test]
+async fn reanalyze_endpoint_returns_a_fresh_report_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("analyzer.sqlite")).expect("store");
+    let ui = start_with_analyzer(store, Ok(canned_report())).await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("client");
+
+    let response = client
+        .post(format!("http://{}/-/reanalyze", ui.addr))
+        .header("authorization", "Bearer never-me-in-output")
+        .header("content-type", "application/json")
+        .body(r#"{"dumpId":"dump_01AAA"}"#)
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.expect("body")).expect("json");
+    assert_eq!(body["report"]["dumpId"], "dump_01AAA");
+    assert_eq!(body["report"]["outcome"], "completed");
+
+    let malformed = client
+        .post(format!("http://{}/-/reanalyze", ui.addr))
+        .body(r#"{"dumpId":"dump_01AAA","force":true}"#)
+        .send()
+        .await
+        .expect("malformed post");
+    assert_eq!(malformed.status(), 400);
+
+    ui.shutdown.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), ui.task).await;
 }
 
 #[tokio::test]

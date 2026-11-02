@@ -1532,6 +1532,11 @@ impl<T: ExecTransport> SshCdbRunner<T> {
             .map_err(|err| AnalyzerError::Runner(format!("cdb execution failed: {err}")))?;
 
         let mut output = classify_output(&request.bounds, output)?;
+        if let Some(message) = reject_incomplete_acquisition(&output, ESSENTIAL_SECTIONS) {
+            return Err(AnalyzerError::Runner(format!(
+                "essential acquisition incomplete ({message}); required sections must end before a completed verdict"
+            )));
+        }
         // Mandatory evidence is now owned. Network symbol loading runs in a
         // second CDB process, so its timeout cannot erase the saved baseline.
         if output
@@ -1787,9 +1792,70 @@ fn truncate_utf8(mut bytes: Vec<u8>, cap: usize) -> (String, bool) {
     }
     let text = match std::str::from_utf8(&bytes) {
         Ok(text) => text.to_string(),
-        Err(err) => String::from_utf8_lossy(&bytes[..err.valid_up_to()]).into_owned(),
+        // Lossy-decode the whole capped buffer. Stopping at `valid_up_to`
+        // would discard every later section and frame after one bad byte.
+        Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
     };
     (text, truncated)
+}
+
+const ESSENTIAL_SECTIONS: &[&str] = &[
+    "target",
+    "exception",
+    "context",
+    "instruction",
+    "stack-before-symbols",
+    "modules-initial",
+];
+const REFINEMENT_SECTIONS: &[&str] = &["symbols-load", "modules", "stack"];
+
+/// A completed production acquisition must close every required section.
+/// Legacy unmarked transcripts and failed dump verdicts stay unchanged.
+/// An evidence excerpt capped at [`report::MAX_SECTION_BYTES`] is still
+/// properly ended when its `DA_END` marker was present.
+///
+/// A combined transcript is a superset of the essential pass: its final
+/// `modules` and `stack` sections satisfy `modules-initial` and
+/// `stack-before-symbols`. An unterminated substitute does not count.
+fn reject_incomplete_acquisition(output: &RunOutput, required: &[&str]) -> Option<String> {
+    if output.outcome != ReportOutcome::Completed {
+        return None;
+    }
+    let capture = output.capture.as_ref()?;
+    if capture
+        .evidence
+        .iter()
+        .all(|evidence| evidence.id == "legacy-transcript")
+    {
+        return None;
+    }
+    let missing: Vec<&str> = required
+        .iter()
+        .copied()
+        .filter(|id| !essential_evidence_ended(capture, id))
+        .collect();
+    if missing.is_empty() {
+        None
+    } else {
+        Some(missing.join(", "))
+    }
+}
+
+fn section_properly_ended(capture: &ReportCapture, id: &str) -> bool {
+    capture.evidence.iter().any(|evidence| {
+        evidence.id == id && evidence.error.as_deref() != Some("Missing section end marker")
+    })
+}
+
+fn essential_evidence_ended(capture: &ReportCapture, id: &str) -> bool {
+    if section_properly_ended(capture, id) {
+        return true;
+    }
+    match id {
+        "modules-initial" => section_properly_ended(capture, "modules"),
+        "stack-before-symbols" => section_properly_ended(capture, "stack"),
+        _ => false,
+    }
 }
 
 /// Truncate `text` to at most `max_chars` characters (codepoint-safe).
@@ -3120,6 +3186,16 @@ impl<T: ExecTransport> SshCdbRunner<T> {
         // itself is at fault, so those baselines stay failed. Refinement
         // failures returned earlier and never touch the baseline outcome.
         let refined_outcome = optional.outcome;
+        if let Some(message) = reject_incomplete_acquisition(&optional, REFINEMENT_SECTIONS) {
+            mark_refinement_failure(
+                baseline,
+                CaptureStatus::Failed,
+                &format!(
+                    "Optional symbol refinement incomplete ({message}); required sections must end before a completed verdict"
+                ),
+            );
+            return;
+        }
         let Some(mut extra) = optional.capture else {
             mark_refinement_failure(
                 baseline,
@@ -3150,6 +3226,11 @@ impl<T: ExecTransport> SshCdbRunner<T> {
                 };
             }
             capture.stack = extra.stack;
+        } else if capture.stack.frames.is_empty() {
+            capture.stack.limitations.push(
+                "Symbol refinement produced no final stack; no preliminary addresses are available"
+                    .into(),
+            );
         } else {
             capture.stack.limitations.push(
                 "Symbol refinement produced no final stack; preliminary addresses retained".into(),
@@ -3170,12 +3251,13 @@ impl<T: ExecTransport> SshCdbRunner<T> {
                 .omissions
                 .push("Optional symbol-refinement output was truncated".into());
         }
-        if baseline.outcome == ReportOutcome::Failed && refined_outcome == ReportOutcome::Completed
-        {
-            baseline.outcome = ReportOutcome::Completed;
+        if refined_outcome == ReportOutcome::Completed {
+            if baseline.outcome == ReportOutcome::Failed {
+                baseline.outcome = ReportOutcome::Completed;
+            }
+            baseline.summary = optional.summary;
+            baseline.facts = optional.facts;
         }
-        baseline.summary = optional.summary;
-        baseline.facts = optional.facts;
     }
 }
 fn mark_refinement_failure(baseline: &mut RunOutput, status: CaptureStatus, message: &str) {

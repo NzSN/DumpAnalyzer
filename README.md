@@ -218,6 +218,10 @@ daemon's configured token). A matching canonical report is reused without
 another CDB run; a legacy report under the same identity is rejected. For fresh
 capture, configure a distinct `DUMP_ANALYZER_VERSION` and restart. Version
 `0.1.0` is reserved for legacy records and rejected at configuration time.
+The report-detail **Re-analyze** action performs a forced fresh run without
+manual version editing. It uses a unique reanalysis version and preserves the
+original report as history. Its API equivalent is `POST /-/reanalyze` with the
+same `{"dumpId":"…"}` body and authorization rules as `/-/analyze`.
 The Jobs widget shows **claimed, running, and reporting work**. Discovered
 dumps appear in the separate **Dumps explorer**, grouped by customer and case,
 with search and analysis actions at each level. Completed dumps remain

@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::agent::{Agent, Attempt, MAX_ATTEMPTS};
@@ -100,6 +101,15 @@ pub struct ScopeReport {
 pub trait Analyzer: Send + Sync {
     async fn analyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError>;
 
+    /// Force a fresh toolchain run under a new report identity, preserving
+    /// the original canonical report as history.
+    async fn reanalyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError> {
+        Err(AnalyzeError::NotAvailable {
+            dump_id: dump_id.to_owned(),
+            reason: "reanalysis is not supported by this analyzer".to_owned(),
+        })
+    }
+
     /// Current on-demand executions, independent of the durable scheduled queue.
     fn active_jobs(&self) -> Result<Vec<JobRow>> {
         Ok(Vec::new())
@@ -139,6 +149,8 @@ pub struct PipelineAnalyzer {
     store: Store,
     active: Arc<Mutex<HashMap<JobIdentity, JobRow>>>,
 }
+
+static REANALYSIS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Owns one live manual execution; cancellation drops the guard with its future.
 struct ActiveManualJob {
@@ -244,35 +256,27 @@ impl PipelineAnalyzer {
             )))),
         }
     }
-}
 
-#[async_trait::async_trait]
-impl Analyzer for PipelineAnalyzer {
-    fn active_jobs(&self) -> Result<Vec<JobRow>> {
-        let active = self.active.lock().map_err(|_| {
-            AnalyzerError::State("active analysis registry mutex poisoned".to_owned())
-        })?;
-        let mut rows: Vec<JobRow> = active.values().cloned().collect();
-        rows.sort_by(|left, right| {
-            (
-                &left.created_at,
-                &left.identity.dump_id,
-                &left.identity.input_sha256,
-                &left.identity.kind,
-                &left.identity.analyzer_version,
-            )
-                .cmp(&(
-                    &right.created_at,
-                    &right.identity.dump_id,
-                    &right.identity.input_sha256,
-                    &right.identity.kind,
-                    &right.identity.analyzer_version,
-                ))
-        });
-        Ok(rows)
+    fn reanalysis_version(&self) -> std::result::Result<String, AnalyzeError> {
+        let stamp = now_utc()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect::<String>();
+        let sequence = REANALYSIS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let version = format!("{}-r{stamp}-{sequence}", self.config.version);
+        if version.encode_utf16().count() > crate::wire::MAX_ANALYZER_VERSION_CHARS {
+            return Err(AnalyzeError::Terminal(AnalyzerError::Config(
+                "configured analyzer version is too long for a reanalysis suffix".to_owned(),
+            )));
+        }
+        Ok(version)
     }
 
-    async fn analyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError> {
+    async fn analyze_impl(
+        &self,
+        dump_id: &str,
+        force_fresh: bool,
+    ) -> std::result::Result<Report, AnalyzeError> {
         // Gate: the dump must exist, be `available`, and carry a sealed hash.
         let detail = match self.agent.client().get_dump(dump_id).await {
             Ok(detail) => detail,
@@ -299,7 +303,11 @@ impl Analyzer for PipelineAnalyzer {
             dump_id: dump_id.to_owned(),
             input_sha256: sha256,
             kind: "triage".to_owned(),
-            analyzer_version: self.config.version.clone(),
+            analyzer_version: if force_fresh {
+                self.reanalysis_version()?
+            } else {
+                self.config.version.clone()
+            },
         };
         if let Some(stored) = self
             .store
@@ -370,6 +378,41 @@ impl Analyzer for PipelineAnalyzer {
             summary: submission.summary,
             facts: submission.facts,
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl Analyzer for PipelineAnalyzer {
+    fn active_jobs(&self) -> Result<Vec<JobRow>> {
+        let active = self.active.lock().map_err(|_| {
+            AnalyzerError::State("active analysis registry mutex poisoned".to_owned())
+        })?;
+        let mut rows: Vec<JobRow> = active.values().cloned().collect();
+        rows.sort_by(|left, right| {
+            (
+                &left.created_at,
+                &left.identity.dump_id,
+                &left.identity.input_sha256,
+                &left.identity.kind,
+                &left.identity.analyzer_version,
+            )
+                .cmp(&(
+                    &right.created_at,
+                    &right.identity.dump_id,
+                    &right.identity.input_sha256,
+                    &right.identity.kind,
+                    &right.identity.analyzer_version,
+                ))
+        });
+        Ok(rows)
+    }
+
+    async fn analyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError> {
+        self.analyze_impl(dump_id, false).await
+    }
+
+    async fn reanalyze(&self, dump_id: &str) -> std::result::Result<Report, AnalyzeError> {
+        self.analyze_impl(dump_id, true).await
     }
 
     async fn analyze_scope(

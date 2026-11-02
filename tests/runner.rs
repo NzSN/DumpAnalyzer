@@ -1160,3 +1160,332 @@ async fn runner_and_box_forward_phase_caps_and_metadata_has_its_own_small_budget
     assert_eq!(caps[1], ("cdb".into(), 4 * 1024 * 1024 - RICH.len()));
     assert_eq!(caps[2], ("powershell.exe".into(), 32 * 1024));
 }
+
+fn cdb_bytes(stdout: Vec<u8>, status: Option<i32>) -> FakeTransport {
+    FakeTransport::new(move |program, _args| {
+        if program == "cdb" {
+            Some(Ok(TransportOutput {
+                status,
+                stdout: stdout.clone(),
+                stderr: Vec::new(),
+            }))
+        } else {
+            None
+        }
+    })
+}
+
+fn insert_byte_before(log: &str, marker: &str, byte: u8) -> Vec<u8> {
+    let index = log.find(marker).expect(marker);
+    let mut bytes = log.as_bytes()[..index].to_vec();
+    bytes.push(byte);
+    bytes.extend_from_slice(&log.as_bytes()[index..]);
+    bytes
+}
+
+#[tokio::test]
+async fn invalid_bytes_before_later_sections_keep_frames() {
+    let bytes = insert_byte_before(
+        &authored_essential_log(),
+        "\nDA_END:stack-before-symbols",
+        0xFF,
+    );
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = SshCdbRunner::new(cdb_bytes(bytes, Some(0)))
+        .run(make_request(
+            tmp.path().join("invalid-before-frames"),
+            default_bounds(),
+        ))
+        .await
+        .expect("bytes after an invalid sequence stay classifiable");
+    let frames = output.facts["frames"].as_array().expect("frames");
+    assert!(
+        frames.iter().any(|frame| frame == "electron+0x1f2a41"),
+        "{frames:?}"
+    );
+    let capture = output.capture.expect("capture");
+    let stack = capture
+        .evidence
+        .iter()
+        .find(|evidence| evidence.id == "stack-before-symbols")
+        .expect("later section");
+    assert_ne!(
+        stack.error.as_deref(),
+        Some("Missing section end marker"),
+        "end marker after the bad byte must survive"
+    );
+    assert!(
+        capture
+            .evidence
+            .iter()
+            .any(|evidence| evidence.text.contains('\u{FFFD}')),
+        "invalid byte is replaced in the retained transcript"
+    );
+}
+
+#[tokio::test]
+async fn invalid_bytes_at_cap_keep_the_tail_inside_the_cap() {
+    let mut bytes = insert_byte_before(
+        &authored_essential_log(),
+        "\nDA_END:stack-before-symbols",
+        0xFF,
+    );
+    bytes.extend_from_slice(&[0xC3, 0xA9]);
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut bounds = default_bounds();
+    // Cap lands on the trailing partial codepoint, after the earlier invalid byte and frames.
+    bounds.max_output_bytes = bytes.len() - 1;
+    let output = SshCdbRunner::new(cdb_bytes(bytes, Some(0)))
+        .run(make_request(tmp.path().join("invalid-at-cap"), bounds))
+        .await
+        .expect("partial codepoint at the cap must not drop earlier frames");
+    assert_eq!(output.facts["log"]["truncated"], true);
+    let frames = output.facts["frames"].as_array().expect("frames");
+    assert!(
+        frames.iter().any(|frame| frame == "electron+0x1f2a41"),
+        "{frames:?}"
+    );
+    assert!(
+        output
+            .capture
+            .expect("capture")
+            .evidence
+            .iter()
+            .any(|evidence| evidence.text.contains('\u{FFFD}')),
+        "the invalid byte inside the cap is replaced, not used as a cut"
+    );
+}
+
+#[tokio::test]
+async fn essential_cut_after_exception_banner_is_a_runner_error() {
+    let full = authored_essential_log();
+    let banner = "DA_BEGIN:exception\n";
+    let start = full.find(banner).expect("exception banner") + banner.len();
+    let cut = format!(
+        "{}\nExceptionCode: c0000005 (Access violation)\n",
+        &full[..start]
+    );
+    assert_eq!(
+        parse_triage(&cut).expect("legacy parse").outcome,
+        ReportOutcome::Completed,
+        "public parse_triage keeps a classifiable partial transcript"
+    );
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let error = SshCdbRunner::new(cdb_transport(&cut, Some(0)))
+        .run(make_request(
+            tmp.path().join("cut-exception"),
+            default_bounds(),
+        ))
+        .await
+        .expect_err("unterminated essential acquisition retries");
+    assert!(matches!(error, AnalyzerError::Runner(_)), "{error:?}");
+    let message = error.to_string();
+    assert!(
+        message.contains("essential acquisition incomplete"),
+        "{message}"
+    );
+    assert!(message.contains("context"), "{message}");
+    assert!(message.contains("modules-initial"), "{message}");
+}
+
+#[tokio::test]
+async fn combined_final_sections_satisfy_essential_module_and_stack_evidence() {
+    let begin = "DA_BEGIN:stack-before-symbols\n";
+    let end = "DA_END:stack-before-symbols\n";
+    let start = RICH.find(begin).expect("preliminary stack");
+    let stop = RICH.find(end).expect("preliminary stack end") + end.len();
+    let log = format!("{}{}", &RICH[..start], &RICH[stop..]);
+    assert!(!log.contains("modules-initial"));
+    assert!(!log.contains("stack-before-symbols"));
+    assert_eq!(
+        parse_triage(&log).expect("combined log").outcome,
+        ReportOutcome::Completed
+    );
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = SshCdbRunner::new(cdb_transport(&log, Some(0)))
+        .run(make_request(
+            tmp.path().join("combined-marked"),
+            default_bounds(),
+        ))
+        .await
+        .expect("final modules and stack cover essential evidence");
+    assert_eq!(output.outcome, ReportOutcome::Completed);
+}
+
+#[tokio::test]
+async fn failed_refinement_preserves_baseline_summary_and_facts() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = SshCdbRunner::new(RefiningTransport::default())
+        .run(make_request(
+            tmp.path().join("baseline-facts"),
+            default_bounds(),
+        ))
+        .await
+        .expect("completed refinement still upgrades");
+    let upgraded_summary = output.summary.clone();
+
+    #[derive(Clone, Default)]
+    struct CorruptRefinement {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    #[async_trait]
+    impl ExecTransport for CorruptRefinement {
+        async fn exec(
+            &self,
+            program: &str,
+            _args: &[&str],
+            _stdin: Option<&[u8]>,
+            _timeout: Duration,
+        ) -> Result<TransportOutput, AnalyzerError> {
+            if program == "cdb" {
+                let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let stdout = if call == 0 {
+                    authored_essential_log().into_bytes()
+                } else {
+                    CORRUPT.as_bytes().to_vec()
+                };
+                return Ok(TransportOutput {
+                    status: Some(if call == 0 { 0 } else { 1 }),
+                    stdout,
+                    stderr: vec![],
+                });
+            }
+            Ok(TransportOutput {
+                status: Some(0),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        async fn put_file(&self, _local: &Path, _remote: &str) -> Result<(), AnalyzerError> {
+            Ok(())
+        }
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = SshCdbRunner::new(CorruptRefinement::default())
+        .run(make_request(
+            tmp.path().join("failed-refinement"),
+            default_bounds(),
+        ))
+        .await
+        .expect("failed refinement keeps the baseline verdict");
+    assert_eq!(output.outcome, ReportOutcome::Failed);
+    assert!(output.summary.contains("no symbols"), "{}", output.summary);
+    assert_ne!(output.summary, upgraded_summary);
+    assert!(
+        !output.summary.contains("could not open the dump"),
+        "{}",
+        output.summary
+    );
+    assert_eq!(output.facts["failure"]["reason"], "symbols_missing");
+    assert!(
+        !output.facts["frames"]
+            .as_array()
+            .expect("frames")
+            .is_empty()
+    );
+}
+
+fn completed_refinement_without_frames() -> String {
+    "\
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+Loading Dump File [C:\\da\\work\\authored-fixture\\dump.dmp]
+DA_BEGIN:symbols-load
+Reloading current modules
+DA_END:symbols-load
+DA_BEGIN:modules
+00007ff6`e2b10000 00007ff6`ecc00000 electron (private pdb symbols) C:\\symcache\\electron.pdb
+DA_END:modules
+DA_BEGIN:stack
+DA_END:stack
+0:000> q
+"
+    .to_string()
+}
+
+fn clear_section(log: &str, id: &str) -> String {
+    let begin = format!("DA_BEGIN:{id}\n");
+    let end = format!("DA_END:{id}\n");
+    let start = log.find(&begin).expect(&begin) + begin.len();
+    let stop = log.find(&end).expect(&end);
+    format!("{}{}", &log[..start], &log[stop..])
+}
+
+#[derive(Clone)]
+struct PairTransport {
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    essential: String,
+    refinement: String,
+}
+#[async_trait]
+impl ExecTransport for PairTransport {
+    async fn exec(
+        &self,
+        program: &str,
+        _args: &[&str],
+        _stdin: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<TransportOutput, AnalyzerError> {
+        if program == "cdb" {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let body = if call == 0 {
+                self.essential.clone()
+            } else {
+                self.refinement.clone()
+            };
+            return Ok(TransportOutput {
+                status: Some(0),
+                stdout: body.into_bytes(),
+                stderr: vec![],
+            });
+        }
+        Ok(TransportOutput {
+            status: Some(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+    async fn put_file(&self, _local: &Path, _remote: &str) -> Result<(), AnalyzerError> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn no_refined_frames_mentions_preliminary_addresses_only_when_present() {
+    for (essential, expected) in [
+        (authored_essential_log(), "preliminary addresses retained"),
+        (
+            clear_section(&authored_essential_log(), "stack-before-symbols"),
+            "no preliminary addresses are available",
+        ),
+    ] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let output = SshCdbRunner::new(PairTransport {
+            calls: Default::default(),
+            essential,
+            refinement: completed_refinement_without_frames(),
+        })
+        .run(make_request(
+            tmp.path().join("no-refined-frames"),
+            default_bounds(),
+        ))
+        .await
+        .expect("empty final stack still completes refinement");
+        let limitations = output
+            .capture
+            .expect("capture")
+            .stack
+            .limitations
+            .join("\n");
+        assert!(
+            limitations.contains(expected),
+            "missing {expected} in {limitations}"
+        );
+        if expected.contains("no preliminary") {
+            assert!(
+                !limitations.contains("preliminary addresses retained"),
+                "{limitations}"
+            );
+        }
+    }
+}

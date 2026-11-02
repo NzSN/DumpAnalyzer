@@ -669,6 +669,9 @@ function renderReportDetail() {
   $("report-detail-status").textContent = detailState.loading ? "Loading selected report…" : detailState.error || (data ? "Saved report detail. No background evidence refresh." : "");
   $("report-detail-retry").hidden = !detailState.error;
   $("report-download").disabled = !data || detailState.loading;
+  const dumpId = data?.report?.identity?.dumpId ?? data?.legacy?.identity?.dumpId ?? "";
+  $("report-reanalyze").disabled = !capabilities.analyzer || !dumpId || detailState.loading || actionPending;
+  $("report-reanalyze").dataset.dumpId = dumpId;
   $("report-detail-content").setAttribute("aria-busy", String(detailState.loading));
   const signature = JSON.stringify([id, data]);
   if (detailState.signature !== signature) {
@@ -768,6 +771,7 @@ async function loadCapabilities() {
   const rescanNode = $("act-rescan") || document.querySelector('[data-act="rescan"]');
   if (rescanNode) rescanNode.hidden = !capabilities.rescan;
   if (selectedPanel === "dumps") refreshList("dumps");
+  if (selectedPanel === "reports" && states.reports.reportId) renderReportDetail();
 }
 function applyListChange(panel, updates, debounce = false) {
   const state = states[panel];
@@ -785,11 +789,12 @@ function applyListChange(panel, updates, debounce = false) {
 
 async function runAction(act, id, button, feedbackId = "toast") {
   if (actionPending || (act === "rescan" ? !capabilities.rescan : !capabilities.analyzer)) return;
-  const routes = { dump: ["/-/analyze", { dumpId: id }], case: ["/-/analyze-case", { caseId: id }], customer: ["/-/analyze-customer", { customerId: id }], rescan: ["/-/rescan", {}] };
+  const routes = { dump: ["/-/analyze", { dumpId: id }], reanalyze: ["/-/reanalyze", { dumpId: id }], case: ["/-/analyze-case", { caseId: id }], customer: ["/-/analyze-customer", { customerId: id }], rescan: ["/-/rescan", {}] };
   const [route, payload] = routes[act];
   const show = (ok, message) => { const target = $(feedbackId); target.className = "toast " + (ok ? "ok" : "err"); target.textContent = message; };
   const label = button.textContent, focusKey = button.dataset.focusKey;
   actionPending = true;
+  let result = null;
   document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = true; });
   button.classList.add("spin"); button.textContent = "Running…";
   renderExplorer();
@@ -801,6 +806,7 @@ async function runAction(act, id, button, feedbackId = "toast") {
     else if (act === "rescan") show(true, `rescan: ${body.inserted} new dump(s) discovered`);
     else if (body.reports) show(true, `${act}: ${body.considered} considered, ${body.reports.length} reported, ${(body.skipped || []).length} skipped`);
     else show(true, `${act}: ${body.report?.outcome ?? "done"} — ${body.report?.summary ?? ""}`);
+    if (response.ok) result = body;
   } catch (error) { show(false, `${act}: ${error.message}`); }
   finally {
     // Hidden panels fetch on entry; completion refreshes only the current panel and cheap status.
@@ -808,11 +814,13 @@ async function runAction(act, id, button, feedbackId = "toast") {
     cancelPanelRequest("reports");
     await Promise.all([refreshStatus(), refreshSelected()]);
     actionPending = false;
+    if (selectedPanel === "reports" && states.reports.reportId) renderReportDetail();
     document.querySelectorAll(".actions-grid button").forEach((node) => { node.disabled = false; });
     if (button.isConnected) { button.classList.remove("spin"); button.textContent = label; }
     renderExplorer();
     if (selectedPanel === "dumps") restoreFocus($("explorer-card") || $("panel-dumps"), focusKey);
   }
+  return result;
 }
 
 /* ---------- Event wiring ---------- */
@@ -833,6 +841,19 @@ $("report-download").addEventListener("click", () => {
   link.download = "report-" + detailState.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120) + ".json";
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$("report-reanalyze").addEventListener("click", async () => {
+  const button = $("report-reanalyze");
+  const dumpId = button.dataset.dumpId;
+  if (!dumpId) return;
+  const body = await runAction("reanalyze", dumpId, button, "report-detail-status");
+  const reportId = body?.report?.facts?.reportId;
+  if (typeof reportId === "string" && reportId) {
+    states.reports.reportId = reportId;
+    replaceHash();
+    syncReportView();
+    await loadReportDetail();
+  }
 });
 
 $("dump-filter").addEventListener("input", (event) => applyListChange("dumps", { q: event.target.value.trim() }, true));

@@ -689,6 +689,21 @@ async fn route(request: &Request, context: &UiContext) -> Response {
                 Err(err) => analyze_error_json(&err),
             }
         }
+        ("POST", "/-/reanalyze") => {
+            if !authorized(context, request.authorization.as_deref()) {
+                return json_response(401, json!({ "error": "unauthenticated" }));
+            }
+            let Some(dump_id) = parse_json_dump_id(&request.body) else {
+                return json_response(400, json!({ "error": "invalid_request" }));
+            };
+            let Some(analyzer) = &context.analyzer else {
+                return json_response(501, json!({"error":"analyzer_unavailable"}));
+            };
+            match analyzer.reanalyze(&dump_id).await {
+                Ok(report) => json_response(200, report_json(&report)),
+                Err(err) => analyze_error_json(&err),
+            }
+        }
         ("POST", "/-/store-token") => {
             let Some(token) = parse_json_id(&request.body, "token") else {
                 return json_response(400, json!({ "error": "invalid_request" }));

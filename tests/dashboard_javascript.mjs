@@ -8,6 +8,7 @@ import vm from "node:vm";
 // The dashboard behaviour moved to a same-origin asset so the HTML can run
 // under a strict CSP; these helpers remain the DOM-free pure block in it.
 const page = readFileSync(new URL("../src/ui/dashboard.js", import.meta.url), "utf8");
+const shell = readFileSync(new URL("../src/ui/dashboard.html", import.meta.url), "utf8");
 const escape = page.split("\n").find(line => line.startsWith("const esc ="));
 const helpers = page.slice(page.indexOf("function statusLabel("), page.indexOf("function cancelDetailRequest("));
 assert.ok(escape && helpers.includes("function javascriptStackMarkup("));
@@ -58,4 +59,17 @@ test("missing, failed and truncated observations remain explicit and do not fabr
   const unrelated = report();
   unrelated.evidence[0].command = "model-supplied transcript";
   assert.equal(context.render(unrelated), "");
+});
+
+test("report detail offers forced reanalysis and navigates to the new canonical report", () => {
+  assert.match(shell, /id="report-reanalyze"/);
+  assert.match(page, /reanalyze: \["\/-\/reanalyze", \{ dumpId: id \}\]/);
+  assert.match(page, /body\?\.report\?\.facts\?\.reportId/);
+  assert.match(page, /states\.reports\.reportId = reportId/);
+});
+
+test("reanalysis button is re-enabled after capabilities load and actions finish", () => {
+  const capabilitiesLoader = page.slice(page.indexOf("async function loadCapabilities("), page.indexOf("function applyListChange("));
+  assert.match(capabilitiesLoader, /states\.reports\.reportId\) renderReportDetail\(\)/);
+  assert.match(page, /actionPending = false;\s+if \(selectedPanel === "reports" && states\.reports\.reportId\) renderReportDetail\(\)/);
 });
